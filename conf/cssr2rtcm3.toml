@@ -44,3 +44,10 @@ systems = ["GPS", "Galileo", "QZSS"]
 #   0 or omitted = elevation-dependent (25 + 20·sin(el) dB-Hz)
 #   >0           = fixed value in dB-Hz (mosaic-CLAS uses 50)
 snr_fixed = 50.0
+# L6D satellite auto-selection: minimum elevation angle (degrees).
+# cssr2rtcm3 watches all QZS satellites broadcasting L6D and selects the one
+# with the highest elevation. When the selected satellite drops below this
+# threshold, stops transmitting for >30 s, or another satellite reaches a
+# clearly higher elevation, it fails over to the next best candidate.
+# Default 10 degrees keeps GEO satellites (PRN >= 199) eligible.
+l6d_elmin = 10.0

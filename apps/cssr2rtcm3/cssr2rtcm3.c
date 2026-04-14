@@ -90,6 +90,7 @@ static int msm_base_type(int sys) {
 static int rtcm3_msm_grade = 7; /* MSM grade: 4, 5, or 7 */
 static int rtcm3_msm_sys[] = {SYS_GPS, SYS_GLO, SYS_GAL, SYS_QZS, 0};
 static double snr_fixed = 0.0;  /* 0 = elevation-dependent model, >0 = fixed dB-Hz */
+static double l6d_elmin = 10.0; /* min elevation (deg) for L6D satellite selection */
 
 /* signal code remapping table (CLAS code → receiver code) */
 #define MAX_SIG_REMAP 32
@@ -292,6 +293,14 @@ static void load_cssr2rtcm3_config(const char *conffile) {
                 fprintf(stderr, "cssr2rtcm3: snr_fixed=%.1f dB-Hz\n", snr_fixed);
             }
         }
+        /* l6d_elmin = 10.0 → minimum elevation (deg) for L6D satellite selection */
+        {
+            double dval;
+            if (sscanf(p, "l6d_elmin = %lf", &dval) == 1) {
+                l6d_elmin = dval;
+                fprintf(stderr, "cssr2rtcm3: l6d_elmin=%.1f deg\n", l6d_elmin);
+            }
+        }
         /* systems = ["GPS", "Galileo"] or systems = GPS,Galileo */
         if (strncmp(p, "systems", 7) == 0) {
             char *eq = strchr(p, '=');
@@ -299,6 +308,156 @@ static void load_cssr2rtcm3_config(const char *conffile) {
         }
     }
     fclose(fp);
+}
+
+/*============================================================================
+ * L6D satellite auto-selection
+ *
+ * Track which QZS satellites are currently broadcasting L6D CLAS and pick the
+ * one with the highest elevation above `l6d_elmin`. When the selected satellite
+ * drops below elmin, goes silent for >30 s, or another satellite reaches a
+ * clearly higher elevation, auto-switch to the next best candidate.
+ *
+ * This replaces the old "QZO-over-GEO" heuristic which silently stuck on QZO
+ * even after it dropped out, causing CLAS corrections to freeze.
+ *===========================================================================*/
+
+#define L6D_TIMEOUT     30.0    /* seconds without reception → force reselect */
+#define L6D_FRESH_WIN   10.0    /* candidate must have been received within this window */
+#define L6D_SWITCH_HYST 5.0     /* require new sat's elevation to exceed current by this */
+
+static gtime_t l6d_last_time_per_sat[MAXSAT + 1];
+static double  l6d_last_el_per_sat[MAXSAT + 1];  /* deg; -999 = unknown */
+
+/**
+ * @brief Compute QZS satellite elevation at a given time and receiver position.
+ * @return elevation in degrees, or -999.0 if position/ephemeris not available.
+ */
+static double l6d_compute_el(int sat, gtime_t time, const double *user_pos, nav_t *nav)
+{
+    double rs[6] = {0}, dts[2] = {0}, var = 0.0;
+    double e[3], azel[2], pos[3];
+    int svh = 0;
+
+    if (norm(user_pos, 3) <= 0.0) {
+        return -999.0;
+    }
+    if (!nav || nav->n <= 0) {
+        return -999.0;
+    }
+    if (!satpos(time, time, sat, EPHOPT_BRDC, nav, rs, dts, &var, &svh)) {
+        return -999.0;
+    }
+    if (norm(rs, 3) <= 0.0) {
+        return -999.0;
+    }
+    if (geodist(rs, user_pos, e) <= 0.0) {
+        return -999.0;
+    }
+    ecef2pos(user_pos, pos);
+    satazel(pos, e, azel);
+    return azel[1] * R2D;
+}
+
+/**
+ * @brief Record that an L6D frame was received from the given QZS satellite.
+ */
+static void l6d_record_frame(int sat, gtime_t time, const double *user_pos, nav_t *nav)
+{
+    double el;
+    if (sat <= 0 || sat > MAXSAT) {
+        return;
+    }
+    if (satsys(sat, NULL) != SYS_QZS) {
+        return;
+    }
+    l6d_last_time_per_sat[sat] = time;
+    el = l6d_compute_el(sat, time, user_pos, nav);
+    if (el > -999.0) {
+        l6d_last_el_per_sat[sat] = el;
+    }
+}
+
+/**
+ * @brief Select the best L6D PRN given the current time and elevation table.
+ *
+ * Returns the satellite number to use, or 0 if no eligible satellite exists.
+ * Candidates: QZS with reception within L6D_FRESH_WIN and elevation >= l6d_elmin.
+ * Winner: highest elevation. Ties broken by most recent reception.
+ *
+ * @param current  Currently selected PRN (0 if none).
+ * @param now      Current time.
+ * @return Selected satellite number, or `current` if no switch is warranted.
+ */
+static int l6d_select_best(int current, gtime_t now)
+{
+    int i, best = current;
+    double best_el = -999.0;
+    double current_el = (current > 0 && current <= MAXSAT)
+                            ? l6d_last_el_per_sat[current] : -999.0;
+    int current_stale = 0;
+
+    /* is current selection stale? */
+    if (current > 0 && current <= MAXSAT) {
+        if (l6d_last_time_per_sat[current].time == 0 ||
+            timediff(now, l6d_last_time_per_sat[current]) > L6D_TIMEOUT ||
+            (current_el > -999.0 && current_el < l6d_elmin)) {
+            current_stale = 1;
+        }
+    } else {
+        current_stale = 1;  /* no current selection */
+    }
+
+    for (i = 1; i <= MAXSAT; i++) {
+        if (satsys(i, NULL) != SYS_QZS) {
+            continue;
+        }
+        if (l6d_last_time_per_sat[i].time == 0) {
+            continue;
+        }
+        if (timediff(now, l6d_last_time_per_sat[i]) > L6D_FRESH_WIN) {
+            continue;
+        }
+        if (l6d_last_el_per_sat[i] < l6d_elmin) {
+            continue;
+        }
+        if (l6d_last_el_per_sat[i] > best_el) {
+            best_el = l6d_last_el_per_sat[i];
+            best = i;
+        }
+    }
+
+    /* bootstrap: if no current and no elevation-qualified candidate, pick the
+     * most recently received QZS regardless of elevation (e.g. before the
+     * receiver position is known). Without this, startup would never begin. */
+    if (best == current && current == 0) {
+        gtime_t newest = {0};
+        for (i = 1; i <= MAXSAT; i++) {
+            if (satsys(i, NULL) != SYS_QZS) {
+                continue;
+            }
+            if (l6d_last_time_per_sat[i].time == 0) {
+                continue;
+            }
+            if (timediff(now, l6d_last_time_per_sat[i]) > L6D_FRESH_WIN) {
+                continue;
+            }
+            if (newest.time == 0 || timediff(l6d_last_time_per_sat[i], newest) > 0.0) {
+                newest = l6d_last_time_per_sat[i];
+                best = i;
+            }
+        }
+    }
+
+    /* apply hysteresis: don't switch away from a healthy current selection
+     * unless the candidate is clearly better */
+    if (!current_stale && best != current && best > 0) {
+        if (best_el - current_el < L6D_SWITCH_HYST) {
+            return current;
+        }
+    }
+
+    return best;
 }
 
 /**
@@ -1059,7 +1218,12 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
             }
         }
         else if (!strcmp(argv[i], "-prn") && i + 1 < argc) {
-            l6d_prn_filter = satno(SYS_QZS, atoi(argv[++i]));
+            /* -prn is deprecated; L6D satellite is auto-selected based on
+             * elevation (see l6d_elmin in TOML config). Emit a warning but
+             * do not error out so existing scripts keep running. */
+            ++i;
+            fprintf(stderr, "cssr2rtcm3: warning: -prn is deprecated (ignored); "
+                            "L6D satellite is auto-selected by elevation\n");
         }
         else if (!strcmp(argv[i], "-d") && i + 1 < argc) {
             trace_level = atoi(argv[++i]);
@@ -1332,30 +1496,38 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
 
                 if (ret == 10) {
                     /* L6D frame decoded */
-                    int cret, l6d_sat, fprn;
+                    int cret, l6d_sat;
+                    int new_filter;
                     l6d_sat = raw_sbf->ephsat;
                     l6d_count++;
                     if (l6d_sat > 0 && l6d_sat <= MAXSAT) {
                         l6d_prn_count[l6d_sat]++;
                     }
 
-                    /* auto-select QZS satellite for L6D filtering.
-                     * Prefer QZO (PRN < 199) over GEO (PRN >= 199) —
-                     * GEO satellites use different broadcast patterns
-                     * that may not produce valid corrections. */
-                    if (l6d_prn_filter == 0 && l6d_sat > 0) {
-                        l6d_prn_filter = l6d_sat;
-                        satsys(l6d_sat, &fprn);
-                        fprintf(stderr, "L6D: auto-selected J%d for CLAS input\n", fprn);
-                    } else if (l6d_prn_filter > 0 && l6d_sat > 0) {
-                        int cur_prn, new_prn;
-                        satsys(l6d_prn_filter, &cur_prn);
-                        satsys(l6d_sat, &new_prn);
-                        if (cur_prn >= 199 && new_prn < 199) {
-                            l6d_prn_filter = l6d_sat;
-                            fprintf(stderr, "L6D: switched to QZO J%d (prefer over GEO J%d)\n",
-                                    new_prn, cur_prn);
+                    /* Record this reception and run the elevation-based
+                     * selector. The selector chooses the QZS satellite with
+                     * the highest elevation above l6d_elmin and fails over
+                     * when the current selection goes silent or drops below
+                     * elmin. See lessons.md L-036 for the background.          */
+                    l6d_record_frame(l6d_sat, raw_sbf->time, user_pos, nav);
+                    new_filter = l6d_select_best(l6d_prn_filter, raw_sbf->time);
+                    if (new_filter != l6d_prn_filter && new_filter > 0) {
+                        int old_prn = 0, new_prn = 0;
+                        if (l6d_prn_filter > 0) {
+                            satsys(l6d_prn_filter, &old_prn);
                         }
+                        satsys(new_filter, &new_prn);
+                        if (l6d_prn_filter == 0) {
+                            fprintf(stderr, "L6D: selected J%d (el=%.1f deg)\n",
+                                    new_prn, l6d_last_el_per_sat[new_filter]);
+                        } else {
+                            fprintf(stderr,
+                                    "L6D: switched J%d -> J%d (el: %.1f -> %.1f deg)\n",
+                                    old_prn, new_prn,
+                                    l6d_last_el_per_sat[l6d_prn_filter],
+                                    l6d_last_el_per_sat[new_filter]);
+                        }
+                        l6d_prn_filter = new_filter;
                     }
 
                     /* only feed L6D from selected satellite (avoid frame corruption) */
