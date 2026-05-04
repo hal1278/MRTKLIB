@@ -32,9 +32,9 @@ mosaic-G5 P3 module.
 
 |  | VRS (`mrtk cssr2rtcm3`) | MRTKLIB Engine (`mrtk run`) |
 |--|------------------------|----------------------------|
-| **How it works** | Converts CLAS to RTCM3 and feeds corrections back to the receiver's built-in RTK engine | MRTKLIB's CLAS-dedicated PPP-RTK engine computes the position directly |
-| **Advantages** | Lightweight — only format conversion runs on the host, so a minimal SBC (e.g. Raspberry Pi Zero) is sufficient | Purpose-built CLAS engine with optimized correction handling; potentially better accuracy and fix rate |
-| **Disadvantages** | Relies on the receiver's generic RTK engine, which is not optimized for CLAS corrections | Requires more compute resources on the host for real-time positioning |
+| **How it works** | Converts CLAS to RTCM3 and feeds corrections back to the receiver's built-in RTK engine | MRTKLIB's CLAS-dedicated PPP-RTK engine computes the position directly on the host |
+| **Host compute load** | Lightweight — only format conversion runs on the host, so a minimal SBC (e.g. Raspberry Pi Zero) is sufficient | Heavier — full PPP-RTK pipeline runs on the host; a more capable SBC or laptop is recommended for real-time use |
+| **Where positioning happens** | Inside the receiver (RTK engine consumes RTCM3) | On the host (MRTKLIB PPP-RTK engine consumes raw observations + L6D directly) |
 
 #### Approach 1 — VRS (`mrtk cssr2rtcm3`)
 
@@ -110,6 +110,7 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
     - Ports: `USB2`
     - Off: unchecked
     - Support: checked
+    - **Interval: `1 sec`** (CLAS corrections update every 5 s and PVT can be paced at 1 Hz; 1 Hz is sufficient for static and most kinematic use cases. For high-rate dynamics, set `100 msec` instead.)
 
     Click `Apply`, then `OK` to close.
 
@@ -118,16 +119,27 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
     <details>
     <summary>Required SBF blocks (reference)</summary>
 
+    Selecting `Support` enables a curated set of blocks that includes everything
+    needed by `mrtk cssr2rtcm3` and `mrtk run`. The principal blocks consumed
+    are listed below.
+
     | SBF Block | ID | Purpose |
     |-----------|----|---------|
-    | QZSRawL6 | 4066 | QZSS L6 raw data (L6E) |
+    | MeasEpoch | 4027 | Raw GNSS observations (required) |
     | QZSRawL6D | 4270 | QZSS L6D raw data (CLAS CSSR) |
-    | GPSNav | 5891 | GPS broadcast ephemeris |
-    | GALNav | 4002 | Galileo broadcast ephemeris |
-    | QZSNav | 4095 | QZSS broadcast ephemeris |
+    | GPSNav | 4017 | GPS broadcast ephemeris |
+    | GALNav | 4022 | Galileo broadcast ephemeris |
+    | QZSNav | 4030 | QZSS broadcast ephemeris |
     | GLONav | 4004 | GLONASS broadcast ephemeris (optional) |
-    | BDSNav | 4081 | BDS broadcast ephemeris (optional) |
-    | PVTGeodetic | 4007 | Receiver position (used for OSR computation) |
+    | BDSNav | 4081 | BeiDou broadcast ephemeris (optional) |
+    | PVTGeodetic | 4007 | Receiver position (latched by `mrtk cssr2rtcm3` as the VRS reference) |
+
+    !!! note
+        Block IDs are listed for reference. Septentrio occasionally renumbers
+        blocks across firmware revisions; consult the SBF Reference Guide that
+        ships with your firmware version if you need exact IDs. Enabling
+        `Support` on Stream 1 is the recommended way to ensure all required
+        blocks are output regardless of firmware version.
 
     </details>
 
@@ -296,16 +308,25 @@ Key parameters:
 | `elevation_mask` | `0.0` | Include all visible satellites |
 | `ionosphere` | `est-adaptive` | Adaptive ionospheric estimation |
 | `cssr_grid` | `clas_grid.def` | CLAS grid definition file |
+| `l6d_elmin` | `10.0` (deg) | Minimum elevation for QZS L6D satellite auto-selection. The selector picks the QZS satellite with the highest elevation above this threshold and fails over when the active satellite drops below it or stops broadcasting. |
 
 ## Test Results
 
 ### Test Configuration
 
-To compare the two approaches, we conducted a static test with the following setup.
+The latest long-term static test was conducted under the following setup.
 
-**Test Site**
-
-<div style="text-align: center;"><img src="images/mosaic-g5/PXL_20260317_025914063.jpg" style="max-width: 640px; width: 100%;"></div>
+| Item | Value |
+|------|-------|
+| **Test site** | Tokyo University of Marine Science and Technology, Etchujima Campus |
+| **Antenna** | (TBD — to be filled in after the test) |
+| **Receiver** | Septentrio mosaic-go G5 P3 evaluation kit |
+| **Receiver firmware** | (recorded with `getReceiverInfo` at session start) |
+| **PVT output rate** | 1 Hz (SBF Output Stream 1, `Interval = sec1`) |
+| **Solution Sensitivity** | Loose |
+| **Max Age of RTK data** | 60 s |
+| **MRTKLIB build** | commit `3a8cc51` or later (eph_prev fix applied) |
+| **Session duration** | 24 h continuous |
 
 **Block Diagram**
 
@@ -329,34 +350,43 @@ flowchart LR
 | `mrtk run`        | Perform CLAS PPP-RTK positioning in real time                            |
 | `sbf_plot`        | Monitor the mosaic-G5 positioning status (PVT mode and position scatter) |
 
+### Long-term stability (24 h)
 
-**Runtime Screenshot**
+!!! info "Pending — long-term test in progress"
+    A 24-hour continuous test is currently running. Results
+    (Fix rate, longest continuous Fix run, ENU dispersion, comparison plots)
+    will be published here once the session completes.
 
-The screenshot below shows the test in progress.  Left: `sbf_plot` displaying
-the mosaic-G5 position scatter in real time (orange = RTK Float).  Right:
-`mrtk run` console output showing the MRTKLIB PPP-RTK engine status.
+Planned content of this section:
 
-<div style="text-align: center;"><img src="images/mosaic-g5/screenshot_20260317120530.png" style="max-width: 640px; width: 100%;"></div>
+- Fix-rate breakdown over 24 hours (Fix / Float / SPP percentages)
+- Time series of vertical / horizontal components
+- Comparison with mosaic-CLAS reference solution if available
 
-### Accuracy Comparison (VRS vs. MRTKLIB Engine)
+### Independent verification (Septentrio PPK)
 
-The figure below compares the MRTKLIB PPP-RTK engine (`mrtk run`) with the
-mosaic-G5's built-in RTK engine fed by `mrtk cssr2rtcm3`.
-The left panel shows the East, North, and Up components over time;
-the right panel shows the horizontal scatter.
+Septentrio independently post-processed the same SBF + cssr2rtcm3 RTCM3
+stream with their PPK toolchain and confirmed **Fix rate ≈ 100%** with the
+current cssr2rtcm3 build. The brief Float dips that remained were observed
+on the mosaic-CLAS reference solution at the same epochs and are caused by
+CLAS broadcast characteristics rather than the cssr2rtcm3 output itself.
 
-The MRTKLIB engine (green) achieved a **Fix** solution within approximately
-30 seconds and maintained centimetre-level accuracy throughout the session.
-The mosaic-G5 internal RTK engine (orange/red) entered **Float** within
-the first few minutes but reverted to **SPP** after approximately 30 minutes.
-This is likely caused by the `Solution Selectivity = Medium` setting, which
-applies strict quality checks that the VRS-based corrections may not satisfy
-consistently.  Setting `Loose` may help retain the Float solution longer.
+## Known Issues
 
-MRTKLIB's PPP-RTK engine is purpose-built for CLAS and applies dedicated
-correction handling (STEC interpolation, phase bias application, network-aware
-grid selection).  The VRS approach, by contrast, relies on the receiver's
-generic RTK engine, which treats the RTCM3 corrections as ordinary base
-station observations without CLAS-specific optimizations.
+### Vertical-component dispersion (~30 s sawtooth) — [#97](https://github.com/h-shiono/MRTKLIB/issues/97)
 
-<div style="text-align: center;"><img src="images/mosaic-g5/CLA0076d_G5P3076d_pos.png" style="max-width: 640px; width: 100%;"></div>
+When solutions are plotted, the vertical (Up) component shows a roughly
+30-second sawtooth pattern of a few centimetres peak-to-peak that is not
+present in reference implementations processing the same data. Horizontal
+accuracy is unaffected.
+
+The cause is `cssr2rtcm3`'s extrapolation of CLAS Compact SSR orbit/clock
+corrections between snapshots: rate terms are currently held at zero, so
+each ~30 s SSR update introduces a small step in the corrected satellite
+position/clock that propagates into the vertical component. Estimating the
+rate by numerical differentiation between consecutive snapshots is being
+investigated as a remediation.
+
+This is a property of the correction extrapolation logic, not a
+receiver-specific issue; any RTK engine consuming this RTCM3 stream is
+expected to show the same pattern.
