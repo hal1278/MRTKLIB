@@ -161,7 +161,49 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
 
     Click `Apply`, then `OK` to close.
 
-7. **Save configuration to the receiver**: Go to `File` > `Copy Configuration` and set:
+7. **Configure the RTCM3 input port** (Approach 1 / VRS only): Identify the COM
+    port that the host will use to send RTCM3 corrections to the receiver
+    (e.g. `COM1`, `COM2`, `USB1`), and set its **Input Type** explicitly to
+    `RTCMv3`.
+
+    Via RxControl GUI: `Communication` > `Input/Output Selection`, choose the
+    target port, set `Input Type` to `RTCMv3`, click `Apply`.
+
+    Via ASCII commands (USB1 terminal):
+
+    ```
+    setDataInOut, COM1, RTCMv3
+    ```
+
+    Verify with `gdio`:
+
+    ```
+    DataInOut, COM1, RTCMv3, SBF+NMEA+ASCIIDisplay, (on)
+    ```
+
+    !!! warning "`auto` does **not** reliably detect RTCMv3"
+        The firmware reference states that `Input Type = auto` auto-detects
+        RTCMv3, but at least on firmware `20250611b` this is not the case in
+        practice — the receiver silently ignores incoming RTCM3 and stays in
+        SPP mode forever, even when `mrtk cssr2rtcm3` is producing valid
+        corrections. **Always set the InputType explicitly to `RTCMv3`** for
+        the port that receives corrections.
+
+        Diagnostic symptom: PVT stays at **mode = 1 (SPP / Stand-alone)**
+        indefinitely, with no transition to DGPS (mode = 2) / Float (mode = 5)
+        / Fix (mode = 4), despite `mrtk cssr2rtcm3` running and emitting RTCM3
+        bytes. At a clear-sky stationary point a 24 h SPP-only session can
+        still cluster within ±15 cm — looks plausible at a glance, so check
+        the **PVT mode field** in `PVTGeodetic`, not just the scatter plot.
+
+    Also confirm that the COM port baud rate matches the host side
+    (`mrtk cssr2rtcm3 -out serial://...:115200` ⇒ `setComSettings, COM1, baud115200`):
+
+    ```
+    gcs
+    ```
+
+8. **Save configuration to the receiver**: Go to `File` > `Copy Configuration` and set:
 
     | Field  | Value   |
     | ------ | ------- |
@@ -169,6 +211,12 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
     | Target | Boot    |
 
     Click `Apply`, then `OK` to close.
+
+    Equivalent ASCII command:
+
+    ```
+    exeCopyConfigFile, Current, Boot
+    ```
 
 ## Running — Approach 1: VRS
 
