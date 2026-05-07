@@ -91,6 +91,7 @@ static int rtcm3_msm_grade = 7; /* MSM grade: 4, 5, or 7 */
 static int rtcm3_msm_sys[] = {SYS_GPS, SYS_GLO, SYS_GAL, SYS_QZS, 0};
 static double snr_fixed = 0.0;  /* 0 = elevation-dependent model, >0 = fixed dB-Hz */
 static double l6d_elmin = 10.0; /* min elevation (deg) for L6D satellite selection */
+static int l6d_prn_fixed = 0;   /* 0 = auto-select; >0 = lock to QZS PRN (e.g. 199) */
 
 /* signal code remapping table (CLAS code → receiver code) */
 #define MAX_SIG_REMAP 32
@@ -299,6 +300,15 @@ static void load_cssr2rtcm3_config(const char *conffile) {
             if (sscanf(p, "l6d_elmin = %lf", &dval) == 1) {
                 l6d_elmin = dval;
                 fprintf(stderr, "cssr2rtcm3: l6d_elmin=%.1f deg\n", l6d_elmin);
+            }
+        }
+        /* l6d_prn_fixed = 199 → lock L6D source to this QZS PRN (0 = auto) */
+        {
+            int ival;
+            if (sscanf(p, "l6d_prn_fixed = %d", &ival) == 1) {
+                l6d_prn_fixed = ival;
+                fprintf(stderr, "cssr2rtcm3: l6d_prn_fixed=J%d (auto-select disabled)\n",
+                        l6d_prn_fixed);
             }
         }
         /* systems = ["GPS", "Galileo"] or systems = GPS,Galileo */
@@ -1286,6 +1296,20 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
         load_cssr2rtcm3_config(conffile);
     }
 
+    /* If l6d_prn_fixed was set in the TOML config, bypass auto-selection by
+     * pre-loading the filter with that QZS PRN. The selector loop below
+     * skips re-evaluation when l6d_prn_fixed > 0.                          */
+    if (l6d_prn_fixed > 0) {
+        l6d_prn_filter = satno(SYS_QZS, l6d_prn_fixed);
+        if (l6d_prn_filter <= 0) {
+            fprintf(stderr, "cssr2rtcm3: invalid l6d_prn_fixed=J%d (satno failed)\n",
+                    l6d_prn_fixed);
+            return -1;
+        }
+        fprintf(stderr, "cssr2rtcm3: L6D locked to J%d (satno=%d, auto-select bypassed)\n",
+                l6d_prn_fixed, l6d_prn_filter);
+    }
+
     /* SNR model: pass fixed value to OSR engine via posopt[10] */
     prcopt.posopt[10] = (int)snr_fixed;
 
@@ -1510,9 +1534,13 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                      * selector. The selector chooses the QZS satellite with
                      * the highest elevation above l6d_elmin and fails over
                      * when the current selection goes silent or drops below
-                     * elmin. See lessons.md L-036 for the background.          */
+                     * elmin. See lessons.md L-036 for the background.
+                     *
+                     * When l6d_prn_fixed is set, the filter is pre-loaded
+                     * at startup and the selector is bypassed entirely.    */
                     l6d_record_frame(l6d_sat, raw_sbf->time, user_pos, nav);
-                    new_filter = l6d_select_best(l6d_prn_filter, raw_sbf->time);
+                    new_filter = l6d_prn_fixed > 0 ? l6d_prn_filter
+                                 : l6d_select_best(l6d_prn_filter, raw_sbf->time);
                     if (new_filter != l6d_prn_filter && new_filter > 0) {
                         int old_prn = 0, new_prn = 0;
                         if (l6d_prn_filter > 0) {
