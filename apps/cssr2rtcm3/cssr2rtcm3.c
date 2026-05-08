@@ -859,15 +859,25 @@ static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
      * get dummy observations; clas_ssr2osr() will discard those without
      * actual CLAS corrections.
      *
-     * Cap the output at MAXOBS — obsdata[] is allocated with MAXOBS slots
-     * and obs->data[] passed in is also MAXOBS-sized. With BDS+NAVIC enabled
-     * MAXSAT exceeds MAXOBS, so without this guard the inner light-time loop
-     * below writes past obsd[]'s end and corrupts the heap. (ASAN catches
-     * this; in production the heap corruption manifests as a delayed crash
-     * after enough ephemerides accumulate, anywhere from 10 minutes to
-     * 11 hours depending on constellation visibility.)                     */
+     * Restrict enumeration to systems listed in rtcm3_msm_sys[] (configured
+     * via TOML `systems`). Two reasons:
+     *   1. Cap n at MAXOBS — obsdata[] is allocated with MAXOBS=96 slots,
+     *      and the inner light-time loop writes past the end if MAXSAT
+     *      satellites end up enumerated (BDS+NAVIC push the count over 96).
+     *   2. Skip GLONASS/BDS/NAVIC entirely. CLAS does not broadcast
+     *      corrections for those constellations, and a single corrupt
+     *      GLONASS broadcast ephemeris is enough to send geph2pos() into
+     *      a non-converging RK4 integration that spins forever in
+     *      glorbit(), starving the rest of the cssr2rtcm3 main loop.
+     *      Observed once on Pi after ~12 h of operation — the process
+     *      stayed `R` and consumed CPU but stopped emitting RTCM3.       */
     for (i = n = 0; i < MAXSAT && n < MAXOBS; i++) {
-        int j, found = 0;
+        int j, k, sys, sys_ok = 0, found = 0;
+        sys = satsys(i + 1, NULL);
+        for (k = 0; rtcm3_msm_sys[k]; k++) {
+            if (rtcm3_msm_sys[k] == sys) { sys_ok = 1; break; }
+        }
+        if (!sys_ok) continue;
         /* check broadcast ephemeris exists */
         for (j = 0; j < nav->n; j++) {
             if (nav->eph[j].sat == i + 1 && nav->eph[j].toe.time > 0) {
