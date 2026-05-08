@@ -857,8 +857,16 @@ static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
      * stored separately from nav->ssr_ch, causing Galileo/QZS satellites to
      * be excluded.  Using broadcast eph ensures all CLAS-corrected satellites
      * get dummy observations; clas_ssr2osr() will discard those without
-     * actual CLAS corrections. */
-    for (i = n = 0; i < MAXSAT; i++) {
+     * actual CLAS corrections.
+     *
+     * Cap the output at MAXOBS — obsdata[] is allocated with MAXOBS slots
+     * and obs->data[] passed in is also MAXOBS-sized. With BDS+NAVIC enabled
+     * MAXSAT exceeds MAXOBS, so without this guard the inner light-time loop
+     * below writes past obsd[]'s end and corrupts the heap. (ASAN catches
+     * this; in production the heap corruption manifests as a delayed crash
+     * after enough ephemerides accumulate, anywhere from 10 minutes to
+     * 11 hours depending on constellation visibility.)                     */
+    for (i = n = 0; i < MAXSAT && n < MAXOBS; i++) {
         int j, found = 0;
         /* check broadcast ephemeris exists */
         for (j = 0; j < nav->n; j++) {
