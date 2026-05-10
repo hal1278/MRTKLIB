@@ -178,7 +178,7 @@ class Plotter:
         plt.tight_layout()
 
         # Save figure
-        if savefig is not None:
+        if savefig:
             filename = f"{self.reffile.stem}_{self.trgfile.stem if self.trgfile else 'ref'}_pos.png"
             path = self.reffile.parent / filename
             fig.savefig(path, dpi=300)
