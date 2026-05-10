@@ -17,6 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>  /* strcasecmp */
 
 /* byte extraction macros (little-endian, matching RTKLIB convention) */
 #define U1(p) ((uint8_t)(p)[0])
@@ -365,6 +366,13 @@ int mrtk_l6extract(int argc, char **argv) {
     if (!infile) {
         fprintf(stderr, "Error: -in FILE is required\n\n");
         print_usage();
+        return 1;
+    }
+
+    if (filter_l6d && filter_l6e) {
+        fprintf(stderr, "Error: -l6d and -l6e are mutually exclusive\n"
+                        "       (specifying both filters out every frame).\n"
+                        "       Omit both flags to extract L6D and L6E together.\n");
         return 1;
     }
 
