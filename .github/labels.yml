@@ -45,7 +45,6 @@
 
 # -----------------------------------------------------------------------------
 # module:* — which part of the codebase is affected
-# (cssr2rtcm3 label deliberately omitted until that tool is publicly released)
 # -----------------------------------------------------------------------------
 - name: "module:ppp"
   color: "5319e7"
@@ -65,6 +64,9 @@
 - name: "module:madoca"
   color: "5319e7"
   description: "MADOCA L6E / MADOCA-PPP decoding and correction handling"
+- name: "module:cssr2rtcm3"
+  color: "5319e7"
+  description: "cssr2rtcm3 CSSR-to-RTCM3 converter (mrtk cssr2rtcm3)"
 - name: "module:toml-config"
   color: "5319e7"
   description: "TOML configuration loader and schema"

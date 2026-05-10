@@ -5,6 +5,101 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.5] - 2026-05-10
+
+**Feature** — first official release of `mrtk cssr2rtcm3` (real-time CSSR→RTCM3 converter) and `mrtk l6extract`, with a Septentrio mosaic-G5 P3 hardware integration guide and a 24-hour endurance test.
+
+### Added
+
+- **`mrtk cssr2rtcm3` — public release** of the real-time QZSS CLAS L6D
+  (CSSR) → RTCM3 MSM7 converter. Lets RTCM3-capable receivers consume
+  CLAS as a Virtual Reference Station source. Outputs `1005` / `1006`
+  base-station messages and MSM7 for GPS / Galileo / QZSS, with
+  configurable signal remap (`G2X→2W`, `E1X→1C`, `E5X→5Q`, `J2X→2L`),
+  selectable SNR model (fixed or elevation-based), and
+  mosaic-CLAS-compatible station ID. Default config in
+  `conf/cssr2rtcm3.toml`.
+- **Elevation-based L6D PRN auto-selection** in `cssr2rtcm3` with
+  configurable threshold (`l6d_elmin`, default `10°`), 30-second
+  timeout, and 5° hysteresis. `l6d_prn_fixed` available to lock the
+  source PRN. The legacy `-prn` flag is deprecated.
+- **`mrtk l6extract` subcommand** — offline L6D / L6E frame extractor
+  for SBF and UBX logs.
+- **Septentrio mosaic-G5 P3 hardware integration guide**
+  (`docs/hardware/cssr2rtcm3-mosaic-g5.md`) covering RxTools setup,
+  `cssr2rtcm3 → mosaic-G5` VRS-RTK wiring, the alternative `mrtk run`
+  PPP-RTK path, and a published 24-hour static endurance result
+  (Fix 72.05 % / Float 27.94 %, 87,839 epochs).
+- **`module:cssr2rtcm3` GitHub label** for issue/PR triage along the
+  module axis (PR #99).
+- **Plotting helpers** under `scripts/plotting/`:
+  `parse_pvt.py` (NMEA / SBF parser with rigorous ECEF→ENU),
+  `plot_pos.py` (ENU comparison plotter, supports CSV save),
+  `sbf_plot.py` (real-time SBF position monitor).
+- **Positioning-engines reference**
+  (`docs/guide/positioning-engines.md`) explaining RTK vs. VRS-RTK
+  vs. PPP-RTK.
+
+### Fixed
+
+- **Long-running daemon stability** — `actualdist()` now caps satellite
+  enumeration at `MAXOBS` and skips non-CLAS systems
+  (`d028b0c`, `7fb497f`), eliminating the `MAXSAT` overflow / GLONASS
+  RK4 hangs that would otherwise stall multi-day runs.
+- **10-minute DGPS dips eliminated** — broadcast-ephemeris IODE
+  rollover used to leave CLAS SSR pointing at a vanished IODE for
+  ~55 s, causing RTK to fall back to DGPS. New `nav_t.eph_prev` slot
+  bridges the gap (`3a8cc51`).
+- **L5 / E5a OSR corrections** — `clas_ssr2osr()` now applies CLAS
+  L5/E5a corrections instead of leaving them invalid (`361b6df`).
+- **Galileo / QZSS in MSM output** — Galileo and QZSS are now emitted
+  in the RTCM3 stream (`21f7b1f`, `985fc34`); Galileo ephemeris (1045)
+  broadcast added (`f5f2748`); broadcast ephemeris resent every 30 s
+  (`c2ba3b6`).
+- **VRS base position latched on first SPP fix** (`4fa4d65`) —
+  removes the dominant cause of Float-only RTK on the converter side.
+- **`osr[]` per-epoch clearing** in `clas_ssr2osr()` (`0145c30`) —
+  prevents stale P / Φ being carried forward when no new correction
+  arrived for a satellite.
+- **δBIAS discontinuity compensation** per IS-QZSS-L6-005 §5.5.3.2
+  (`2b7580e`).
+- **Ephemeris lookup via `seleph()`** with IODE matching (`d64893b`).
+- **Same-frequency code fallback** in `clas_osr_corrmeas()` so CLAS
+  bias matching does not strand satellites that broadcast a different
+  code on the same frequency (`d8d2f4b`).
+- **VRS PP**: base position init enabled for VRS-RTK in
+  post-processing, plus `selfreqpair` fallback in `zdres_sat` for E5a
+  observations (`b034d48`, `ea296db`, `5295229` Galileo-only scope);
+  regression dataset reaches 98.5 % Fix.
+- **PVT-time-based RTCM3 pacing** at the 1 s grid (`e729983`) —
+  RTCM3 delivery rate up to ~99.5 %.
+- **SBF Type-2 sub-blocks** processed when the Type-1 signal is not
+  in `obsdef` (#69 / `a3a1203`).
+
+### Changed
+
+- **`-prn` deprecated** in `cssr2rtcm3` in favour of `l6d_elmin`
+  auto-selection. The flag is still accepted but emits a deprecation
+  warning.
+
+### Documentation
+
+- **mosaic-G5 RTCMv3 input gotcha** documented after a 24h
+  SPP-stuck diagnosis: on firmware `20250611b`, the receiver does
+  not reliably auto-detect RTCMv3 — the receive-side port must be
+  set to `RTCMv3` explicitly (`0ea0147`).
+- **macOS serial setup**: use `/dev/cu.*` not `/dev/tty.*` for
+  serial output (DCD blocking).
+
+### Known limitations
+
+- **Vertical-component dispersion (~30 s sawtooth)** — [#97](https://github.com/h-shiono/MRTKLIB/issues/97).
+- **Fix-rate gap vs. mosaic-CLAS reference (~20 %)** — [#98](https://github.com/h-shiono/MRTKLIB/issues/98). Concentrated in two windows (h ≈ 04–05 and h ≈ 14–18 GPST); satellite count and correction age are healthy in both.
+
+### Test Results
+
+62/62 tests pass (no regressions).
+
 ## [v0.6.4] - 2026-04-16
 
 **Patch** — rtkrcv stability fixes and GitHub Community Profile completion.
