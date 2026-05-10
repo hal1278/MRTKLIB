@@ -19,6 +19,8 @@
 #include <string.h>
 #include <strings.h>  /* strcasecmp */
 
+#include "mrtklib/mrtk_cli.h"
+
 /* byte extraction macros (little-endian, matching RTKLIB convention) */
 #define U1(p) ((uint8_t)(p)[0])
 #define U2(p) ((uint16_t)(p)[0] | ((uint16_t)(p)[1] << 8))
@@ -310,22 +312,38 @@ static int detect_format(const char *path) {
 
 /* ---- CLI ---- */
 
+/* long-option aliases */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--input", "-in"},
+    {"--output", "-o"},
+    {NULL, NULL},
+};
+
 static void print_usage(void) {
-    fprintf(stderr,
-            "l6extract: Extract QZSS L6 frames from SBF/UBX files\n"
-            "\n"
-            "Usage: mrtk l6extract [OPTIONS]\n"
-            "\n"
-            "Options:\n"
-            "  -in FILE     Input SBF or UBX binary file (required)\n"
-            "  -r FORMAT    Receiver format: sbf, ubx (auto-detect from extension)\n"
-            "  -o PREFIX    Output file prefix (default: \"l6\")\n"
-            "  -l6d         Extract L6D frames only (CLAS)\n"
-            "  -l6e         Extract L6E frames only (MADOCA)\n"
-            "  -h           Show this help\n"
-            "\n"
-            "Output files: {prefix}_J{PRN}_{l6d|l6e}.l6\n"
-            "  Each file contains concatenated 250-byte L6 frames.\n");
+    static const char *lines[] = {
+        "mrtk l6extract: extract QZSS L6 frames from SBF/UBX files",
+        "",
+        "Usage: mrtk l6extract [OPTIONS]",
+        "",
+        "Options:",
+        "  -in, --input  FILE     Input SBF or UBX binary file (required)",
+        "  -r   FORMAT            Receiver format: sbf, ubx (auto-detect)",
+        "  -o,  --output PREFIX   Output file prefix                  [\"l6\"]",
+        "  -l6d                   Extract L6D frames only (CLAS)",
+        "  -l6e                   Extract L6E frames only (MADOCA)",
+        "  -h,  --help            Show this help",
+        "",
+        "Output files: {prefix}_J{PRN}_{l6d|l6e}.l6",
+        "  Each file contains concatenated 250-byte L6 frames.",
+        "",
+        "Examples:",
+        "  mrtk l6extract --input rover.sbf --output session1",
+        NULL,
+    };
+    int i;
+    for (i = 0; lines[i]; i++) {
+        fprintf(stderr, "%s\n", lines[i]);
+    }
 }
 
 int mrtk_l6extract(int argc, char **argv) {
@@ -335,6 +353,9 @@ int mrtk_l6extract(int argc, char **argv) {
     FILE *fp;
 
     memset(out, 0, sizeof(out));
+
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
 
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-in") && i + 1 < argc) {

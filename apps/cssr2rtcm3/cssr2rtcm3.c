@@ -39,6 +39,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_opt.h"
 #include "mrtklib/mrtk_nav.h"
@@ -608,28 +609,42 @@ static void dump_clas_state(const clas_ctx_t *clas, const clas_corr_t *corr)
 /* global state for signal handler */
 static volatile sig_atomic_t g_shutdown = 0;
 
+/* long-option aliases */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--config", "-k"},
+    {"--input", "-in"},
+    {"--output", "-out"},
+    {"--nav", "-nav"},
+    {"--trace", "-d"},
+    {"--interval", "-t"},
+    {NULL, NULL},
+};
+
 static const char *usage_text[] = {
-    "usage: mrtk cssr2rtcm3 [options] [-nav file ...]",
+    "mrtk cssr2rtcm3: real-time CSSR (CLAS L6D) to RTCM3 MSM (OSR) converter",
     "",
-    "  Real-time QZSS CSSR (CLAS L6D) to RTCM3 MSM (OSR) converter.",
-    "  MSM message type is configurable via TOML (default: MSM7).",
-    "  Converts CLAS corrections to VRS pseudo-observations for",
-    "  CLAS-unsupported receivers.",
+    "Usage: mrtk cssr2rtcm3 [OPTIONS] [-nav FILE ...]",
     "",
-    "options:",
-    "  -k  file          Configuration file (TOML or legacy .conf)",
-    "  -in  uri          L6 CSSR input stream  [stdin]",
-    "                    Use sbf://... for single SBF stream mode",
-    "                    (auto-extracts L6D, PVT position, and NAV)",
-    "  -2ch uri          Second L6 input stream (channel 2)",
-    "  -out uri          RTCM3 output stream   [stdout]",
-    "  -pos uri          Position input stream  (NMEA GGA)",
-    "  -p  lat,lon,hgt   Fixed user position   (deg, m)",
-    "  -nav file ...     Navigation files (RINEX NAV)",
-    "  -d  level         Trace level (0-5)     [0]",
-    "  -t  interval      Output interval (s)   [1]",
+    "  Converts CLAS CSSR corrections to VRS pseudo-observations (RTCM3 MSM)",
+    "  in real-time, enabling CLAS-unsupported receivers to consume CLAS via",
+    "  NTRIP/TCP. The MSM message type is configurable in the TOML config",
+    "  (default: MSM7).",
     "",
-    "stream URI formats:",
+    "Options:",
+    "  -k,  --config FILE       Configuration file (TOML or legacy .conf)",
+    "  -in, --input  URI        L6 CSSR input stream                  [stdin]",
+    "                             Use sbf://... for single SBF stream mode",
+    "                             (auto-extracts L6D, PVT position, and NAV)",
+    "  -2ch URI                 Second L6 input stream (channel 2)",
+    "  -out, --output URI       RTCM3 output stream                   [stdout]",
+    "  -pos URI                 Position input stream (NMEA GGA)",
+    "  -p   LAT,LON,HGT         Fixed user position (deg, m)",
+    "  -nav, --nav FILE...      Navigation files (RINEX NAV)",
+    "  -d,  --trace LEVEL       Trace level (0..5)                    [0]",
+    "  -t,  --interval SEC      Output interval (s)                   [1]",
+    "  -h,  --help              Show this help",
+    "",
+    "Stream URI formats:",
     "  file://path                File",
     "  serial://port:baud         Serial port",
     "  tcpsvr://:port             TCP server (listen)",
@@ -638,11 +653,11 @@ static const char *usage_text[] = {
     "  ntripcli://[user:pw@]host:port/mnt  NTRIP client",
     "  ntripcas://[user:pw@]:port/mnt  NTRIP caster",
     "",
-    "examples:",
+    "Examples:",
     "  # File replay (testing)",
-    "  mrtk cssr2rtcm3 -in file://data/2019239Q.l6 \\",
-    "    -out file://out.rtcm3 \\",
-    "    -nav data/nav.nav -p 36.104,140.087,70.0",
+    "  mrtk cssr2rtcm3 --input file://data/2019239Q.l6 \\",
+    "    --output file://out.rtcm3 \\",
+    "    --nav data/nav.nav -p 36.104,140.087,70.0",
     "",
     "  # Serial L6 -> TCP server, position from receiver NMEA",
     "  mrtk cssr2rtcm3 -in serial://ttyUSB0:115200 \\",
@@ -1211,6 +1226,9 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     int l6d_prn_filter = 0;  /* auto-select first QZS satellite for L6D */
     int l6d_prn_count[MAXSAT + 1];  /* L6D block count per satellite */
     memset(l6d_prn_count, 0, sizeof(l6d_prn_count));
+
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
 
     /* parse command-line arguments */
     for (i = 1; i < argc; i++) {

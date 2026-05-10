@@ -39,6 +39,7 @@
 #include <signal.h>
 #include <unistd.h>
 
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/rtklib.h"
 
 #define PRGNAME "str2str"      /* program name */
@@ -49,27 +50,32 @@
 static strsvr_t strsvr;          /* stream server */
 static volatile int intrflg = 0; /* interrupt flag */
 
+/* long-option aliases -------------------------------------------------------*/
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--input", "-in"},
+    {"--output", "-out"},
+    {"--trace", "-t"},
+    {NULL, NULL},
+};
+
 /* help text -----------------------------------------------------------------*/
 static const char* help[] = {
+    "mrtk relay: stream multiplexer / format converter (str2str)",
     "",
-    " usage: str2str [-in stream] [-out stream [-out stream...]] [options]",
+    "Usage: mrtk relay [-in STREAM] [-out STREAM [-out STREAM...]] [OPTIONS]",
     "",
-    " Input data from a stream and divide and output them to multiple streams",
-    " The input stream can be serial, tcp client, tcp server, ntrip client, or",
-    " file. The output stream can be serial, tcp client, tcp server, ntrip server,",
-    " or file. str2str is a resident type application. To stop it, type ctr-c in",
-    " console if run foreground or send signal SIGINT for background process.",
-    " If both of the input stream and the output stream follow #format, the",
-    " format of input messages are converted to output. To specify the output",
-    " messages, use -msg option. If the option -in or -out omitted, stdin for",
-    " input or stdout for output is used. If the stream in the option -in or -out",
-    " is null, stdin or stdout is used as well.",
-    " Command options are as follows.",
+    "  Reads from one input stream and writes to one or more output streams.",
+    "  Input may be serial, tcp client/server, ntrip client, or file. Output",
+    "  may be serial, tcp client/server, ntrip server, or file. With #format",
+    "  on both endpoints, the input is decoded and re-encoded for output.",
+    "  Resident process: stop with Ctrl-C in foreground or SIGINT in background.",
+    "  Omitting -in/-out (or passing a null path) defaults to stdin/stdout.",
     "",
-    " -in  stream[#format] input  stream path and format",
-    " -out stream[#format] output stream path and format",
+    "Options:",
+    "  -in,  --input  STREAM[#FORMAT]    Input stream path and format",
+    "  -out, --output STREAM[#FORMAT]    Output stream path and format (repeat OK)",
     "",
-    "  stream path",
+    "  Stream paths:",
     "    serial       : serial://port[:brate[:bsize[:parity[:stopb[:fctr]]]]]",
     "    tcp server   : tcpsvr://:port",
     "    tcp client   : tcpcli://addr[:port]",
@@ -78,7 +84,7 @@ static const char* help[] = {
     "    ntrip caster : ntripc://[user:passwd@][:port]/mntpnt[:srctbl] (only out)",
     "    file         : [file://]path[::T][::+start][::xseppd][::S=swap]",
     "",
-    "  format",
+    "  Formats:",
     "    rtcm2        : RTCM 2 (only in)",
     "    rtcm3        : RTCM 3",
     "    nov          : NovAtel OEMV/4/6,OEMStar (only in)",
@@ -93,35 +99,42 @@ static const char* help[] = {
     "    rt17         : Trimble RT17 (only in)",
     "    sbf          : Septentrio SBF (only in)",
     "",
-    " -msg \"type[(tint)][,type[(tint)]...]\"",
-    "                   rtcm message types and output intervals (s)",
-    " -sta sta          station id",
-    " -opt opt          receiver dependent options",
-    " -s  msec          timeout time (ms) [10000]",
-    " -r  msec          reconnect interval (ms) [10000]",
-    " -n  msec          nmea request cycle (m) [0]",
-    " -f  sec           file swap margin (s) [30]",
-    " -c  file          input commands file [no]",
-    " -c1 file          output 1 commands file [no]",
-    " -c2 file          output 2 commands file [no]",
-    " -c3 file          output 3 commands file [no]",
-    " -c4 file          output 4 commands file [no]",
-    " -p  lat lon hgt   station position (latitude/longitude/height) (deg,m)",
-    " -px x y z         station position (x/y/z-ecef) (m)",
-    " -a  antinfo       antenna info (separated by ,)",
-    " -i  rcvinfo       receiver info (separated by ,)",
-    " -o  e n u         antenna offset (e,n,u) (m)",
-    " -l  local_dir     ftp/http local directory []",
-    " -x  proxy_addr    http/ntrip proxy address [no]",
-    " -b  str_no        relay back messages from output str to input str [no]",
-    " -t  level         trace level [0]",
-    " -fl file          log file [str2str.trace]",
-    " -h                print help",
+    "  -msg \"TYPE[(TINT)][,TYPE[(TINT)]...]\"  RTCM message types and intervals (s)",
+    "  -sta SID            Station ID",
+    "  -opt OPT            Receiver-dependent options",
+    "  -s   MSEC           Timeout (ms)                                  [10000]",
+    "  -r   MSEC           Reconnect interval (ms)                       [10000]",
+    "  -n   MSEC           NMEA request cycle (ms)                       [0]",
+    "  -f   SEC            File swap margin (s)                          [30]",
+    "  -c   FILE           Input commands file                           [none]",
+    "  -c1  FILE           Output 1 commands file                        [none]",
+    "  -c2  FILE           Output 2 commands file                        [none]",
+    "  -c3  FILE           Output 3 commands file                        [none]",
+    "  -c4  FILE           Output 4 commands file                        [none]",
+    "  -p   LAT LON HGT    Station position (deg, m)",
+    "  -px  X Y Z          Station position (ECEF, m)",
+    "  -a   ANTINFO        Antenna info (comma-separated)",
+    "  -i   RCVINFO        Receiver info (comma-separated)",
+    "  -o   E N U          Antenna offset (e,n,u, m)",
+    "  -l   LOCAL_DIR      ftp/http local directory                      [none]",
+    "  -x   PROXY_ADDR     http/ntrip proxy address                      [none]",
+    "  -b   STR_NO         Relay back messages from output to input      [none]",
+    "  -t,  --trace LEVEL  Trace level                                   [0]",
+    "  -fl  FILE           Log file                                      [str2str.trace]",
+    "  -h,  --help         Show this help",
+    "",
+    "Examples:",
+    "  mrtk relay --input ntrip://user:pw@caster:2101/MNT \\",
+    "             --output tcpsvr://:9000",
+    "  mrtk relay -in serial://ttyUSB0:115200#sbf -out file://out.rtcm3#rtcm3",
+    NULL,
 };
 /* print help ----------------------------------------------------------------*/
 static void printhelp(void) {
     int i;
-    for (i = 0; i < sizeof(help) / sizeof(*help); i++) fprintf(stderr, "%s\n", help[i]);
+    for (i = 0; help[i]; i++) {
+        fprintf(stderr, "%s\n", help[i]);
+    }
     exit(0);
 }
 /* signal handler ------------------------------------------------------------*/
@@ -236,6 +249,9 @@ int mrtk_relay(int argc, char** argv) {
     int types[MAXSTR] = {STR_FILE, STR_FILE}, stat[MAXSTR] = {0}, log_stat[MAXSTR] = {0};
     int byte[MAXSTR] = {0}, bps[MAXSTR] = {0}, fmts[MAXSTR] = {0}, sta = 0;
 
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
     for (i = 0; i < MAXSTR; i++) {
         paths[i] = s1[i];
         logs[i] = s2[i];
@@ -243,7 +259,9 @@ int mrtk_relay(int argc, char** argv) {
         cmds_periodic[i] = cmd_periodic_strs[i];
     }
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-in") && i + 1 < argc) {
+        if (mrtk_is_help_flag(argv[i])) {
+            printhelp();
+        } else if (!strcmp(argv[i], "-in") && i + 1 < argc) {
             if (!decodepath(argv[++i], types, paths[0], fmts)) return -1;
         } else if (!strcmp(argv[i], "-out") && i + 1 < argc && n < MAXSTR - 1) {
             if (!decodepath(argv[++i], types + n + 1, paths[n + 1], fmts + n + 1)) return -1;
