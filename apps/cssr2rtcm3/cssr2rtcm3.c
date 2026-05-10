@@ -611,7 +611,8 @@ static volatile sig_atomic_t g_shutdown = 0;
 static const char *usage_text[] = {
     "usage: mrtk cssr2rtcm3 [options] [-nav file ...]",
     "",
-    "  Real-time QZSS CSSR (CLAS L6D) to RTCM3 MSM4 (OSR) converter.",
+    "  Real-time QZSS CSSR (CLAS L6D) to RTCM3 MSM (OSR) converter.",
+    "  MSM message type is configurable via TOML (default: MSM7).",
     "  Converts CLAS corrections to VRS pseudo-observations for",
     "  CLAS-unsupported receivers.",
     "",

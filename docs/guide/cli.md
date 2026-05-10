@@ -156,19 +156,23 @@ mrtk ssr2osr [options] obsfile navfile [navfile...] [l6file...]
 
 ### mrtk cssr2rtcm3
 
-Convert CLAS CSSR corrections to RTCM3 MSM4 messages in real time, enabling CLAS-incompatible receivers to use CLAS as a VRS source.
+Convert CLAS CSSR corrections to RTCM3 MSM messages in real time, enabling CLAS-incompatible receivers to use CLAS as a VRS source. The MSM message type is configurable via TOML (default: MSM7; MSM4 / MSM5 also supported).
 
 ```bash
-mrtk cssr2rtcm3 [options]
+mrtk cssr2rtcm3 [options] [-nav file ...]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `-k file` | Configuration file (TOML) |
-| `-in stream` | Input stream (Septentrio SBF with L6D + NAV + PVT) |
+| `-k file` | Configuration file (TOML or legacy `.conf`) |
+| `-in stream` | L6 CSSR input stream; use `sbf://...` for single-stream SBF (auto-extracts L6D, PVT, NAV) |
+| `-2ch stream` | Second L6 input stream (channel 2) |
 | `-out stream` | Output RTCM3 stream (e.g., `tcpsvr://:2101`) |
-| `-gga stream` | NMEA GGA input for rover position (optional) |
-| `-x level` | Debug trace level (0-5) |
+| `-pos stream` | NMEA GGA input stream for rover position (optional) |
+| `-p lat,lon,hgt` | Fixed user position (deg, m) |
+| `-nav file` | Navigation file(s) (RINEX NAV) |
+| `-d level` | Trace level (0-5) |
+| `-t interval` | Output interval in seconds (default: 1) |
 
 **Stream URI formats:**
 

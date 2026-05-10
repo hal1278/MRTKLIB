@@ -76,7 +76,7 @@ static void print_help(void) {
             "Format Translation:\n"
             "  ssr2obs     Convert SSR corrections to pseudo-observations\n"
             "  ssr2osr     Convert SSR corrections to OSR\n"
-            "  cssr2rtcm3  Convert CLAS CSSR to RTCM3 MSM4 (real-time VRS)\n"
+            "  cssr2rtcm3  Convert CLAS CSSR to RTCM3 MSM (real-time VRS)\n"
             "\n"
             "Utilities:\n"
             "  bias        Estimate receiver fractional biases\n"
