@@ -40,70 +40,94 @@
  */
 #include <stdarg.h>
 
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtk_options.h"
 #include "mrtklib/mrtk_postpos.h"
 #include "mrtklib/mrtklib.h"
 #include "rtklib.h"
 
-#define PROGNAME "rnx2rtkp" /* program name */
+#define PROGNAME "rnx2rtkp" /* program name (kept for trace file + .pos header) */
 #define MAXFILE 16          /* max number of input files */
 
+/* long-option aliases -------------------------------------------------------*/
+/* Note: -h is reserved for "fix and hold AR" in this subcommand, so we do not
+ * map --help to -h. Instead, --help / -? are recognized explicitly below. */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--config", "-k"},
+    {"--output", "-o"},
+    {"--start", "-ts"},
+    {"--end", "-te"},
+    {"--interval", "-ti"},
+    {"--freq", "-f"},
+    {"--trace", "-x"},
+    {NULL, NULL},
+};
+
 /* help text -----------------------------------------------------------------*/
-static const char* help[] = {"",
-                             " usage: rnx2rtkp [option]... file file [...]",
-                             "",
-                             " Read RINEX OBS/NAV/GNAV/HNAV/CLK, SP3, SBAS message log files and ccompute ",
-                             " receiver (rover) positions and output position solutions.",
-                             " The first RINEX OBS file shall contain receiver (rover) observations. For the",
-                             " relative mode, the second RINEX OBS file shall contain reference",
-                             " (base station) receiver observations. At least one RINEX NAV/GNAV/HNAV",
-                             " file shall be included in input files. To use SP3 precise ephemeris, specify",
-                             " the path in the files. The extension of the SP3 file shall be .sp3 or .eph.",
-                             " All of the input file paths can include wild-cards (*). To avoid command",
-                             " line deployment of wild-cards, use \"...\" for paths with wild-cards.",
-                             " Command line options are as follows ([]:default). With -k option, the",
-                             " processing options are input from the configuration file. In this case,",
-                             " command line options precede options in the configuration file.",
-                             "",
-                             " -?        print help",
-                             " -k file   input options from configuration file [off]",
-                             " -o file   set output file [stdout]",
-                             " -ts ds ts start day/time (ds=y/m/d ts=h:m:s) [obs start time]",
-                             " -te de te end day/time   (de=y/m/d te=h:m:s) [obs end time]",
-                             " -ti tint  time interval (sec) [all]",
-                             " -p mode   mode (0:single,1:dgps,2:kinematic,3:static,4:moving-base,",
-                             "                 5:fixed,6:ppp-kinematic,7:ppp-static) [2]",
-                             " -m mask   elevation mask angle (deg) [15]",
-                             " -sys s[,s...] nav system(s) (s=G:GPS,R:GLO,E:GAL,J:QZS,C:BDS,I:IRN) [G|R]",
-                             " -f freq   number of frequencies for relative mode (1:L1,2:L1+L2,3:L1+L2+L5) [2]",
-                             " -v thres  validation threshold for integer ambiguity (0.0:no AR) [3.0]",
-                             " -b        backward solutions [off]",
-                             " -c        forward/backward combined solutions [off]",
-                             " -i        instantaneous integer ambiguity resolution [off]",
-                             " -h        fix and hold for integer ambiguity resolution [off]",
-                             " -e        output x/y/z-ecef position [latitude/longitude/height]",
-                             " -a        output e/n/u-baseline [latitude/longitude/height]",
-                             " -n        output NMEA-0183 GGA sentence [off]",
-                             " -g        output latitude/longitude in the form of ddd mm ss.ss' [ddd.ddd]",
-                             " -t        output time in the form of yyyy/mm/dd hh:mm:ss.ss [sssss.ss]",
-                             " -u        output time in utc [gpst]",
-                             " -d col    number of decimals in time [3]",
-                             " -s sep    field separator [' ']",
-                             " -r x y z  reference (base) receiver ecef pos (m) [average of single pos]",
-                             "           rover receiver ecef pos (m) for fixed or ppp-fixed mode",
-                             " -l lat lon hgt reference (base) receiver latitude/longitude/height (deg/m)",
-                             "           rover latitude/longitude/height for fixed or ppp-fixed mode",
-                             " -ign_chierr ignore chi-square error mode [off]",
-                             " -sta staname   station name[RINEX MARKER NAME]",
-                             " -y level  output soltion status (0:off,1:states,2:residuals) [0]",
-                             " -x level  debug trace level (0:off) [0]",
-                             " -ver      print version"};
-/* print help ----------------------------------------------------------------*/
+static const char *help_lines[] = {
+    "mrtk post: post-processing positioning from RINEX OBS/NAV (rnx2rtkp)",
+    "",
+    "Usage: mrtk post [OPTIONS] FILE [FILE...]",
+    "",
+    "  Reads RINEX OBS/NAV/GNAV/HNAV/CLK, SP3, and SBAS message logs and computes",
+    "  receiver (rover) positions. The first OBS file is the rover; for relative",
+    "  modes the second OBS file is the base. At least one NAV/GNAV/HNAV file is",
+    "  required. SP3 precise ephemeris files use extension .sp3 or .eph.",
+    "  Wild-cards (*) in file paths are supported; quote them as \"...\" to avoid",
+    "  shell expansion. With -k, options come from a configuration file; command",
+    "  line options take precedence.",
+    "",
+    "Options:",
+    "  -k,  --config FILE         Configuration file (TOML or legacy)   [none]",
+    "  -o,  --output FILE         Output file                           [stdout]",
+    "  -ts, --start Y/M/D H:M:S   Start day/time (GPST)                 [obs start]",
+    "  -te, --end   Y/M/D H:M:S   End day/time   (GPST)                 [obs end]",
+    "  -ti, --interval SEC        Time interval (s)                     [all]",
+    "  -p   MODE                  Positioning mode 0..7                 [2]",
+    "                               (0:single,1:dgps,2:kinematic,3:static,",
+    "                                4:moving-base,5:fixed,6:ppp-kinematic,",
+    "                                7:ppp-static)",
+    "  -m   DEG                   Elevation mask angle                  [15]",
+    "  -sys S[,S...]              Nav systems                           [G,R]",
+    "                               (G:GPS,R:GLO,E:GAL,J:QZS,C:BDS,I:IRN)",
+    "  -f,  --freq N              Number of frequencies (relative)      [2]",
+    "                               (1:L1, 2:L1+L2, 3:L1+L2+L5)",
+    "  -v   THRES                 AR validation threshold (0.0: no AR)  [3.0]",
+    "  -b                         Backward solutions                    [off]",
+    "  -c                         Forward/backward combined solutions   [off]",
+    "  -i                         Instantaneous integer AR              [off]",
+    "  -h                         Fix-and-hold integer AR               [off]",
+    "  -e                         Output ECEF x/y/z position            [lat/lon/h]",
+    "  -a                         Output e/n/u baseline                 [lat/lon/h]",
+    "  -n                         Output NMEA-0183 GGA                  [off]",
+    "  -g                         Output lat/lon as ddd mm ss.ss'       [ddd.ddd]",
+    "  -t                         Output time as yyyy/mm/dd hh:mm:ss.ss [sssss.ss]",
+    "  -u                         Output time in UTC                    [GPST]",
+    "  -d   COL                   Decimals in time                      [3]",
+    "  -s   SEP                   Field separator                       [' ']",
+    "  -r   X Y Z                 Reference (base) ECEF position (m)    [single avg]",
+    "                               For fixed/ppp-fixed: rover ECEF position",
+    "  -l   LAT LON HGT           Reference (base) lat/lon/h (deg, m)   [single avg]",
+    "                               For fixed/ppp-fixed: rover lat/lon/h",
+    "  -ign_chierr                Ignore chi-square error               [off]",
+    "  -sta NAME                  Station name                          [RINEX MARKER]",
+    "  -y   LEVEL                 Solution status (0:off,1:states,2:resid) [0]",
+    "  -x,  --trace LEVEL         Debug trace level (0..5)              [0]",
+    "  -ver                       Print version",
+    "  -?,  --help                Show this help",
+    "                               (-h is the fix-and-hold AR flag, not help)",
+    "",
+    "Examples:",
+    "  mrtk post --config conf/claslib/post.toml obs.obs nav.nav clas.l6",
+    "  mrtk post -k conf.toml --start 2024/01/15 00:00:00 -o out.pos *.obs *.nav",
+    NULL,
+};
+
 static void printhelp(void) {
     int i;
-    for (i = 0; i < (int)(sizeof(help) / sizeof(*help)); i++) {
-        fprintf(stderr, "%s\n", help[i]);
+    for (i = 0; help_lines[i]; i++) {
+        fprintf(stderr, "%s\n", help_lines[i]);
     }
     exit(0);
 }
@@ -135,6 +159,17 @@ int mrtk_post(int argc, char** argv) {
     solopt.timef = 0;
     sprintf(solopt.prog, "%s(%s ver.%s)", PROGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
     sprintf(filopt.trace, "%s.trace", PROGNAME);
+
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
+    /* recognise help flags up-front (-? is the legacy short flag here because
+     * -h is reserved for fix-and-hold AR; --help is the unified long form) */
+    for (i = 1; i < argc; i++) {
+        if (!strcmp(argv[i], "-?") || !strcmp(argv[i], "--help")) {
+            printhelp();
+        }
+    }
 
     /* load options from configuration file(s)
      * resetsysopts() is called once before the loop so that multiple -k flags

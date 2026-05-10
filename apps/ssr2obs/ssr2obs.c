@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include "mrtklib/mrtk_clas.h"
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_mat.h"
@@ -73,20 +74,44 @@
 
 /* global variables ----------------------------------------------------------*/
 
-static const char* usage[] = {"usage: ssr2obs [options] file ...",
-                              "",
-                              "options: ([] as default)",
-                              "  -ts y/m/d h:m:s   start time of OBS (GPST) []",
-                              "  -te y/m/d h:m:s   end time of OBS   (GPST) [start time + 1h]",
-                              "  -ti tint          time interval (s) [1]",
-                              "  -k  file          configuration file []",
-                              "  -o  file          output file [" OUT_FILE "]",
-                              "  -r                output RINEX3 OBS (default)",
-                              "  -b                output RTCM3 MSM4 binary",
-                              "  -c  file          also write OSR corrections CSV to file",
-                              "  -x                debug trace level (0: no trace) [0]",
-                              "  file ...          QZSS L6 message file (.l6/.L6) and RINEX NAV files",
-                              NULL};
+/* long-option aliases */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--config", "-k"},
+    {"--output", "-o"},
+    {"--start", "-ts"},
+    {"--end", "-te"},
+    {"--interval", "-ti"},
+    {"--trace", "-x"},
+    {NULL, NULL},
+};
+
+static const char* usage[] = {
+    "mrtk ssr2obs: convert SSR corrections to pseudo-observations",
+    "",
+    "Usage: mrtk ssr2obs [OPTIONS] FILE...",
+    "",
+    "  Reads QZSS L6 message files and RINEX NAV files and emits VRS",
+    "  pseudo-observations (RINEX3 OBS or RTCM3 MSM4 binary).",
+    "",
+    "Options:",
+    "  -ts, --start Y/M/D H:M:S   Start time of OBS (GPST)        [required]",
+    "  -te, --end   Y/M/D H:M:S   End time   of OBS (GPST)        [start + 1h]",
+    "  -ti, --interval SEC        Time interval (s)               [1]",
+    "  -p   LAT,LON,HGT           VRS position (deg, m)",
+    "  -k,  --config FILE         Configuration file (TOML or legacy)",
+    "  -o,  --output FILE         Output file                     [" OUT_FILE "]",
+    "  -r                         Output RINEX 3 OBS              [default]",
+    "  -b                         Output RTCM3 MSM4 binary",
+    "  -c   FILE                  Also write OSR corrections CSV to FILE",
+    "  -x,  --trace LEVEL         Debug trace level               [0]",
+    "  -h,  --help                Show this help",
+    "  FILE...                    QZSS L6 (.l6/.L6) and RINEX NAV files",
+    "",
+    "Examples:",
+    "  mrtk ssr2obs --config conf.toml --start 2024/01/15 00:00:00 \\",
+    "               --output vrs.obs corr.l6 brdc.nav",
+    NULL,
+};
 
 #define OSR_CSV_HDR                         \
     "msg,tow,sys,prn,pbias0,pbias1,pbias2," \
@@ -557,9 +582,17 @@ int mrtk_ssr2obs(int argc, char** argv) {
     prcopt.refpos = 1;
     solopt.timef = 0;
 
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
     /* parse command-line options */
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-ts") && i + 2 < argc) {
+        if (mrtk_is_help_flag(argv[i])) {
+            for (j = 0; usage[j]; j++) {
+                fprintf(stderr, "%s\n", usage[j]);
+            }
+            return 0;
+        } else if (!strcmp(argv[i], "-ts") && i + 2 < argc) {
             sscanf(argv[++i], "%lf/%lf/%lf", es, es + 1, es + 2);
             sscanf(argv[++i], "%lf:%lf:%lf", es + 3, es + 4, es + 5);
             ts = epoch2time(es);

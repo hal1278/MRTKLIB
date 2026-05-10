@@ -38,6 +38,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_clas.h"
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_coords.h"
@@ -118,6 +119,46 @@ static FILE* open_l6(char** infile, int n) {
     return fp;
 }
 
+/* long-option aliases */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--config", "-k"},
+    {"--output", "-o"},
+    {"--start", "-ts"},
+    {"--end", "-te"},
+    {"--trace", "-x"},
+    {NULL, NULL},
+};
+
+/* print usage ---------------------------------------------------------------*/
+static const char* usage_lines[] = {
+    "mrtk dump: dump CSSR (CLAS L6D) to CSV (dumpcssr)",
+    "",
+    "Usage: mrtk dump [OPTIONS] L6FILE [NAVFILE...]",
+    "",
+    "  Decodes a QZSS CSSR (CLAS L6D) archive file and dumps human-readable",
+    "  correction records (per epoch / per satellite) to CSV.",
+    "",
+    "Options:",
+    "  -ts, --start Y/M/D H:M:S   Start time (GPST)",
+    "  -te, --end   Y/M/D H:M:S   End time   (GPST)",
+    "  -k,  --config FILE         Configuration file (TOML or legacy)",
+    "  -o,  --output FILE         Output CSV                            [stdout]",
+    "  -ch  N                     L6 channel (0 or 1)                   [0]",
+    "  -x,  --trace LEVEL         Trace level                           [0]",
+    "  -h,  --help                Show this help",
+    "",
+    "Examples:",
+    "  mrtk dump --output dump.csv 2019239Q.l6 brdc.nav",
+    NULL,
+};
+
+static void printusage(void) {
+    int i;
+    for (i = 0; usage_lines[i]; i++) {
+        fprintf(stderr, "%s\n", usage_lines[i]);
+    }
+}
+
 /* main ----------------------------------------------------------------------*/
 int mrtk_dump(int argc, char** argv) {
     clas_ctx_t* clas;
@@ -130,9 +171,15 @@ int mrtk_dump(int argc, char** argv) {
     char path[1024];
     int i, iw, n = 0, ret, net, ch = 0, trace_level = 0;
 
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
     /* parse command-line options */
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-ts") && i + 2 < argc) {
+        if (mrtk_is_help_flag(argv[i])) {
+            printusage();
+            return 0;
+        } else if (!strcmp(argv[i], "-ts") && i + 2 < argc) {
             sscanf(argv[++i], "%lf/%lf/%lf", es, es + 1, es + 2);
             sscanf(argv[++i], "%lf:%lf:%lf", es + 3, es + 4, es + 5);
             ts = epoch2time(es);
@@ -149,15 +196,7 @@ int mrtk_dump(int argc, char** argv) {
         } else if (!strcmp(argv[i], "-x") && i + 1 < argc) {
             trace_level = atoi(argv[++i]);
         } else if (argv[i][0] == '-') {
-            fprintf(stderr,
-                    "usage: %s [options] l6file [navfile...]\n"
-                    "  -ts y/m/d h:m:s   start time (GPST)\n"
-                    "  -te y/m/d h:m:s   end time   (GPST)\n"
-                    "  -k  file          configuration file\n"
-                    "  -o  file          output CSV [stdout]\n"
-                    "  -ch n             L6 channel 0|1 [0]\n"
-                    "  -x  level         trace level [0]\n",
-                    PROGNAME);
+            printusage();
             return 0;
         } else if (n < MAXFILE) {
             infile[n++] = argv[i];
