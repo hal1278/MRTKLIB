@@ -1229,8 +1229,11 @@ int clas_osr_zdres(const obsd_t* obs, int n, const double* rs, const double* dts
         /* If selfreqpair returns 0 (L1 only) but CLAS has secondary
          * frequency corrections, use them. This handles Galileo E5a
          * when obsdef places it at index 1 instead of index 2 (e.g.
-         * signals=["E1C","E5Q"] without E7Q). */
-        if (qj == 0) {
+         * signals=["E1C","E5Q"] without E7Q).
+         *
+         * Restricted to Galileo so user-selected single-frequency modes
+         * (e.g. POSL1) on GPS / QZSS / GLONASS / BDS are preserved. */
+        if (qj == 0 && satsys(sat, NULL) == SYS_GAL) {
             for (j = 1; j < nf; j++) {
                 if (corr->smode[sat - 1][j] != 0) {
                     qj = j;
