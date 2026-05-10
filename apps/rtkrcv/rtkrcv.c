@@ -74,6 +74,7 @@
 #include <unistd.h>
 
 #include "mrtklib/mrtk_clas.h"
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtk_station.h"
 #include "mrtklib/mrtklib.h"
@@ -154,19 +155,46 @@ static filopt_t filopt = {""};     /* file options */
 static gtime_t rst = {0};          /* raw/rtcm data start time */
 
 /* help text -----------------------------------------------------------------*/
-static const char* usage[] = {"usage: rtkrcv [-s][-p port][-d dev][-o file][-w pwd][-r level][-t level][-sta sta]",
-                              "options",
-                              "  -s         start RTK server on program startup",
-                              "  -p port    port number for telnet console",
-                              "  -m port    port number for monitor stream",
-                              "  -d dev     terminal device for console",
-                              "  -o file    processing options file",
-                              "  -w pwd     login password for remote console (\"\": no password)",
-                              "  -r level   output solution status file (0:off,1:states,2:residuals)",
-                              "  -t level   debug trace level (0:off,1-5:on)",
-                              "  -sta sta   station name for receiver dcb",
-                              "  -v|-ver    print version",
-                              "  -rst ds ts start day/time (ds=y/m/d ts=h:m:s) [raw/rtcm data start time]"};
+/* Long-option aliases for the command-line parser. Note rtkrcv historically
+ * uses -o for the processing-options file (i.e. the configuration), -t for
+ * debug trace, and -r for solution-status output level. */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--config", "-o"},
+    {"--device", "-d"},
+    {"--port", "-p"},
+    {"--trace", "-t"},
+    {NULL, NULL},
+};
+
+static const char* usage[] = {
+    "mrtk run: real-time positioning console (rtkrcv)",
+    "",
+    "Usage: mrtk run [OPTIONS]",
+    "",
+    "  Starts the RTK server with optional telnet console. Stream paths,",
+    "  formats, and processing options are loaded from a configuration file",
+    "  (TOML or legacy). Without -s the server stays idle until the 'start'",
+    "  console command is issued.",
+    "",
+    "Options:",
+    "  -s                   Start RTK server on program startup",
+    "  -p,  --port PORT     Telnet console port",
+    "  -m   PORT            Monitor stream port",
+    "  -d,  --device DEV    Terminal device for console",
+    "  -o,  --config FILE   Processing options / configuration file",
+    "  -w   PWD             Login password for remote console (\"\": none)",
+    "  -r   LEVEL           Solution status file (0:off, 1:states, 2:residuals)",
+    "  -t,  --trace LEVEL   Debug trace level (0:off, 1-5:on)",
+    "  -sta NAME            Station name for receiver DCB",
+    "  -v,  -ver            Print version",
+    "  -rst Y/M/D H:M:S     Start day/time (raw/rtcm data start time)",
+    "  -h,  --help          Show this help",
+    "",
+    "Examples:",
+    "  mrtk run --config conf/run.toml --port 2401 -s",
+    "  mrtk run -o conf.toml --device /dev/ttyUSB0 --trace 2",
+    NULL,
+};
 static const char* helptxt[] = {"start                 : start rtk server",
                                 "stop                  : stop rtk server",
                                 "restart               : restart rtk sever",
@@ -269,7 +297,7 @@ static opt_t rcvopts[] = {{"console-passwd", 2, (void*)passwd, ""},
 /* print usage ---------------------------------------------------------------*/
 static void printusage(void) {
     int i;
-    for (i = 0; i < (int)(sizeof(usage) / sizeof(*usage)); i++) {
+    for (i = 0; usage[i]; i++) {
         fprintf(stderr, "%s\n", usage[i]);
     }
     exit(0);
@@ -2048,8 +2076,13 @@ int mrtk_run(int argc, char** argv) {
 
     mrtk_ctx_t* ctx;
 
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-s")) {
+        if (mrtk_is_help_flag(argv[i])) {
+            printusage();
+        } else if (!strcmp(argv[i], "-s")) {
             start = 1;
         } else if (!strcmp(argv[i], "-p") && i + 1 < argc) {
             port = atoi(argv[++i]);

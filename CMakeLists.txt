@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(MRTKLIB VERSION 0.6.5 LANGUAGES C)
+project(MRTKLIB VERSION 0.6.6 LANGUAGES C)
 
 # ── Version header generation ─────────────────────────────────────────────────
 set(MRTKLIB_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
@@ -40,6 +40,7 @@ add_library(mrtklib STATIC
     src/core/mrtk_bits.c
     src/core/mrtk_sys.c
     src/core/mrtk_trace.c
+    src/core/mrtk_cli.c
     # ── models/ (物理・環境モデル) ─────────────────────────────────────────────
     src/models/mrtk_atmos.c
     src/models/mrtk_astro.c

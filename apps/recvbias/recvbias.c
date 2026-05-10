@@ -22,6 +22,7 @@
  *   2025/02/06  1.1  change nav_t to static due to size increase
  *   2025/03/24  1.2  add option -allbias; update code bias calculation
  */
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtk_trace.h"
 #include "rtklib.h"
@@ -69,63 +70,68 @@ static const uint8_t malib_sig_cmp[16] = {CODE_L2Q, CODE_L2X, CODE_L2I, CODE_L6Q
                                           CODE_L1P, CODE_L1X, CODE_L1D, CODE_L5P, CODE_L5X, CODE_L5D,
                                           0,        0,        0,        0};
 
+/* long-option aliases */
+/* Note: -ts here means "time span (days)", NOT a start time, so we do NOT
+ * map --start to -ts. -t is the trace flag. */
+static const mrtk_optmap_t opt_aliases[] = {
+    {"--nav", "-nav"},
+    {"--output", "-out"},
+    {"--trace", "-t"},
+    {NULL, NULL},
+};
+
 /* print usage ---------------------------------------------------------------*/
-static const char* help[] = {"",
-                             "NAME:",
-                             "  recvbias - generate receiver code biases",
-                             "",
-                             "SYNOPSIS:",
-                             "  recvbias [options] file",
-                             "",
-                             "DESCRIPTION:",
-                             "  It reads RINEX OBS/NAV, IONEX TEC data, and satellite code biases, ",
-                             " and generates receiver code biases. The generated receiver code biases, ",
-                             " as well as input satellite code biases (only when Bias SINEX format files ",
-                             " are input), are saved to a file specified with option -out. All file paths",
-                             " can include keywords replaced by date and time. RINEX OBS/NAV and ",
-                             " IONEX TEC files can include wildcards (*) to be expanded to multiple files.",
-                             "",
-                             "  The program supports the following input file formats:",
-                             "    - Bias SINEX format (.bia)",
-                             "    - L6 archive (.l6)",
-                             "    - RTCM3 (.rtcm3)",
-                             "",
-                             "OPTIONS: (* indicates required options)",
-                             " -td y/m/d        date (y=year,m=month,d=date in GPST) *",
-                             " -ts tspan        time span (days) [1]",
-                             " -nav file        RINEX NAV file *",
-                             " -tec file        IONEX TEC file *",
-                             " -scb file        satellite code bias file(.bia or .l6 or .rtcm3) *",
-                             " -pos x,y,z       receiver position(ecef-x,y,z）*",
-                             " -el  elmask      elevation mask(deg)[30]",
-                             " -sta staname     station name[RINEX MARKER NAME]",
-                             " -sig sx[,sx...]  signal selection(s=G:GPS,J:QZS,C:BDS x=0-2)",
-                             "                  G0(L1C/A-L2P),G1(L1C/A-L2C),G2(L1C/A-L5)",
-                             "                  J0(L1C-L5),J1(L1C/A-L2C)",
-                             "                  C0(B1-B3),C1(B1C-B2a)",
-                             " -allbias         outputs receiver code biases for each satellite",
-                             " -out file        output satellite/receiver code bias file [stdout]",
-                             " -t   level       debug trace level (0:off) [0]",
-                             " file             RINEX OBS file *",
-                             "",
-                             " keywords replaced in file path",
-                             "   %Y -> yyyy     year (4 digits) (2000-2099)",
-                             "   %y -> yy       year (2 digits) (00-99)",
-                             "   %m -> mm       month           (01-12)",
-                             "   %d -> dd       day of month    (01-31)",
-                             "   %h -> hh       hours           (00-23)",
-                             "   %H -> a        hour code       (a-x)",
-                             "   %M -> mm       minutes         (00-59)",
-                             "   %n -> ddd      day of year     (001-366)",
-                             "   %W -> wwww     gps week        (0001-9999)",
-                             "   %D -> d        day of gps week (0-6)",
-                             ""};
+static const char* help[] = {
+    "mrtk bias: generate receiver code biases (recvbias)",
+    "",
+    "Usage: mrtk bias [OPTIONS] FILE",
+    "",
+    "  Reads RINEX OBS/NAV, IONEX TEC, and satellite code-bias files, and",
+    "  produces receiver code biases. The generated biases (and input",
+    "  satellite biases for Bias-SINEX inputs) are written to the file given",
+    "  by --output. File paths may contain date/time keywords; RINEX OBS/NAV",
+    "  and IONEX TEC paths may use wildcards (*).",
+    "",
+    "  Supported satellite-bias formats:",
+    "    - Bias SINEX (.bia)",
+    "    - L6 archive (.l6)",
+    "    - RTCM3 (.rtcm3)",
+    "",
+    "Options: (* = required)",
+    "  -td  Y/M/D                 Date (GPST)                       *",
+    "  -ts  TSPAN                 Time span (days)                  [1]",
+    "  -nav, --nav FILE           RINEX NAV file                    *",
+    "  -tec FILE                  IONEX TEC file                    *",
+    "  -scb FILE                  Satellite code bias file          *",
+    "                               (.bia, .l6, or .rtcm3)",
+    "  -pos X,Y,Z                 Receiver position (ECEF, m)       *",
+    "  -el  ELMASK                Elevation mask (deg)              [30]",
+    "  -sta NAME                  Station name                      [RINEX MARKER]",
+    "  -sig SX[,SX...]            Signal selection (s=G/J/C, x=0-2)",
+    "                               G0(L1C/A-L2P), G1(L1C/A-L2C), G2(L1C/A-L5)",
+    "                               J0(L1C-L5),    J1(L1C/A-L2C)",
+    "                               C0(B1-B3),     C1(B1C-B2a)",
+    "  -allbias                   Output receiver biases per satellite",
+    "  -out, --output FILE        Output bias file                  [stdout]",
+    "  -t,  --trace LEVEL         Debug trace level                 [0]",
+    "  -h,  --help                Show this help",
+    "  FILE                       RINEX OBS file                    *",
+    "",
+    "Keywords replaced in file paths:",
+    "  %Y yyyy   %y yy    %m mm    %d dd    %h hh    %H a (hour code)",
+    "  %M mm     %n ddd   %W wwww  %D d",
+    "",
+    "Examples:",
+    "  mrtk bias -td 2024/01/15 --nav brdc.nav -tec ionex.tec \\",
+    "            -scb sat.bia -pos -3947.7,3364.3,3699.5 \\",
+    "            --output recv.bia rover.obs",
+    NULL,
+};
 
 /* print help ----------------------------------------------------------------*/
 static void print_help(void) {
     int i;
-
-    for (i = 0; i < sizeof(help) / sizeof(*help); i++) {
+    for (i = 0; help[i]; i++) {
         fprintf(stderr, "%s\n", help[i]);
     }
     exit(0);
@@ -872,8 +878,13 @@ int mrtk_bias(int argc, char** argv) {
     ctx = mrtk_ctx_create();
     g_mrtk_ctx = ctx;
 
+    /* translate --long flags to their -short aliases before parsing */
+    mrtk_normalize_args(argc, argv, opt_aliases);
+
     for (i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "-td") && i + 1 < argc) {
+        if (mrtk_is_help_flag(argv[i])) {
+            print_help(); /* exits */
+        } else if (!strcmp(argv[i], "-td") && i + 1 < argc) {
             sscanf(argv[++i], "%lf/%lf/%lf", ep, ep + 1, ep + 2);
             req[0] = 1;
         } else if (!strcmp(argv[i], "-ts") && i + 1 < argc) {

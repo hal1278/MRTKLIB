@@ -1,6 +1,7 @@
-# Real-Time CLAS PPP-RTK via rtkrcv
+# Real-Time CLAS PPP-RTK via `mrtk run`
 
-MRTKLIB supports real-time CLAS PPP-RTK positioning using `rtkrcv`.
+MRTKLIB supports real-time CLAS PPP-RTK positioning via `mrtk run` (the
+unified-CLI entry point that supersedes the legacy `rtkrcv` binary).
 Input streams can be any RTKLIB-supported type — serial, TCP client/server,
 NTRIP, or file replay.  Both single-channel and dual-channel L6 configurations
 are supported.  This document describes the setup, usage, and performance
@@ -10,9 +11,9 @@ characteristics, with file-stream replay as the primary example.
 
 ## Overview
 
-`rtkrcv` processes GNSS observations and CLAS L6D corrections in real time
+`mrtk run` processes GNSS observations and CLAS L6D corrections in real time
 (or accelerated file replay) to produce centimetre-level PPP-RTK solutions.
-The same CLAS engine used by `rnx2rtkp` (post-processing) runs inside
+The same CLAS engine used by `mrtk post` (post-processing) runs inside
 the rtksvr thread, with corrections decoded from a separate L6 input stream.
 
 ### Supported Input Combinations
@@ -101,17 +102,19 @@ phase_cycle   = "./tests/data/claslib/l2csft.tbl"
 
 ```bash
 # Single-channel
-./build/rtkrcv -s -p 52005 -o conf/claslib/rtkrcv.toml
+./build/mrtk run -s --port 52005 --config conf/claslib/rtkrcv.toml
 
 # Dual-channel
-./build/rtkrcv -s -p 52005 -o conf/claslib/rtkrcv_2ch.toml
+./build/mrtk run -s --port 52005 --config conf/claslib/rtkrcv_2ch.toml
 ```
 
 Flags:
 - `-s` : auto-start streaming on launch
-- `-p PORT` : telnet console port
-- `-d N` : trace level (0-5)
-- `-o FILE` : configuration file
+- `-p` / `--port PORT` : telnet console port
+- `-t` / `--trace N` : trace level (0-5)
+- `-o` / `--config FILE` : processing options / configuration file
+- `-d` / `--device DEV` : terminal device for the interactive console
+- `-h` / `--help` : show full help
 
 ---
 
@@ -124,7 +127,7 @@ same CLAS correction decoder.
 
 0627 station, 2019-08-27 16:00-17:00 UTC, Trimble NetR9.
 
-| Metric | Post-Processing (rnx2rtkp) | Real-Time (rtkrcv) |
+| Metric | Post-Processing (`mrtk post`) | Real-Time (`mrtk run`) |
 |--------|:---:|:---:|
 | Total epochs | 3,580 | 3,599 |
 | Fix (Q=4) | 3,575 (99.86%) | 3,517 (97.72%) |
@@ -138,7 +141,7 @@ After convergence, the steady-state fix rate is identical: ~99.86%.
 
 0627 station, 2025-06-06 20:00-21:00 UTC, Trimble NetR9.
 
-| Metric | Post-Processing (rnx2rtkp) | Real-Time (rtkrcv) |
+| Metric | Post-Processing (`mrtk post`) | Real-Time (`mrtk run`) |
 |--------|:---:|:---:|
 | Fix (Q=4) | 3,579 (99.4%) | ~3,335 (92.6%) |
 | Float (Q=5) | ~21 (0.6%) | ~192 (5.3%) |
@@ -242,7 +245,7 @@ cd build && ctest -R rtkrcv_rt_clas --output-on-failure
 Each test:
 1. Extracts test data from `claslib_testdata.tar.gz` (fixture)
 2. Patches the TOML config with a temporary output path
-3. Runs `rtkrcv` at x10 speed
+3. Runs `mrtk run` at x10 speed
 4. Compares output line count against reference (>=90% threshold)
 
 Both tests use `RESOURCE_LOCK rtkrcv_port` to prevent parallel execution
@@ -320,5 +323,6 @@ Check `files.cssr_grid` in the config.
 
 ### `Error: vt is NULL`
 
-Harmless warning from rtkrcv's console subsystem when running without an
-interactive terminal (e.g. from scripts).  Does not affect positioning.
+Harmless warning from the rtkrcv console subsystem inside `mrtk run` when
+running without an interactive terminal (e.g. from scripts).  Does not
+affect positioning.

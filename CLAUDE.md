@@ -48,6 +48,7 @@ feature expansion.
 | **v0.6.3** | Stream | NTRIP v2 (HTTP/1.1) protocol support with auto-negotiation, chunked transfer encoding, URL percent-decoding | ✅ Released |
 | **v0.6.4** | rtkrcv / Repo | rtkrcv status-path stability fixes (data race + OOB + async-signal-safe SIGSEGV handler); GitHub Community Profile | ✅ Released |
 | **v0.6.5** | cssr2rtcm3 | First official release of `mrtk cssr2rtcm3` (real-time CSSR→RTCM3 MSM converter) and `mrtk l6extract`; mosaic-G5 P3 hardware guide; 24-hour static endurance test | ✅ Released |
+| **v0.6.6** | CLI | Unified `mrtk` subcommand help format and GNU-style long-option aliases (`--config`, `--output`, `--start`, `--end`, `--interval`, `--trace`, `--input`, `--nav`, `--device`, `--port`, `--freq`, `--help`); legacy binary headers removed | ✅ Released |
 | **v0.6.x** | All | Doxygen docstring coverage expansion | 💭 Backlog |
 
 ### Test Status

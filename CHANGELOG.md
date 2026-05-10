@@ -5,6 +5,83 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.6] - 2026-05-10
+
+**Refactor** — unified `mrtk` subcommand help format and added GNU-style
+long-option aliases (`--config`, `--output`, `--start`, `--end`, `--interval`,
+`--trace`, `--input`, `--nav`, `--device`, `--port`, `--freq`, `--help`)
+across all 10 subcommands. No behavior change for existing scripts; no
+positioning-engine numerics modified.
+
+### Added
+
+- **Long-option aliases** for the most-used short flags in every `mrtk`
+  subcommand. Implemented as a pre-pass that rewrites `argv[i]` pointers
+  to existing short forms, so per-subcommand argument-parsing loops are
+  untouched. Discoverable via `mrtk <subcommand> --help`.
+- **`-h` / `--help` flag** added to eight subcommands that previously had
+  no help flag at all (`run`, `ssr2obs`, `ssr2osr`, `bias`, `dump`).
+  `relay`, `cssr2rtcm3`, and `l6extract` already supported `-h` / `--help`.
+- **Shared CLI helpers** in `include/mrtklib/mrtk_cli.h` and
+  `src/core/mrtk_cli.c`:
+  - `mrtk_normalize_args()` — long→short alias pre-pass.
+  - `mrtk_is_help_flag()` — recognises `-h` / `--help`.
+- **`scripts/analysis/compare_rtcm3.py`** — RTCM3 byte-level diff utility
+  preserved from the cssr2rtcm3 development workflow (PR #103).
+
+### Changed
+
+- **All subcommand help text** rewritten to a consistent
+  `mrtk <subcommand>: <description>` header followed by a unified
+  Usage / Options / Examples layout, replacing the legacy binary-name
+  headers (`usage: rtkrcv`, `usage: rnx2rtkp`, `Synopsis convbin`,
+  `NAME: recvbias`, etc.).
+- **Help flags within subcommands**: nine subcommands now use `-h` /
+  `--help`. Two intentional exceptions are preserved for backward
+  compatibility:
+  - `mrtk post`: `-h` remains the fix-and-hold AR flag; help is `-?` /
+    `--help`.
+  - `mrtk convert`: `-h FILE` remains the HNAV-output flag; help is
+    `--help`.
+- **`docs/guide/cli.md`** — option tables now show both `-short` and
+  `--long` forms and call out the `-h` exceptions.
+- **`docs/reference/rtkrcv-clas-realtime.md`** — retitled to "via
+  `mrtk run`"; all in-text references to legacy `rtkrcv` / `rnx2rtkp`
+  binaries updated to the unified-CLI form.
+
+### Fixed
+
+- N/A (refactor only, no functional bug fixes).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `apps/{convbin,cssr2rtcm3,dumpcssr,l6extract,recvbias,rnx2rtkp,rtkrcv,ssr2obs,ssr2osr,str2str}.c` | Unified help text, long-option aliases, help-flag handling |
+| `include/mrtklib/mrtk_cli.h` | New — shared CLI helpers (long-alias map, help-flag recogniser) |
+| `src/core/mrtk_cli.c` | New — implementation |
+| `CMakeLists.txt` | Add `src/core/mrtk_cli.c`, version 0.6.5 → 0.6.6 |
+| `docs/guide/cli.md` | Show both short and long forms; `-h` exceptions documented |
+| `docs/reference/rtkrcv-clas-realtime.md` | "via `mrtk run`"; legacy binary refs updated |
+| `scripts/analysis/compare_rtcm3.py` | New — RTCM3 byte-level diff (PR #103) |
+| `CHANGELOG.md` | v0.6.6 entry |
+| `mkdocs.yml` | v0.6.6 in Releases navigation |
+| `README.md`, `CLAUDE.md` | v0.6.6 roadmap entry |
+
+### Test Results
+
+61/63 tests pass — identical to develop baseline. The two pre-existing
+failures (`rtkrcv_rt`, `madocalib_pppar_ion_check`) reproduce on the
+baseline with the same numerical signatures (3D RMS 0.016186 m on
+baseline vs 0.016324 m here, well within numerical noise). Verified by
+re-running the same two tests in a worktree at `origin/develop`'s
+pre-refactor commit. **Zero regressions introduced.**
+
+### PRs
+
+- [#104](https://github.com/h-shiono/MRTKLIB/pull/104) —
+  `refactor(cli): unify subcommand help format and add long-option aliases`
+
 ## [v0.6.5] - 2026-05-10
 
 **Feature** — first official release of `mrtk cssr2rtcm3` (real-time CSSR→RTCM3 converter) and `mrtk l6extract`, with a Septentrio mosaic-G5 P3 hardware integration guide and a 24-hour endurance test.
