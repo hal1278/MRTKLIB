@@ -83,6 +83,10 @@ flowchart LR
 | **GNSS antenna** | All-band antenna (L1/L2/L5/L6) |
 | **Host PC / SBC** | Linux or macOS machine with MRTKLIB built (PC, laptop, or SBC such as Raspberry Pi) |
 
+!!! tip "Where to buy the mosaic-go G5 P3 kit"
+    - **Global:** [Septentrio Online Shop](https://shop.septentrio.com/en)
+    - **Japan:** [CQ出版 オンラインショップ](https://shop.cqpub.co.jp/hanbai/books/I/I100557.html)
+
 ## Setting Up the Receiver
 
 [RxTools](https://www.septentrio.com/en/products/gps-gnss-receiver-software/rxtools) is a GNSS receiver control and analysis software suite by Septentrio.
@@ -96,15 +100,15 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
 
     - Select `Serial Connection` > `Create New...`
 
-    <div style="text-align: center;"><img src="images/mosaic-g5/select_connection.png" style="max-width: 360px; width: 100%;"></div>
+    <div style="text-align: center;"><img src="../images/mosaic-g5/select_connection.png" style="max-width: 360px; width: 100%;"></div>
 
     - Choose the USB COM port, set a `Connection Name`, and click `Finish`.
 
-    <div style="text-align: center;"><img src="images/mosaic-g5/specify_the_serial_settings.png" style="max-width: 480px; width: 100%;"></div>
+    <div style="text-align: center;"><img src="../images/mosaic-g5/specify_the_serial_settings.png" style="max-width: 480px; width: 100%;"></div>
 
     - RxControl will launch after the connection is established.
 
-    <div style="text-align: center;"><img src="images/mosaic-g5/rx_control.png" style="max-width: 520px; width: 100%;"></div>
+    <div style="text-align: center;"><img src="../images/mosaic-g5/rx_control.png" style="max-width: 520px; width: 100%;"></div>
 
 4. **Set SBF output**: Go to `Communication` > `Output Settings` > `SBF Output` and configure `Stream 1` as follows:
     - Ports: `USB2`
@@ -114,7 +118,7 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
 
     Click `Apply`, then `OK` to close.
 
-    <div style="text-align: center;"><img src="images/mosaic-g5/sbf_output.png" style="max-width: 640px; width: 100%;"></div>
+    <div style="text-align: center;"><img src="../images/mosaic-g5/sbf_output.png" style="max-width: 640px; width: 100%;"></div>
 
     <details>
     <summary>Required SBF blocks (reference)</summary>
@@ -150,7 +154,7 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
         Without this step, the SBF stream will contain no `QZSRawL6D` blocks
         and `cssr2rtcm3` will receive no CLAS data.
 
-    <div style="text-align: center;"><img src="images/mosaic-g5/signal_tracking.png" style="max-width: 420px; width: 100%;"></div>
+    <div style="text-align: center;"><img src="../images/mosaic-g5/signal_tracking.png" style="max-width: 420px; width: 100%;"></div>
 
 6. **Set Positioning Mode**: Go to `Navigation` > `Positioning Mode`:
     - In the `PVT Mode` tab:
