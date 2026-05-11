@@ -83,6 +83,10 @@ flowchart LR
 | **GNSS antenna** | All-band antenna (L1/L2/L5/L6) |
 | **Host PC / SBC** | Linux or macOS machine with MRTKLIB built (PC, laptop, or SBC such as Raspberry Pi) |
 
+!!! tip "Where to buy the mosaic-go G5 P3 kit"
+    - **Global:** [Septentrio Online Shop](https://shop.septentrio.com/en)
+    - **Japan:** [CQ出版 オンラインショップ](https://shop.cqpub.co.jp/hanbai/books/I/I100557.html)
+
 ## Setting Up the Receiver
 
 [RxTools](https://www.septentrio.com/en/products/gps-gnss-receiver-software/rxtools) is a GNSS receiver control and analysis software suite by Septentrio.
