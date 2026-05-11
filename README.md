@@ -101,7 +101,7 @@ streamed from an active `mrtk run` session.
 ### Prerequisites
 * CMake (>= 3.15)
 * C11 compatible compiler (GCC, Clang)
-* LAPACK/BLAS (Optional but recommended for fast matrix operations. e.g., `liblapack-dev` on Ubuntu, Accelerate framework on macOS)
+* LAPACK/BLAS (Optional but recommended for fast matrix operations. e.g., `liblapack-dev` on Ubuntu, Accelerate framework on macOS) — **requires LP64 (32-bit integer) ABI**; ILP64 providers are not supported. With CMake ≥ 3.22 this is enforced automatically; on older CMake, ensure your BLAS/LAPACK is built with `BLA_SIZEOF_INTEGER=4`.
 
 ### Build Instructions
 MRTKLIB uses standard CMake workflow. Out-of-source builds are strictly recommended.
