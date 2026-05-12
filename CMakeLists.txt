@@ -118,6 +118,16 @@ if(UNIX AND NOT APPLE)
 endif()
 
 # ── System LAPACK/BLAS integration for fast matrix operations ────────────────
+# Request LP64 BLAS/LAPACK integer ABI; ILP64 silently breaks our int* wrappers (#108).
+if(CMAKE_VERSION VERSION_GREATER_EQUAL "3.22")
+    if(DEFINED BLA_SIZEOF_INTEGER AND NOT "${BLA_SIZEOF_INTEGER}" STREQUAL "4")
+        message(FATAL_ERROR
+            "MRTKLIB requires LP64 BLAS/LAPACK (32-bit integer interface). "
+            "Set -DBLA_SIZEOF_INTEGER=4 or unset it.")
+    endif()
+    set(BLA_SIZEOF_INTEGER 4 CACHE STRING
+        "BLAS/LAPACK integer size (MRTKLIB requires 4)")
+endif()
 find_package(LAPACK)
 if(LAPACK_FOUND)
     target_compile_definitions(mrtklib PRIVATE LAPACK)
