@@ -16,9 +16,12 @@ project-specific investigations; what appears here is the distilled rule set.
 ### P-01 — Global `-ansi` flag forces C90 on every new target
 
 `CMakeLists.txt` applies `add_compile_options(-ansi -pedantic)` repository-wide.
-Only the `mrtklib` library target and the unified `mrtk` binary explicitly
-override this with `-std=c11`. New executables, tests, or examples inherit
-`-ansi` (= C90) unless the override is added at the new target.
+Only a small number of explicitly-configured targets override this with
+`-std=c11` (currently the `mrtklib` library and the `t_ntrip` test). New
+executables, tests, or examples inherit `-ansi` (= C90) unless the override
+is added at the new target.
+
+`set_target_properties(... C_STANDARD 11)` and `target_compile_features(... c_std_11)` do **not** override `-ansi` once it has been pushed onto the command line by `add_compile_options()`; an explicit `target_compile_options(<target> PRIVATE -std=c11)` is required.
 
 A C99/C11 source file (mixed declarations, `for (int i = ...)`, designated
 initialisers, `// ...` comments, etc.) compiled under `-ansi` will fail on
@@ -126,9 +129,11 @@ slot 1 may be L5 (E5a) for GAL or QZS — the skip will exclude the wrong band.
 Look up the physical band dynamically:
 
 ```c
-int band = code2freq_num(sys, obs->code[f]);
-if (band == 2) continue;   /* skip L2 band, whatever slot it occupies */
+int band = code2freq_num(obs->code[f]);     /* returns 1, 2, 5, … (system-agnostic) */
+if (band == 2) continue;                    /* skip L2 band, whatever slot it occupies */
 ```
+
+The signature is `int code2freq_num(uint8_t code)` — a single code argument; no constellation needed.
 
 Under the default obsdef order for QZS, slot 0 is L1, **slot 1 is L5** (not L2),
 and slot 2 is L2. Do not rely on any specific slot mapping without a runtime

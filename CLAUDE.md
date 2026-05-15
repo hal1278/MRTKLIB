@@ -158,7 +158,7 @@ Since v0.6.0 the historical separate binaries (`rtkrcv`, `rnx2rtkp`, `convbin`, 
 | `mrtk convert` | `convbin` — raw → RINEX conversion                    |
 | `mrtk cssr2rtcm3` | Real-time CLAS CSSR → RTCM3 MSM converter (VRS)     |
 | `mrtk l6extract` | Extract L6 frames from SBF/UBX to per-PRN files       |
-| `mrtk ssr2obs` / `ssr2osr` / `bias` / `dump` / `sbf2l6` | utilities |
+| `mrtk ssr2obs` / `ssr2osr` / `bias` / `dump` | utilities                |
 
 Run `./build/mrtk --help` for the current full list and per-subcommand help via `./build/mrtk <sub> --help`. The legacy binaries are no longer built.
 
