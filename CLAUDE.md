@@ -256,17 +256,29 @@ For any task with 3+ steps or architectural impact:
 
 ### 9.3 Subagent strategy
 
-Use the `Agent` tool (subagents) when the work is independent, would consume the main context window, or benefits from a fresh perspective. One focused task per subagent — do not mix concerns.
+The `Agent` tool has real costs: the subagent has no context from the current conversation (cold-start briefing required), its findings are lossy-compressed into a single return message, spawn latency is fixed, and it cannot ask the user a clarifying question mid-task. Use it selectively, not by default.
 
-Typical subagent shapes:
+**Use a subagent when:**
 
-- **Algorithm safety review** — inspect a diff for matrix / filter / constants changes. Run before commit for any change under `src/pos/`, `src/clas/`, `src/madoca/`, `src/models/`.
-- **Test suite runner** — build and run the full ctest suite, return a compact summary. Use for long ctest runs so the main context is not blocked.
-- **Upstream diff classifier** — compare MRTKLIB against an upstream library and classify hunks by adoption category. Use for sync branches with many files changed.
-- **Codebase research** — open-ended "where is X handled / how does Y work" questions that span several files.
-- **Documentation generation** — Doxygen stubs for undocumented public functions in a single file.
+- The work is long-running (full ctest, large build, multi-file research) and would block the main response
+- The task is open-ended exploration that would consume significant context (e.g. "find every place X is referenced and classify each")
+- Multiple independent investigations can run in parallel — issue them in a **single message with multiple `Agent` tool uses** so they execute concurrently
+- The task matches a pre-configured specialised agent (algorithm safety review, test summarizer, upstream classifier)
 
-The maintainer-local Claude Code workspace provides pre-configured agents for several of the above (under `.claude/agents/`, gitignored). External contributors can configure their own.
+**Do NOT use a subagent when:**
+
+- The target file path or symbol is already known — use `Read` / `Grep` / `Glob` directly
+- The briefing cost (writing a self-contained prompt) exceeds the context the subagent would save
+- The task needs intermediate clarification back to the user
+- A direct edit / single-file change is what's actually required
+
+**Typical specialised shapes** (project conveniences live under `.claude/agents/`, gitignored; external contributors can configure their own):
+
+- Algorithm safety review for diffs under `src/pos/`, `src/clas/`, `src/madoca/`, `src/models/`
+- Test suite runner for long ctest invocations (the run takes minutes; main context stays free)
+- Upstream diff classifier for sync branches touching many files
+
+One focused task per subagent — do not mix concerns. When you delegate, do not duplicate the same search yourself.
 
 ### 9.4 Self-improvement loop
 
