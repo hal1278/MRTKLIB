@@ -1,55 +1,43 @@
 # MRTKLIB — AI Development Guide
 
-## 0. Session Start Protocol (Read This First, Every Time)
+## 0. Session Start Protocol
 
-Before doing anything else, run these three steps:
+Before doing anything else, run these checks:
 
 ```bash
-cat tasks/todo.md       # What is in progress?
-cat tasks/lessons.md    # What mistakes have been made before?
-git status              # What is the current state of the working tree?
+git status                              # current working tree
+[ -f tasks/todo.md ] && cat tasks/todo.md           # active task (maintainer-local; absent in clones)
+[ -f tasks/lessons.md ] && cat tasks/lessons.md     # cumulative lessons (maintainer-local; absent in clones)
 ```
 
-Then state: "I have reviewed todo.md, lessons.md, and git status. Current focus: [active task from todo.md]."
-Do not proceed until this is done.
+Then state: "I have reviewed [files actually read]. Current focus: [active task, or 'no maintainer-local task state, will rely on git status and the user prompt']."
+
+`tasks/` is gitignored. In a fresh clone the AI proceeds without it; in the maintainer's environment those files are the canonical session-handoff state and must be read.
 
 ---
 
 ## 1. Project Overview
 
-**MRTKLIB** is a modernized, unified GNSS positioning library that integrates JAXA's MALIB, CLASLIB, and MADOCALIB into a single cohesive C/C++ package built on a modern CMake/vcpkg architecture.
+**MRTKLIB** is a modernized, unified GNSS positioning library that integrates JAXA's MALIB, CLASLIB, and MADOCALIB into a single cohesive C/C++ package on a CMake/vcpkg foundation.
 
 ### Current Phase: Algorithm Refinement & Real-Time Expansion
 
-All three upstream libraries (MALIB, MADOCALIB, CLASLIB) are fully integrated.
-Post-processing and real-time engines are operational for PPP, PPP-AR, PPP-RTK,
-and VRS-RTK modes. Current work focuses on algorithm improvements and real-time
-feature expansion.
+All three upstream libraries (MALIB, MADOCALIB, CLASLIB) are fully integrated. Post-processing and real-time engines are operational for PPP, PPP-AR, PPP-RTK, and VRS-RTK modes. Current work focuses on algorithm refinement and real-time feature expansion.
 
-### Version History
+### Recent Releases
 
-| Version | Engine | Improvements | Status |
-|---------|--------|-------------|--------|
-| **v0.4.1** | RTK | demo5 PAR, `detslp_dop`/`detslp_code`, full-constellation `varerr`, false-fix persistence fix | ✅ Released |
-| **v0.4.2** | PPP-RTK, PPP | demo5 `detslp_dop`/`detslp_code`, GLONASS clock guard in `ephpos()`, PAR variance gate + arfilter, full-constellation EFACT, adaptive outlier threshold | ✅ Released |
-| **v0.4.3** | PPP-RTK | Real-time CLAS PPP-RTK via `rtkrcv` (BINEX+L6, SBF+L6, RTCM3+UBX; 97.7% fix rate) | ✅ Released |
-| **v0.4.4** | PPP-RTK | Dual-channel CLAS real-time via `rtkrcv` | ✅ Released |
-| **v0.5.0** | All | TOML configuration (replaces legacy `.conf`) | ✅ Released |
-| **v0.5.1** | PPP-RTK | Bug fix: dual-channel CLAS RT fix rate degradation ([#35](https://github.com/h-shiono/MRTKLIB/issues/35)) | ✅ Released |
-| **v0.5.2** | All | Code quality: mandatory braces, nested ternary elimination (67 files) | ✅ Released |
-| **v0.5.3** | All | Code quality: full `clang-format` application (116 files, Google style) | ✅ Released |
-| **v0.5.4** | All | Signals update: frequency / physical band separation and structuring | ✅ Released |
-| **v0.5.5** | PPP-RTK | Bug fix: CLAS real-time via UBX ([#31](https://github.com/h-shiono/MRTKLIB/issues/31)) | ✅ Released |
-| **v0.5.6** | All | RINEX 4.00 CNAV/CNV2 NAV support (GPS, QZSS, BDS) | ✅ Released |
-| **v0.5.7** | — | Port `convbin` and `str2str` CLI applications | ✅ Released |
-| **v0.6.0** | All | Unified `mrtk` binary with subcommands; BSS reduced 3 GB → 34 MB | ✅ Released |
-| **v0.6.1** | All | Config UX: `systems` list, `excluded_sats`, `taplo` formatter | ✅ Released |
-| **v0.6.2** | — | MkDocs Material site + Doxygen API reference + GitHub Pages | ✅ Released |
-| **v0.6.3** | Stream | NTRIP v2 (HTTP/1.1) protocol support with auto-negotiation, chunked transfer encoding, URL percent-decoding | ✅ Released |
-| **v0.6.4** | rtkrcv / Repo | rtkrcv status-path stability fixes (data race + OOB + async-signal-safe SIGSEGV handler); GitHub Community Profile | ✅ Released |
-| **v0.6.5** | cssr2rtcm3 | First official release of `mrtk cssr2rtcm3` (real-time CSSR→RTCM3 MSM converter) and `mrtk l6extract`; mosaic-G5 P3 hardware guide; 24-hour static endurance test | ✅ Released |
-| **v0.6.6** | CLI | Unified `mrtk` subcommand help format and GNU-style long-option aliases (`--config`, `--output`, `--start`, `--end`, `--interval`, `--trace`, `--input`, `--nav`, `--device`, `--port`, `--freq`, `--help`); legacy binary headers removed | ✅ Released |
-| **v0.6.x** | All | Doxygen docstring coverage expansion | 💭 Backlog |
+See [`docs/releases/changelog.md`](docs/releases/changelog.md) for the full history. Recent highlights:
+
+| Version | Theme |
+|---------|-------|
+| v0.5.x | TOML configuration, code quality sweeps, signals restructuring, RINEX 4.00 CNAV, `convbin` / `str2str` ports |
+| v0.6.0 | Unified `mrtk` binary with subcommands (BSS reduced 3 GB → 34 MB) |
+| v0.6.1 | Config UX: `systems` list, `excluded_sats`, `taplo` formatter |
+| v0.6.2 | MkDocs Material site + Doxygen API reference + GitHub Pages |
+| v0.6.3 | NTRIP v2 (HTTP/1.1) protocol support |
+| v0.6.4 | rtkrcv status-path stability + GitHub Community Profile |
+| v0.6.5 | First official `mrtk cssr2rtcm3` release + 24-hour endurance test |
+| v0.6.6 | Unified subcommand help format + GNU-style long-option aliases |
 
 ### Test Status
 
@@ -59,26 +47,29 @@ Run `cd build && ctest --output-on-failure` to get current counts. Last known: 6
 
 ## 2. AI Role — Current Phase
 
-Focus areas in priority order:
+Focus areas, in priority order:
 
-1. **Algorithm Improvements:** Port and validate demo5/upstream algorithm refinements. All changes require before/after accuracy comparison.
-2. **Real-Time Feature Expansion:** New rtkrcv modes, stream handling, multi-constellation support.
-3. **Regression Guarding:** No change is complete without running the full test suite.
-4. **Code Quality:** Docstrings, const-correctness, C++ modernization — but only after tests pass.
-5. **Upstream Sync:** When MALIB/CLASLIB/MADOCALIB updates are detected, assess impact and cherry-pick selectively.
+1. **Algorithm improvements.** Port and validate demo5 / upstream algorithm refinements. All numerical changes require before/after accuracy comparison.
+2. **Real-time feature expansion.** New rtkrcv modes, stream handling, multi-constellation support.
+3. **Regression guarding.** No change is complete without running the full test suite.
+4. **Code quality.** Docstrings, const-correctness, modernization — but only after tests pass.
+5. **Upstream sync.** When MALIB / CLASLIB / MADOCALIB updates are detected, assess impact and cherry-pick selectively.
 
 ---
 
 ## 3. NEVER DO
 
-These are hard rules. No exceptions, no matter how reasonable it seems in context.
+Hard rules. No exceptions, no matter how reasonable an action seems in context.
 
-- **NEVER alter GNSS algorithms, matrix operations, or physical constants** during structural/refactoring work unless explicitly instructed.
-- **NEVER create `rtcm_t` on the stack or in static arrays** — it is ~103 MB. Always heap-allocate with `calloc`.
+- **NEVER alter GNSS algorithms, matrix operations, or physical constants** during structural / refactoring work unless explicitly instructed.
+- **NEVER create `rtcm_t` on the stack or in static arrays** — it is ~103 MB. Always heap-allocate with `calloc`. See §7.1 for the size table of other large structs.
 - **NEVER mark a task complete without running `ctest --output-on-failure`** and confirming all tests pass.
-- **NEVER assume upstream library behavior** — check the actual source when integrating.
-- **NEVER silently swallow a test tolerance change** — always flag it to the user with the numerical delta.
+- **NEVER assume upstream library behavior** — read the actual source when integrating.
+- **NEVER silently swallow a test tolerance change** — flag it to the user with the numerical delta.
 - **NEVER push to `main` directly** — all changes go through a feature branch.
+- **NEVER commit changes without an explicit user request.** "Looks good, ship it" or equivalent is required.
+- **NEVER skip pre-commit hooks** (`--no-verify`, `--no-gpg-sign`) or bypass signing. Hook failures must be root-caused, not bypassed.
+- **NEVER run destructive git operations without explicit confirmation:** `git push --force`, `git reset --hard`, `git branch -D`, `git filter-branch`, `git clean -fdx`, history rewrites. When in doubt, ask before acting.
 
 ---
 
@@ -89,28 +80,35 @@ mrtklib/
 ├── apps/                  # Executable entry points (CLI, GUI)
 ├── include/mrtklib/       # Public headers
 ├── src/                   # Core implementation (mrtk_*.c / .cpp)
-│   ├── pos/               # Positioning engines (ppp, ppp_ar, ppp_iono, spp, rtkpos, postpos)
-│   ├── madoca/            # MADOCA-PPP L6E/L6D decoders
-│   ├── models/            # Atmospheric, antenna, tides models
-│   ├── data/              # Ephemeris, observation, navigation data handlers
-│   ├── rtcm/              # RTCM3 encoder/decoder
-│   └── stream/            # Real-time data streams
+│   ├── pos/               #   Positioning engines (ppp, ppp_ar, ppp_iono, spp, rtkpos, postpos)
+│   ├── madoca/            #   MADOCA-PPP L6E/L6D decoders
+│   ├── models/            #   Atmospheric, antenna, tide models
+│   ├── data/              #   Ephemeris, observation, navigation data handlers
+│   ├── rtcm/              #   RTCM3 encoder/decoder
+│   └── stream/            #   Real-time data streams
 ├── tests/                 # CTest-based regression & unit tests
-├── conf/                  # Configuration files
-├── tasks/                 # todo.md, lessons.md (always kept current)
-└── vcpkg/                 # Dependency management
+├── conf/                  # Configuration files (TOML)
+├── docs/                  # User-facing docs (MkDocs); docs/dev/ for developer references
+├── vcpkg/                 # Dependency management
+├── tasks/                 # Maintainer-local task tracker & lessons (gitignored)
+└── .claude/               # Maintainer-local Claude Code config (gitignored)
 ```
+
+`tasks/` and `.claude/` are gitignored. A fresh clone of the repository will not contain them. Anything that needs to be visible to external contributors lives under `docs/`, `include/`, `src/`, `tests/`, `conf/`, or in the project README.
 
 ---
 
 ## 5. Coding Standards
 
-### Language Standards
-- **C++:** C++17 minimum. Use `<filesystem>`, structured bindings, `if constexpr` where appropriate.
-- **C:** C11 for legacy-compatible files. Maintain `extern "C"` in headers included by C files.
+### Language
 
-### Docstrings (mandatory for all public functions)
-```cpp
+- **C:** C11 for new code. The library target compiles with `-std=c11`; the global `-ansi` flag is overridden per-target (see [`docs/dev/pitfalls-public.md`](docs/dev/pitfalls-public.md) P-01).
+- **C++:** C++17 for new C++ files (currently a small fraction of the codebase). Use `<filesystem>`, structured bindings, `if constexpr` where they help readability.
+- **Headers consumed by C:** maintain `extern "C"` blocks.
+
+### Docstrings (mandatory for public API)
+
+```c
 /**
  * @brief Short description.
  * @param[in]  param_name  Description.
@@ -119,130 +117,237 @@ mrtklib/
  */
 ```
 
-### C++ Modernization Rules
-- Prefer `std::vector` over raw arrays for new code.
-- Use smart pointers (`std::unique_ptr`, `std::shared_ptr`) for new heap allocations.
-- Rigorous `const` correctness on all parameters.
-- Do not modernize legacy C code in the same commit as algorithm changes.
-
 ### Formatting
-`.clang-format` is authoritative. Run before committing.
+
+- **C / C++:** `.clang-format` (Google base) is authoritative. Run before committing.
+- **TOML:** `taplo` is the formatter, configured by `taplo.toml` at the repo root. Run `taplo fmt` (or use the VS Code "Even Better TOML" extension) on any edit under `conf/`, root-level config files, or new TOML samples before committing.
+
+### Style — what NOT to add
+
+These hurt the codebase. Don't do them even if they seem helpful:
+
+- **Don't write comments that restate the code.** Comments are for the *why* when it's non-obvious — a hidden constraint, a subtle invariant, a workaround for a specific bug. If a comment would only say what the code already says, omit it.
+- **Don't add backwards-compatibility shims** (renamed-and-kept-old-name, deprecated aliases) unless the user explicitly asks. The codebase has no external API stability guarantee outside `include/mrtklib/`.
+- **Don't add error handling for cases that can't happen.** Trust internal code and framework guarantees. Validate at system boundaries (user input, file parsing, network), not between trusted internal modules.
+- **Don't introduce abstractions for hypothetical future requirements.** Three similar lines is preferable to a premature template / factory / strategy pattern. Only abstract when the third or fourth concrete case appears.
+- **Don't modernize legacy C in the same commit as an algorithm change.** Two separate commits, each independently reviewable.
 
 ---
 
 ## 6. Build & Test Commands
 
-| Action        | Command                                      |
-|---------------|----------------------------------------------|
-| Configure     | `cmake --preset default`                     |
-| Build         | `cmake --build build`                        |
-| Test (all)    | `cd build && ctest --output-on-failure`      |
-| Test (filter) | `cd build && ctest -R <pattern> --output-on-failure` |
-| Coverage      | `cd build && ctest -T Coverage`              |
+| Action        | Command                                                |
+|---------------|--------------------------------------------------------|
+| Configure     | `cmake --preset default`                               |
+| Build         | `cmake --build build`                                  |
+| Test (all)    | `cd build && ctest --output-on-failure`                |
+| Test (filter) | `cd build && ctest -R <pattern> --output-on-failure`   |
+| Coverage      | `cd build && ctest -T Coverage`                        |
+
+For long ctest runs (regression tests can take several minutes), prefer launching a `test-summarizer` subagent so the main context is not blocked. See §9.3.
+
+### Unified `mrtk` binary
+
+Since v0.6.0 the historical separate binaries (`rtkrcv`, `rnx2rtkp`, `convbin`, `str2str`, …) are consolidated into a single `mrtk` executable with subcommands. Use the unified form in new code, scripts, documentation, and configuration:
+
+| Subcommand   | Replaces / role                                          |
+|--------------|----------------------------------------------------------|
+| `mrtk run`   | `rtkrcv` — real-time positioning pipeline                |
+| `mrtk post`  | `rnx2rtkp` — post-processing positioning                 |
+| `mrtk relay` | `str2str` — relay and split data streams                 |
+| `mrtk convert` | `convbin` — raw → RINEX conversion                    |
+| `mrtk cssr2rtcm3` | Real-time CLAS CSSR → RTCM3 MSM converter (VRS)     |
+| `mrtk l6extract` | Extract L6 frames from SBF/UBX to per-PRN files       |
+| `mrtk ssr2obs` / `ssr2osr` / `bias` / `dump` | utilities                |
+
+Run `./build/mrtk --help` for the current full list and per-subcommand help via `./build/mrtk <sub> --help`. The legacy binaries are no longer built.
 
 ---
 
 ## 7. Key Technical Notes (Accumulated)
 
-### 7.1 rtcm_t Struct Size
-`rtcm_t` ≈ 103 MB. Never stack-allocate. Use `calloc` + pointer arrays for multiple instances.
+### 7.1 Large struct sizes — always heap-allocate
 
-### 7.2 LAPACK vs Embedded LU Solver
-MRTKLIB uses system LAPACK; upstream madocalib uses an embedded LU solver. Expect ~1.5–3.8 cm numerical differences in PPP-AR solutions. Test tolerances are adjusted accordingly — never tighten without explicit sign-off.
+| Type | Approximate size |
+|------|-----------------|
+| `rtksvr_t` | ~972 MB |
+| `rtcm_t` | ~103 MB |
+| `osb_t` | ~700 KB |
+| `clas_corr_t` | ~352 KB |
 
-### 7.3 pppiono_t Design
-MRTKLIB: heap-allocated pointer `nav->pppiono = calloc(...)`. Upstream: embedded struct `nav.pppiono`. All access uses `->`, not `.`.
+Never stack-allocate or place these in static arrays. Use `calloc()` and pass by pointer. For multiple instances, use an array of pointers (not an array of structs).
 
-### 7.4 Multi-Channel Support
-- **CLAS L6D:** Post-processing and real-time both support dual-channel (`CLAS_CH_NUM=2`). In rtkrcv: stream 1 (base slot) = ch2, stream 2 = ch1.
+### 7.2 LAPACK vs embedded LU solver
+
+MRTKLIB links system LAPACK; upstream MADOCALIB uses an embedded LU solver. Expect ~1.5–3.8 cm numerical differences in PPP-AR solutions. Test tolerances are adjusted accordingly — **never tighten without explicit sign-off**.
+
+### 7.3 `pppiono_t` design
+
+MRTKLIB uses a heap-allocated pointer: `nav->pppiono = calloc(...)`. Upstream embeds the struct as `nav.pppiono`. All MRTKLIB access uses `->`, not `.`.
+
+### 7.4 Multi-channel support
+
+- **CLAS L6D:** Both post-processing and real-time support dual-channel (`CLAS_CH_NUM=2`). In rtkrcv, stream 1 (base slot) = ch2, stream 2 = ch1.
 - **MADOCA L6E:** Post-processing supports multi-L6E via `SSR_CH_NUM=2`. Real-time is single-stream.
 
-### 7.5 Known Bug Patterns (from lessons.md)
-- `initx()` placement: must be called before the state is used, not after. Misplacement causes silent filter divergence.
-- `filter()` skips zero-initialized states: always explicitly initialize state covariance to a nonzero value before first use.
+### 7.5 Known pitfalls
 
-> *More entries are in `tasks/lessons.md`. Section 7.5 is a summary of the highest-impact patterns only.*
+The repeatable pitfall patterns are catalogued in [`docs/dev/pitfalls-public.md`](docs/dev/pitfalls-public.md). Topics covered:
+
+- Build & toolchain (global `-ansi` flag, `BLA_SIZEOF_INTEGER` hint vs. guarantee, `trace()` no-op)
+- Memory & allocation (`MAXSAT` vs `MAXOBS`, `glorbit()` non-convergence)
+- GNSS algorithm pitfalls (frequency slot hardcoding, `nav->eph[]` direct indexing, GAL F/NAV slot, MSM signal-ID tables, MSM encoder semantics, CLAS `nf=2`)
+- Platform & runtime (macOS `cu.*` serial, diagnosing stuck daemons)
+- CSSR / IS-QZSS-L6 subtype reference
+
+Read that file when touching any of these areas, and consult it before commit when running `/review`. The maintainer keeps a longer internal investigation log; the public catalog distils the reusable rules.
+
+### 7.6 BLAS/LAPACK LP64 ABI
+
+MRTKLIB requires an **LP64** BLAS/LAPACK provider (32-bit integer interface). On CMake ≥ 3.22, `CMakeLists.txt` sets `BLA_SIZEOF_INTEGER=4` as a request to `FindBLAS.cmake` and rejects an explicit `=8` override with `FATAL_ERROR`.
+
+This is a *hint*, not enforcement: `FindBLAS.cmake` uses `BLA_SIZEOF_INTEGER` to pick between library-name candidates (e.g. `openblas` vs `openblas64`), but does not verify the resolved library's ABI. On platforms where the ILP64 build is shipped under the LP64 filename (NixOS being one), an ILP64 library can still be linked silently. Crashes in `utest_t_matrix` or any LAPACK call are the canonical symptom; the remediation is to pass an explicit LP64 provider via `CMAKE_PREFIX_PATH` or `BLAS_LIBRARIES`.
+
+Documentation and code comments should use *requests* / *hint* wording rather than *enforces* / *forces*.
+
+### 7.7 Antenna PCV array width: `NFREQPCV`, not `NFREQ`
+
+Two constants in `include/mrtklib/mrtk_foundation.h`:
+
+- `NFREQ = 3`     — number of carrier frequencies used by the positioning engines
+- `NFREQPCV = 12` — number of carrier frequencies stored in `pcv_t` (antenna phase-center parameters)
+
+`antmodel()` and `antmodel_s()` in `src/models/mrtk_antenna.c` loop `for (i = 0; i < NFREQPCV; i++)` and write **12 elements** into the output `double *dant` argument. The function signature gives no size hint, and the docstring only says "range offsets for each frequency".
+
+Callers that allocate `double dant[NFREQ]` (= 3 elements) and pass it to `antmodel()` will overflow the buffer by 9 doubles. The symptom is silent stack/heap corruption that only triggers when a non-zero PCV value is written into one of the upper slots.
+
+**Rule:** When calling `antmodel()` / `antmodel_s()`, the output buffer must be sized `NFREQPCV` (or `MAXFREQ`, whichever is in use locally). Audit any new caller for this. Do not change the loop bound to `NFREQ` without auditing every caller of `pcv_t`-aware code first.
 
 ---
 
 ## 8. Git Conventions
 
-### Branch Naming
+### Branch naming
+
 ```
 feat/<short-description>      # New feature
 fix/<short-description>       # Bug fix
 test/<short-description>      # Test additions/changes
 refactor/<short-description>  # Non-functional cleanup
 docs/<short-description>      # Documentation only
+sync/<library>-<date>         # Upstream sync
 ```
 
-### Commit Messages (Conventional Commits)
+### Commit messages (Conventional Commits)
+
 ```
 feat(ppp): add triple-frequency ambiguity resolution
 fix(clas): correct channel assignment in dual-stream mode
-test(madoca): add PPP-AR accuracy regression for 2024-01-15
+test(madoca): add PPP-AR accuracy regression for <data>
 refactor(rtcm): replace raw array with std::vector in msg buffer
 docs(api): add doxygen for mrtk_ppppos()
 ```
 
-### Upstream Sync Policy
-When MALIB/CLASLIB/MADOCALIB upstream updates are available:
+### Upstream sync policy
+
+When MALIB / CLASLIB / MADOCALIB upstream updates are available:
+
 1. Create branch `sync/<library>-<date>`.
 2. Run `git diff upstream/main -- <relevant files>` to identify changes.
-3. Classify each change: algorithm (needs sign-off) vs. bugfix (can cherry-pick) vs. formatting (ignore).
+3. Classify each hunk: algorithm (needs sign-off) / bugfix (can cherry-pick) / formatting (ignore).
 4. Cherry-pick only after explicit user approval for algorithm changes.
-5. Run full test suite. Document numerical deltas.
+5. Run the full test suite. Document numerical deltas.
 
 ---
 
 ## 9. Workflow Rules
 
-### 9.1 Bug Fix vs. Design Change
-- **Bug fix** (behavior clearly wrong, test is failing): Fix autonomously. Report what you found and what you changed.
-- **Design change** (new architecture, new algorithm, new API): Write plan to `tasks/todo.md` and check in with user before implementing.
+### 9.1 Bug fix vs. design change
+
+- **Bug fix** (behaviour clearly wrong, test failing): fix autonomously. Report what was found and what changed.
+- **Design change** (new architecture, new algorithm, new API surface): write a plan and check in before implementing.
 - When in doubt: it is a design change. Ask.
 
-### 9.2 Plan-First for Non-Trivial Work
+### 9.2 Planning artefacts
+
+Three different planning surfaces, each with its own role:
+
+| Surface | Role | Lifetime |
+|---------|------|----------|
+| **Plan mode** (`ExitPlanMode`) | Pre-implementation alignment with the user on the *approach* | This message |
+| **`TodoWrite`** | In-session progress tracking across multi-step work | This session |
+| **`tasks/todo.md`** (maintainer-local) | Cross-session task continuity, hand-off between sessions | Until the task ships |
+
 For any task with 3+ steps or architectural impact:
-1. Write a plan to `tasks/todo.md` with checkable items.
-2. Present the plan. Wait for approval.
-3. Implement. Mark items complete as you go.
-4. After completion, add a review note to `tasks/todo.md`.
 
-### 9.3 Subagent Strategy
-Use subagents (Task tool) liberally to keep the main context clean:
-- **Research agent:** "Investigate how upstream CLASLIB handles X — summarize findings."
-- **Test agent:** "Run the full test suite and report failures with context."
-- **Diff agent:** "Compare algorithm in mrtk_ppppos.c against madocalib reference — flag mathematical differences."
-- **Docs agent:** "Generate Doxygen docstrings for all undocumented public functions in src/pos/."
-- One focused task per subagent. Do not mix concerns.
+1. If the approach is non-obvious, present it through Plan mode and wait for approval.
+2. Use `TodoWrite` to track sub-steps during the session.
+3. The maintainer updates `tasks/todo.md` as the canonical record of "what is still open" between sessions.
 
-### 9.4 Self-Improvement Loop
+### 9.3 Subagent strategy
+
+The `Agent` tool has real costs: the subagent has no context from the current conversation (cold-start briefing required), its findings are lossy-compressed into a single return message, spawn latency is fixed, and it cannot ask the user a clarifying question mid-task. Use it selectively, not by default.
+
+**Use a subagent when:**
+
+- The work is long-running (full ctest, large build, multi-file research) and would block the main response
+- The task is open-ended exploration that would consume significant context (e.g. "find every place X is referenced and classify each")
+- Multiple independent investigations can run in parallel — issue them in a **single message with multiple `Agent` tool uses** so they execute concurrently
+- The task matches a pre-configured specialised agent (algorithm safety review, test summarizer, upstream classifier)
+
+**Do NOT use a subagent when:**
+
+- The target file path or symbol is already known — use `Read` / `Grep` / `Glob` directly
+- The briefing cost (writing a self-contained prompt) exceeds the context the subagent would save
+- The task needs intermediate clarification back to the user
+- A direct edit / single-file change is what's actually required
+
+**Typical specialised shapes** (project conveniences live under `.claude/agents/`, gitignored; external contributors can configure their own):
+
+- Algorithm safety review for diffs under `src/pos/`, `src/clas/`, `src/madoca/`, `src/models/`
+- Test suite runner for long ctest invocations (the run takes minutes; main context stays free)
+- Upstream diff classifier for sync branches touching many files
+
+One focused task per subagent — do not mix concerns. When you delegate, do not duplicate the same search yourself.
+
+### 9.4 Self-improvement loop
+
 After any user correction:
-1. Immediately update `tasks/lessons.md` with the pattern.
-2. Check if the same pattern appears anywhere in the current working files.
-3. If a high-impact pattern: promote to Section 7.5 of this file.
+
+1. Update the maintainer-local lessons log (`tasks/lessons.md`) immediately.
+2. Check whether the same pattern appears in the current working files.
+3. If the pattern is high-impact and generalisable, propose promotion to [`docs/dev/pitfalls-public.md`](docs/dev/pitfalls-public.md) per the local visibility policy. If it would belong in everyone's session, propose adding it to §7 of this file.
 
 ### 9.5 Definition of Done
+
 A task is done when:
+
 - [ ] All tests pass (`ctest --output-on-failure`)
 - [ ] No test tolerances were silently changed
-- [ ] Docstrings added for new/modified public functions
-- [ ] `tasks/todo.md` updated with completion note
-- [ ] Commit message follows convention
+- [ ] Doxygen docstrings exist for new / modified public functions
+- [ ] Maintainer task tracker reflects completion
+- [ ] Commit message follows Conventional Commits
+- [ ] No unrelated changes are bundled into the commit
 
 ---
 
-## 10. Custom Slash Commands
+## 10. Tooling
 
-These are defined in `.claude/commands/`. Use them to avoid repetitive setup:
+### Slash commands and skills
 
-| Command                  | What it does                                                    |
-|--------------------------|-----------------------------------------------------------------|
-| `/project:test`          | Build + run full ctest, summarize failures                      |
-| `/project:review`        | Review staged diff for GNSS algorithm safety (NEVER DO checks) |
-| `/project:lessons`       | Prompt to update lessons.md after a correction                  |
-| `/project:upstream-diff` | Show diff between MRTKLIB and upstream for a given library      |
-| `/project:docgen`        | Generate Doxygen stubs for undocumented functions in a file     |
+The maintainer's `.claude/` directory (gitignored) contains project-specific Claude Code commands and agents. They are conveniences for the maintainer's workflow, not a public API surface. External contributors using Claude Code can register equivalent commands in their own workspace.
 
-> *Command files live in `.claude/commands/<name>.md`. Add new ones as patterns emerge.*
+Examples of the patterns covered:
+
+| Pattern | What it does |
+|---------|--------------|
+| `/test` | Build + run full ctest, summarize failures |
+| `/review` | Review staged diff against §3 NEVER DO + [`docs/dev/pitfalls-public.md`](docs/dev/pitfalls-public.md) |
+| `/upstream-diff` | Compare MRTKLIB against upstream for a given library |
+| `/docgen` | Generate Doxygen stubs for undocumented functions in a file |
+
+### Tool discipline
+
+- Prefer dedicated tools over `Bash` when one fits: `Read` for files, `Edit` / `Write` for modifications, `Grep` / `Glob` for search.
+- Issue independent tool calls in parallel — sequence them only when the next call depends on the previous result.
+- Brief status updates at key moments (start of work, on finding, on direction change, on blocker). Keep the main response short; the diff and the test result speak for themselves.
