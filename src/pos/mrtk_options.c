@@ -107,7 +107,7 @@ opt_t sysopts[] = {
     {"pos1-posopt9", 3, (void*)&prcopt_.posopt[8], SWTOPT},    /* exclude QZS as refsat */
     {"pos1-posopt10", 3, (void*)&prcopt_.posopt[9], SWTOPT},   /* don't adjust phase bias */
     {"pos1-posopt11", 3, (void*)&prcopt_.posopt[10], FRQOPT2}, /* gps freq (l1+l2/l1+l5) */
-    {"pos1-posopt12", 3, (void*)&prcopt_.posopt[11], SWTOPT},  /* reserved */
+    {"pos1-posopt12", 0, (void*)&prcopt_.posopt[11], "dB-Hz"}, /* snr_fixed (dB-Hz, 0=elev model) */
     {"pos1-posopt13", 3, (void*)&prcopt_.posopt[12], FRQOPT2}, /* qzs freq (l1+l2/l1+l5) */
     {"pos1-gridsel", 0, (void*)&prcopt_.gridsel, "m"},
     {"pos1-rectype", 2, (void*)prcopt_.rectype[0], ""},

@@ -1358,8 +1358,12 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                 l6d_prn_fixed, l6d_prn_filter);
     }
 
-    /* SNR model: pass fixed value to OSR engine via posopt[10] */
-    prcopt.posopt[10] = (int)snr_fixed;
+    /* SNR model: pass fixed value to OSR engine via posopt[11] (reserved slot).
+     * Note: posopt[10] is GPS frequency option in clas_osr_selfreqpair, so
+     * routing snr_fixed through that slot caused a value collision (e.g.
+     * snr_fixed=50 was interpreted as an invalid freq option and silently
+     * fell back to L1+L2, breaking gps_frequency=l1+l5 etc.). */
+    prcopt.posopt[11] = (int)snr_fixed;
 
     /* set user position */
     if (has_fixed_pos) {
