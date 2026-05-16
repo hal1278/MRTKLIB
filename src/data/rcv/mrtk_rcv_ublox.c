@@ -496,8 +496,12 @@ static int decode_rxmrawx(raw_t* raw) {
         }
         /* offset by time tag adjustment */
         if (toff != 0.0) {
-            P -= toff * CLIGHT;
-            L -= toff * code2freq(sys, code, frqid - 7);
+            if (P != 0.0) {
+                P -= toff * CLIGHT;
+            }
+            if (L != 0.0) {
+                L -= toff * code2freq(sys, code, frqid - 7);
+            }
         }
         /* half-cycle shift correction for BDS GEO */
         if (sys == SYS_CMP && (prn <= 5 || prn >= 59) && L != 0.0) {
