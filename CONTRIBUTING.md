@@ -135,8 +135,10 @@ your personal **User** settings — not in the workspace file — so it stays
 out of version control:
 
 ```jsonc
-// User settings.json
-"clangd.path": "/opt/homebrew/opt/llvm/bin/clangd"
+// User settings.json — add this key to your existing settings object
+{
+  "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd"
+}
 ```
 
 User settings take effect because the workspace file leaves `clangd.path`
