@@ -104,6 +104,8 @@ nav:
     - Benchmark: reference/benchmark.md
     - Real-Time CLAS: reference/rtkrcv-clas-realtime.md
     - Test Methodology: reference/test-accuracy-methodology.md
+  - Design:
+    - Positioning Configuration Model: design/configuration.md
   - Releases:
     - Changelog: releases/changelog.md
     - v0.6.6: releases/release-notes-v0.6.6.md

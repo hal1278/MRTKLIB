@@ -62,14 +62,6 @@ incrementally back-ported to each engine:
 | **v0.6.x** | All | Doxygen docstring coverage expansion | 💭 Backlog |
 
 > [!NOTE]
-> **Configuration format change in v0.5.0:** Starting with v0.5.0, all configuration
-> files use TOML (`.toml`).  The legacy RTKLIB `key=value` `.conf` format is no longer
-> shipped or tested.  `loadopts()` still accepts `.conf` files at runtime, but all
-> bundled configs and CTest commands reference `.toml` only.
-> If you need to continue using `.conf` files with the original bundled configurations,
-> please use the [`support/v0.4.x`](https://github.com/h-shiono/MRTKLIB/tree/support/v0.4.x) branch.
-
-> [!NOTE]
 > demo5 algorithm improvements are adapted from **[demo5 RTKLIB](https://github.com/rtklibexplorer/RTKLIB)**
 > by Tim Everett (rtklibexplorer).  Benchmark results use the
 > [PPC-Dataset](https://github.com/taroz/PPC-Dataset) (Taro Suzuki, Chiba Institute of Technology).
