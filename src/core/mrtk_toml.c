@@ -29,6 +29,7 @@ typedef struct {
 static const toml_map_t toml_mapping[] = {
     /* ── positioning ───────────────────────────────────────────────────────── */
     {"positioning", "mode", "pos1-posmode"},
+    {"positioning", "correction", "pos1-correction"},
     {"positioning", "frequency", "pos1-frequency"},
     {"positioning", "solution_type", "pos1-soltype"},
     {"positioning", "elevation_mask", "pos1-elmask"},

@@ -527,6 +527,7 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
     double freq[NFREQ] = {0}, C1, C2, cb = 0.0, pb = 0.0;
     int i, sys = satsys(obs->sat, NULL), ssrcode = CODE_NONE, ant_idx;
     int ssr_bias = 0;
+    int corr = opt->correction; /* correction source (CORR_???); selects the bias path below */
 
     if (strstr(opt->pppopt, "-SSR_BIAS")) {
         ssr_bias = 1;
@@ -551,59 +552,79 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
         L[i] = obs->L[i] * CLIGHT / freq[i] - dants[ant_idx] - dantr[ant_idx] - phw * CLIGHT / freq[i];
         P[i] = obs->P[i] - dants[ant_idx] - dantr[ant_idx];
 
-        /* SSR cbias, pbias correction */
-        ssrcode = mcssr_sel_biascode(sys, obs->code[i]);
-
-        /* for backward compatible to IS-QZSS-MDC-003 */
-        if (sys == SYS_GPS && ssrcode == CODE_L5Q) {
-            if (nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1] == 0.0 &&
-                nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1] == 0.0) {
-                ssrcode = CODE_L5X;
+        if (corr == CORR_IGS) {
+            /* IGS precise products (files): RTKLIB-style float PPP. Apply optional
+             * P1-C1 / P2-C2 DCB from nav->cbias (GPS/GLO) if present; never discard
+             * the measurement for a missing satellite bias. The satellite phase bias
+             * is absorbed by the float phase-ambiguity state (no SSR pbias needed). */
+            if (sys == SYS_GPS || sys == SYS_GLO) {
+                if (obs->code[i] == CODE_L1C) {
+                    P[i] += nav->cbias[obs->sat - 1][1];
+                }
+                if (obs->code[i] == CODE_L2C) {
+                    P[i] += nav->cbias[obs->sat - 1][2];
+                }
             }
-        }
-
-        if (ssrcode != CODE_NONE) {
-            if (nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1] != 0.0) {
-                pb = nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1];
-            }
-            if (nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1] != 0.0) {
-                cb = nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1];
-            }
-        }
-        if (cb != 0.0) {
-            P[i] += cb;
-            trace(NULL, tl > 0 ? 4 : 4, "corr_meas: %s cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr, satid,
-                  code2obs(obs->code[i]), code2obs(ssrcode), cb);
+        } else if (corr == CORR_NONE) {
+            /* no satellite bias correction (SPP/DGPS/RTK route through pntpos/relpos,
+             * not here; branch kept for completeness) */
         } else {
-            if (!nav->ssr_ch[0][obs->sat - 1].vcbias[ssrcode - 1]) {
-                P[i] = 0.0;
-                trace(NULL, tl > 0 ? 3 : 4,
-                      "corr_meas: %s cbias dose not exist. %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr, satid,
-                      code2obs(obs->code[i]), code2obs(ssrcode), cb);
-            }
-        }
-        if (cb <= (SSR_INVALID_CBIAS + 0.005)) {
-            P[i] = 0.0;
-            trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr,
-                  satid, code2obs(obs->code[i]), code2obs(ssrcode), cb);
-        }
+            /* SSR path (qzs-madoca / gal-has / bds-b2b / igs-rts; also CORR_AUTO
+             * fallback). Satellite cbias/pbias come from nav->ssr_ch; a measurement
+             * with no valid SSR bias is dropped (required for PPP-AR, MADOCALIB design). */
+            ssrcode = mcssr_sel_biascode(sys, obs->code[i]);
 
-        if (pb != 0.0) {
-            L[i] += pb;
-            trace(NULL, tl > 0 ? 4 : 4, "corr_meas: %s pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr, satid,
-                  code2obs(obs->code[i]), code2obs(ssrcode), pb);
-        } else if (sys != SYS_GLO) {
-            if (!nav->ssr_ch[0][obs->sat - 1].vpbias[ssrcode - 1]) {
-                L[i] = 0.0;
-                trace(NULL, tl > 0 ? 3 : 4,
-                      "corr_meas: %s pbias dose not exist. %s obscode=C%s ssrcode=C%s pbias=%7.3f\n", tstr, satid,
-                      code2obs(obs->code[i]), code2obs(ssrcode), pb);
+            /* for backward compatible to IS-QZSS-MDC-003 */
+            if (sys == SYS_GPS && ssrcode == CODE_L5Q) {
+                if (nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1] == 0.0 &&
+                    nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1] == 0.0) {
+                    ssrcode = CODE_L5X;
+                }
             }
-        }
-        if (pb <= (SSR_INVALID_PBIAS + 0.00005)) {
-            L[i] = 0.0;
-            trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr,
-                  satid, code2obs(obs->code[i]), code2obs(ssrcode), pb);
+
+            if (ssrcode != CODE_NONE) {
+                if (nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1] != 0.0) {
+                    pb = nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1];
+                }
+                if (nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1] != 0.0) {
+                    cb = nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1];
+                }
+            }
+            if (cb != 0.0) {
+                P[i] += cb;
+                trace(NULL, tl > 0 ? 4 : 4, "corr_meas: %s cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr, satid,
+                      code2obs(obs->code[i]), code2obs(ssrcode), cb);
+            } else {
+                if (!nav->ssr_ch[0][obs->sat - 1].vcbias[ssrcode - 1]) {
+                    P[i] = 0.0;
+                    trace(NULL, tl > 0 ? 3 : 4,
+                          "corr_meas: %s cbias dose not exist. %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr, satid,
+                          code2obs(obs->code[i]), code2obs(ssrcode), cb);
+                }
+            }
+            if (cb <= (SSR_INVALID_CBIAS + 0.005)) {
+                P[i] = 0.0;
+                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr,
+                      satid, code2obs(obs->code[i]), code2obs(ssrcode), cb);
+            }
+
+            if (pb != 0.0) {
+                L[i] += pb;
+                trace(NULL, tl > 0 ? 4 : 4, "corr_meas: %s pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr, satid,
+                      code2obs(obs->code[i]), code2obs(ssrcode), pb);
+            } else if (sys != SYS_GLO) {
+                if (!nav->ssr_ch[0][obs->sat - 1].vpbias[ssrcode - 1]) {
+                    L[i] = 0.0;
+                    trace(NULL, tl > 0 ? 3 : 4,
+                          "corr_meas: %s pbias dose not exist. %s obscode=C%s ssrcode=C%s pbias=%7.3f\n", tstr, satid,
+                          code2obs(obs->code[i]), code2obs(ssrcode), pb);
+                }
+            }
+            if (pb <= (SSR_INVALID_PBIAS + 0.00005)) {
+                L[i] = 0.0;
+                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr,
+                      satid, code2obs(obs->code[i]), code2obs(ssrcode), pb);
+            }
         }
     }
 

@@ -79,8 +79,10 @@ static char signals_[1024];
 #define PSHFTOPT "0:off,1:table"
 #define SATCB "0:auto,1:ssr,2:bia,3:dcb"
 #define SATPB "0:auto,1:ssr,3:fcb"
+#define CORROPT "0:none,1:igs,2:igs-rts,3:qzs-madoca,4:gal-has,5:bds-b2b,6:qzs-clas"
 opt_t sysopts[] = {
     {"pos1-posmode", 3, (void*)&prcopt_.mode, MODOPT},
+    {"pos1-correction", 3, (void*)&prcopt_.correction, CORROPT},
     {"pos1-frequency", 3, (void*)&prcopt_.nf, FRQOPT},
     {"pos1-soltype", 3, (void*)&prcopt_.soltype, TYPOPT},
     {"pos1-elmask", 1, (void*)&elmask_, "deg"},

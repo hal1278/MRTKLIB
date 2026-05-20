@@ -110,6 +110,15 @@ extern "C" {
 #define EPHOPT_SSRAPC 3 /* ephemeris option: broadcast + SSR_APC */
 #define EPHOPT_SSRCOM 4 /* ephemeris option: broadcast + SSR_COM */
 
+#define CORR_AUTO -1      /* correction source: infer from mode + sateph (default) */
+#define CORR_NONE 0       /* correction source: none (SPP/DGPS/RTK) */
+#define CORR_IGS 1        /* correction source: IGS precise products (files) */
+#define CORR_IGS_RTS 2    /* correction source: IGS Real-Time Service (RTCM-SSR) [reserved] */
+#define CORR_QZS_MADOCA 3 /* correction source: MADOCA-PPP (QZSS L6E / RTCM-SSR) */
+#define CORR_GAL_HAS 4    /* correction source: Galileo HAS (E6-B SSR) [reserved] */
+#define CORR_BDS_B2B 5    /* correction source: BeiDou PPP-B2b (B2b SSR) [reserved] */
+#define CORR_QZS_CLAS 6   /* correction source: QZSS CLAS (L6D CSSR) */
+
 /*============================================================================
  * AR Mode Constants
  *===========================================================================*/
@@ -281,6 +290,8 @@ typedef struct prcopt_t {         /* processing options type */
     /* Signal configuration (explicit band/code specification) */
     mrtk_sigcfg_t sigcfg[MRTK_NSYS]; /* per-constellation signal config */
     int sigcfg_set;                   /* 1: sigcfg explicitly configured (overrides nf/pppsig) */
+
+    int correction; /* correction source (CORR_???; CORR_AUTO=infer from mode+sateph) */
 } prcopt_t;
 
 /*============================================================================
@@ -340,6 +351,10 @@ typedef struct {              /* file options type */
 
 extern const prcopt_t prcopt_default;
 extern const solopt_t solopt_default;
+
+/* resolve correction source (CORR_AUTO) and validate the (mode, correction)
+ * combination; returns 1 on success, 0 with msg set on an invalid combination */
+extern int resolve_correction(prcopt_t* opt, char* msg);
 
 #ifdef __cplusplus
 }

@@ -303,6 +303,16 @@ int mrtk_post(int argc, char** argv) {
         mrtk_ctx_destroy(ctx);
         return -2;
     }
+    {
+        char cmsg[256] = "";
+        if (!resolve_correction(&prcopt, cmsg)) {
+            fprintf(stderr, "error : %s\n", cmsg);
+            mrtk_context_free(g_mrtk_legacy_ctx);
+            g_mrtk_ctx = NULL;
+            mrtk_ctx_destroy(ctx);
+            return -2;
+        }
+    }
     ret = postpos(ctx, ts, te, tint, 0.0, &prcopt, &solopt, &filopt, infile, n, outfile, "", "");
 
     if (!ret) {

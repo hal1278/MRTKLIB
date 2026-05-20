@@ -521,6 +521,20 @@ static int startsvr(vt_t* vt) {
 
     trace(NULL, 3, "startsvr:\n");
 
+    /* resolve/validate correction source against the positioning mode */
+    {
+        char cmsg[256] = "";
+        if (!resolve_correction(&prcopt, cmsg)) {
+            trace(NULL, 1, "startsvr: %s\n", cmsg);
+            if (vt) {
+                vt_printf(vt, "error: %s\n", cmsg);
+            } else {
+                fprintf(stderr, "error: %s\n", cmsg);
+            }
+            return 0;
+        }
+    }
+
     /* read start commads from command files */
     for (i = 0; i < 3; i++) {
         if (!*rcvcmds[i]) {

@@ -19,6 +19,8 @@
  */
 #include "mrtklib/mrtk_opt.h"
 
+#include <stdio.h>
+
 /*--- local constants (duplicated to avoid rtklib.h dependency) -------------*/
 static const double D2R = 3.1415926535897932 / 180.0;
 
@@ -81,7 +83,8 @@ const prcopt_t prcopt_default = {
     0,
     0,
     0,
-    0 /* pppsatcb,pppsatpb,unbias,maxbiasdt */
+    0, /* pppsatcb,pppsatpb,unbias,maxbiasdt */
+    .correction = CORR_AUTO,
 };
 const solopt_t solopt_default = {
     /* defaults solution output options */
@@ -91,3 +94,61 @@ const solopt_t solopt_default = {
     {0.0, 0.0},                            /* nmeaintv */
     " ",        ""                         /* separator/program name */
 };
+
+/* resolve and validate correction source ------------------------------------
+ * Resolve CORR_AUTO from mode + sateph (backward compatibility for configs that
+ * omit `correction`), reject reserved-but-unimplemented sources, and enforce the
+ * (mode, correction) validity matrix. See docs/design/configuration.md.
+ * args   : prcopt_t *opt   IO  processing options (opt->correction resolved in place)
+ *          char     *msg   O   error text on failure (caller buffer, >=128 bytes)
+ * return : status (1:ok, 0:invalid combination -> caller should abort)
+ *--------------------------------------------------------------------------*/
+extern int resolve_correction(prcopt_t* opt, char* msg) {
+    int m = opt->mode;
+
+    /* infer when not explicitly configured (correction omitted -> CORR_AUTO) */
+    if (opt->correction == CORR_AUTO) {
+        if (m == PMODE_PPP_RTK || m == PMODE_VRS_RTK) {
+            opt->correction = CORR_QZS_CLAS;
+        } else if (m == PMODE_PPP_KINEMA || m == PMODE_PPP_STATIC || m == PMODE_PPP_FIXED) {
+            opt->correction = (opt->sateph == EPHOPT_PREC) ? CORR_IGS : CORR_QZS_MADOCA;
+        } else {
+            opt->correction = CORR_NONE;
+        }
+    }
+
+    /* reserved sources: present in the schema but not implemented yet */
+    if (opt->correction == CORR_IGS_RTS || opt->correction == CORR_GAL_HAS || opt->correction == CORR_BDS_B2B) {
+        if (msg) {
+            sprintf(msg, "correction source not implemented yet (correction=%d)", opt->correction);
+        }
+        return 0;
+    }
+
+    /* validity matrix (enforced for the PPP-class engines; other modes ignore it) */
+    switch (m) {
+        case PMODE_PPP_KINEMA:
+        case PMODE_PPP_STATIC:
+        case PMODE_PPP_FIXED:
+            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA) {
+                if (msg) {
+                    sprintf(msg, "invalid correction=%d for PPP mode (use igs or qzs-madoca)", opt->correction);
+                }
+                return 0;
+            }
+            break;
+        case PMODE_PPP_RTK:
+        case PMODE_VRS_RTK:
+            if (opt->correction != CORR_QZS_CLAS) {
+                if (msg) {
+                    sprintf(msg, "invalid correction=%d for ppp-rtk/vrs-rtk (use qzs-clas)", opt->correction);
+                }
+                return 0;
+            }
+            break;
+        default:
+            /* single / dgps / rtk-relative / ssr2osr: correction axis not applicable */
+            break;
+    }
+    return 1;
+}
