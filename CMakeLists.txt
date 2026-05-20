@@ -1148,3 +1148,69 @@ set_tests_properties(claslib_ppp_rtk_2ch_scatter PROPERTIES
     FIXTURES_REQUIRED claslib_data
     LABELS            "tier3;scatter;claslib"
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# IGS-products conventional float PPP  (correction = igs, #130)
+# Source: GSI GEONET station 3034 (FUJISAWA), 2026-01-21, 2 h window, GPS+GAL.
+# Validated against the published GSI F5 daily coordinate (RTKLIB-independent).
+# Test data archive: tests/data/igs/igs_testdata.tar.gz
+# ─────────────────────────────────────────────────────────────────────────────
+set(_IGSDATA ${CMAKE_SOURCE_DIR}/tests/data/igs)
+
+add_test(NAME igs_setup
+    COMMAND bash -c "tar xzf ${_IGSDATA}/igs_testdata.tar.gz -C ${_IGSDATA}"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_setup PROPERTIES
+    FIXTURES_SETUP  igs_data
+    TIMEOUT         30
+    LABELS          "regression;igs;ppp"
+)
+
+add_test(NAME igs_cleanup
+    COMMAND bash -c "rm -f \
+        ${_IGSDATA}/30340210.26o \
+        ${_IGSDATA}/BRDC00IGS_2026021_GE.rnx \
+        ${_IGSDATA}/COD0MGXFIN_2026021_05M_ORB.SP3 \
+        ${_IGSDATA}/COD0MGXFIN_2026021_30S_CLK.CLK \
+        ${_IGSDATA}/igs20_trim.atx \
+        ${_IGSDATA}/93034.26.pos"
+)
+set_tests_properties(igs_cleanup PROPERTIES
+    FIXTURES_CLEANUP igs_data
+    LABELS           "regression;igs;ppp"
+)
+
+# ── rnx2rtkp conventional IGS float PPP ──────────────────────────────────────
+add_test(NAME igs_ppp
+    COMMAND $<TARGET_FILE:mrtk> post
+        -k ${CMAKE_SOURCE_DIR}/conf/igs/rnx2rtkp_ppp.toml
+        -ts 2026/01/21 0:00:00 -te 2026/01/21 2:00:00
+        -o ${CMAKE_BINARY_DIR}/out_igs_ppp.pos
+        ${_IGSDATA}/30340210.26o
+        ${_IGSDATA}/BRDC00IGS_2026021_GE.rnx
+        ${_IGSDATA}/COD0MGXFIN_2026021_05M_ORB.SP3
+        ${_IGSDATA}/COD0MGXFIN_2026021_30S_CLK.CLK
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_ppp PROPERTIES
+    FIXTURES_REQUIRED igs_data
+    TIMEOUT           180
+    LABELS            "regression;igs;ppp"
+)
+
+# ── absolute-accuracy check vs published GSI F5 coordinate ────────────────────
+add_test(NAME igs_ppp_check
+    COMMAND ${Python3_EXECUTABLE} ${_COMPARE_POS_ABS}
+        --f5 ${_IGSDATA}/93034.26.pos
+        --date 2026/01/21
+        --tolerance 0.15
+        --skip-epochs 30
+        ${CMAKE_BINARY_DIR}/out_igs_ppp.pos
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_ppp_check PROPERTIES
+    DEPENDS           igs_ppp
+    FIXTURES_REQUIRED igs_data
+    LABELS            "absolute;igs;ppp"
+)
