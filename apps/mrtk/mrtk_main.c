@@ -15,6 +15,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "mrtklib/mrtk_version.h"
 #include "rtklib.h"
 
 /* external subcommand entry points ------------------------------------------*/
@@ -61,7 +62,7 @@ static const subcmd_t subcmds[] = {
 /* help text -----------------------------------------------------------------*/
 static void print_help(void) {
     fprintf(stderr,
-            "mrtk: MRTKLIB unified CLI (%s ver.%s)\n"
+            "mrtk: MRTKLIB unified CLI (%s ver.%s git %s)\n"
             "\n"
             "Usage: mrtk [COMMAND] [OPTIONS]\n"
             "\n"
@@ -82,7 +83,7 @@ static void print_help(void) {
             "  bias        Estimate receiver fractional biases\n"
             "  dump        Dump stream data to human-readable format\n"
             "  l6extract   Extract L6 frames from SBF/UBX to per-PRN files\n",
-            MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+            MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
 }
 
 /* main ----------------------------------------------------------------------*/
@@ -98,7 +99,8 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-v")) {
-        fprintf(stderr, "mrtk (%s ver.%s)\n", MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+        fprintf(stderr, "mrtk (%s ver.%s git %s)\n", MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING,
+                mrtklib_git_hash_str);
         return 0;
     }
 

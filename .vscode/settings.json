@@ -16,7 +16,6 @@
     "--header-insertion=never",
     "--compile-commands-dir=${workspaceFolder}/build"
   ],
-  "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd",
   "C_Cpp.intelliSenseEngine": "disabled",
   "[toml]": {
     "editor.defaultFormatter": "tamasfe.even-better-toml",

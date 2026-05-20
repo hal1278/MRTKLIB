@@ -12,6 +12,29 @@ configure_file(
     @ONLY
 )
 
+# ── Build-time git hash for `mrtk --version` (#120) ──────────────────────────
+# Regenerates ${CMAKE_BINARY_DIR}/generated/mrtk_git_version.c on every build.
+# The script only rewrites the file when the resolved hash changes, so a
+# no-op build does not recompile unrelated translation units.
+set(MRTK_GIT_VERSION_C ${CMAKE_BINARY_DIR}/generated/mrtk_git_version.c)
+add_custom_target(mrtk_git_version_gen ALL
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/GenerateGitVersion.cmake
+    BYPRODUCTS ${MRTK_GIT_VERSION_C}
+    COMMENT "Refreshing mrtk git version metadata"
+    VERBATIM
+)
+# Materialise the file at configure time so the first build has something to
+# compile; subsequent builds get refreshed by the custom target above.
+execute_process(
+    COMMAND ${CMAKE_COMMAND}
+        -DSOURCE_DIR=${CMAKE_SOURCE_DIR}
+        -DBINARY_DIR=${CMAKE_BINARY_DIR}
+        -P ${CMAKE_SOURCE_DIR}/cmake/GenerateGitVersion.cmake
+)
+
 # Expose POSIX/BSD APIs hidden by -ansi (matches makefile platform detection)
 if(APPLE)
     add_compile_definitions(_DARWIN_C_SOURCE)
@@ -104,7 +127,11 @@ add_library(mrtklib STATIC
     src/stream/mrtk_stream.c
     src/stream/mrtk_rtksvr.c
     src/stream/mrtk_streamsvr.c
+    # Generated at every build by mrtk_git_version_gen (see top of file).
+    ${MRTK_GIT_VERSION_C}
 )
+add_dependencies(mrtklib mrtk_git_version_gen)
+set_source_files_properties(${MRTK_GIT_VERSION_C} PROPERTIES GENERATED TRUE)
 target_include_directories(mrtklib PUBLIC include ${CMAKE_BINARY_DIR}/include)
 set_target_properties(mrtklib PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON)
 # Override the global -ansi (= -std=c90) for this target: -std=c11 wins when placed after.

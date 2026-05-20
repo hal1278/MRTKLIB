@@ -304,7 +304,7 @@ static void printusage(void) {
 }
 /* print version -------------------------------------------------------------*/
 static void printver(void) {
-    fprintf(stderr, "%s %s\n", PRGNAME, MRTKLIB_VERSION_STRING);
+    fprintf(stderr, "%s %s git %s\n", PRGNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
     exit(0);
 }
 /* external stop signal ------------------------------------------------------*/
@@ -885,7 +885,7 @@ static void prstatus(vt_t* vt) {
 
     vt_printf(vt, "\n%s%-28s: %s%s\n", ESC_BOLD, "Parameter", "Value", ESC_RESET);
     sprintf(tmp, "%s version", MRTKLIB_SOFTNAME);
-    vt_printf(vt, "%-28s: %s\n", tmp, MRTKLIB_VERSION_STRING);
+    vt_printf(vt, "%-28s: %s (git %s)\n", tmp, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
     vt_printf(vt, "%-28s: %d\n", "rtk server thread", thread);
     vt_printf(vt, "%-28s: %s\n", "rtk server state", svrstate[state]);
     vt_printf(vt, "%-28s: %d\n", "processing cycle (ms)", cycle);
@@ -1706,7 +1706,8 @@ static void cmd_help(char** args, int narg, vt_t* vt) {
     int i;
 
     if (narg < 2) {
-        vt_printf(vt, "%s (%s ver.%s)\n", PRGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+        vt_printf(vt, "%s (%s ver.%s git %s)\n", PRGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING,
+                  mrtklib_git_hash_str);
         for (i = 0; *helptxt[i]; i++) {
             vt_printf(vt, "%s\n", helptxt[i]);
         }
@@ -1750,8 +1751,8 @@ static void* con_thread(void* arg) {
 
     trace(NULL, 3, "console_thread:\n");
 
-    vt_printf(con->vt, "\n%s** %s(%s ver.%s) console (h:help) **%s\n", ESC_BOLD, PRGNAME, MRTKLIB_SOFTNAME,
-              MRTKLIB_VERSION_STRING, ESC_RESET);
+    vt_printf(con->vt, "\n%s** %s(%s ver.%s git %s) console (h:help) **%s\n", ESC_BOLD, PRGNAME,
+              MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str, ESC_RESET);
 
     if (!login(con->vt)) {
         vt_close(con->vt);

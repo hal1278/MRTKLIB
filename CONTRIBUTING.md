@@ -117,6 +117,33 @@ All 62 tests must pass before you open a PR. If your change makes a test
 fail intentionally, update the test in the same commit and explain why in
 the commit message.
 
+#### Editor setup (optional, VS Code)
+
+The repo ships a shared VS Code workspace config so the project formatters
+work out of the box:
+
+- `.vscode/extensions.json` recommends the extensions this project uses
+  (`clangd`, `ruff`, `even-better-toml`). VS Code prompts to install them
+  on first open.
+- `.vscode/settings.json` wires those extensions to the project standards
+  (clangd for C, `compile_commands.json` from `build/`, format-on-save).
+
+The committed settings deliberately contain **no machine-specific paths**.
+clangd is auto-detected from your `PATH`. If your `clangd` is not on `PATH`
+(for example macOS Homebrew installs `llvm` keg-only), set `clangd.path` in
+your personal **User** settings — not in the workspace file — so it stays
+out of version control:
+
+```jsonc
+// User settings.json — add this key to your existing settings object
+{
+  "clangd.path": "/opt/homebrew/opt/llvm/bin/clangd"
+}
+```
+
+User settings take effect because the workspace file leaves `clangd.path`
+unset (precedence: Workspace > User > Default).
+
 ### 4. Follow the coding standards
 
 Project-wide rules are in [CLAUDE.md §4](CLAUDE.md). The headline items:

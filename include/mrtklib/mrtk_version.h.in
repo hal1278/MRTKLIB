@@ -27,4 +27,22 @@
 /** @brief Software name */
 #define MRTKLIB_SOFTNAME       "MRTKLIB"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/**
+ * @brief Git description of the source tree this binary was built from.
+ *
+ * Populated by cmake/GenerateGitVersion.cmake at every build via
+ * `git describe --always --dirty --tags --match 'v*'`. Falls back to
+ * "unknown" when git is not available or the source tree is not a git
+ * checkout (e.g. tarball builds).
+ */
+extern const char mrtklib_git_hash_str[];
+
+#ifdef __cplusplus
+}
+#endif
+
 #endif /* MRTK_VERSION_H */

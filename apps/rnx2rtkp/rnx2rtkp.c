@@ -133,7 +133,8 @@ static void printhelp(void) {
 }
 /* print version -------------------------------------------------------------*/
 static void printver(void) {
-    fprintf(stderr, "%s(%s ver.%s)\n", PROGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+    fprintf(stderr, "%s(%s ver.%s git %s)\n", PROGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING,
+            mrtklib_git_hash_str);
     exit(0);
 }
 /* rnx2rtkp main -------------------------------------------------------------*/
