@@ -110,13 +110,31 @@ static double gettgd(int sat, const nav_t* nav, int type) {
         return (i >= nav->n) ? 0.0 : nav->eph[i].tgd[type] * CLIGHT;
     }
 }
+/* index of the 2nd frequency for the iono-free combination -------------------
+ * #135: for IGS-product PPP, when the conventional slot 1 carries no observation
+ * (F9P-class GAL E5b / BDS B2I, with E5a/B3I absent), fall back to the first
+ * populated higher slot. Returns 1 otherwise, so existing dual-frequency data is
+ * unaffected. nav may be NULL to skip the carrier-frequency validity check
+ * (e.g. for SNR masking, which only needs the observation slot). */
+static int iflc_freq2_idx(const obsd_t* obs, const nav_t* nav, const prcopt_t* opt) {
+    int j;
+    if (opt->ionoopt == IONOOPT_IFLC && opt->correction == CORR_IGS && obs->P[1] == 0.0) {
+        for (j = 2; j < NFREQ; j++) {
+            if (obs->P[j] != 0.0 && (!nav || sat2freq(obs->sat, obs->code[j], nav) != 0.0)) {
+                return j;
+            }
+        }
+    }
+    return 1;
+}
 /* test SNR mask -------------------------------------------------------------*/
 static int snrmask(const obsd_t* obs, const double* azel, const prcopt_t* opt) {
     if (testsnr(0, 0, azel[1], obs->SNR[0] * SNR_UNIT, &opt->snrmask)) {
         return 0;
     }
     if (opt->ionoopt == IONOOPT_IFLC) {
-        if (testsnr(0, 1, azel[1], obs->SNR[1] * SNR_UNIT, &opt->snrmask)) {
+        int i2 = iflc_freq2_idx(obs, NULL, opt); /* #135: mask the actually-used 2nd freq */
+        if (testsnr(0, i2, azel[1], obs->SNR[i2] * SNR_UNIT, &opt->snrmask)) {
             return 0;
         }
     }
@@ -130,24 +148,12 @@ static double prange(const obsd_t* obs, const nav_t* nav, const prcopt_t* opt, d
     sat = obs->sat;
     sys = satsys(sat, NULL);
     P1 = obs->P[0];
-    P2 = obs->P[1];
     *var = 0.0;
 
-    /* #135: for IGS-product PPP, if the conventional 2nd frequency (slot 1) carries
-     * no observation (e.g. u-blox F9P delivers GAL E5b / BDS B2I in slot 2 with the
-     * nominal slot-1 band E5a/B3I absent), fall back to the first populated higher
-     * slot so the iono-free combination can still be formed. No-op when slot 1 is
-     * present, so all existing dual-frequency data is bit-identical. */
-    if (opt->ionoopt == IONOOPT_IFLC && opt->correction == CORR_IGS && P2 == 0.0) {
-        int j;
-        for (j = 2; j < NFREQ; j++) {
-            if (obs->P[j] != 0.0 && sat2freq(sat, obs->code[j], nav) != 0.0) {
-                i2 = j;
-                P2 = obs->P[j];
-                break;
-            }
-        }
-    }
+    /* #135: data-driven 2nd-frequency selection for IGS-product PPP. No-op when
+     * slot 1 is present, so all existing dual-frequency data is bit-identical. */
+    i2 = iflc_freq2_idx(obs, nav, opt);
+    P2 = obs->P[i2];
 
     if (P1 == 0.0 || (opt->ionoopt == IONOOPT_IFLC && P2 == 0.0)) {
         return 0.0;

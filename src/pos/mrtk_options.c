@@ -321,6 +321,10 @@ static int str2enum(const char* str, const char* comment, int* val) {
         for (p -= 2; p >= comment && '0' <= *p && *p <= '9'; p--) {
             /* find start of numeric id */
         }
+        /* include a leading '-' so signed ids (e.g. "-1:auto") parse correctly */
+        if (p >= comment && *p == '-') {
+            return sscanf(p, "%d", val) == 1;
+        }
         return sscanf(p + 1, "%d", val) == 1;
     }
     sprintf(s, "%.30s:", str);
