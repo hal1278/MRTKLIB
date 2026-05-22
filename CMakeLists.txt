@@ -1214,3 +1214,64 @@ set_tests_properties(igs_ppp_check PROPERTIES
     FIXTURES_REQUIRED igs_data
     LABELS            "absolute;igs;ppp"
 )
+
+# -----------------------------------------------------------------------------
+# IGS-products iono-free frequency fallback regression (#135)
+# Source: ECJ02 u-blox raw log, 2026-05-01, first 1 h window.
+# Reference coordinate: full-day static PPP median from the same raw log.
+# Test data archive: tests/data/igs/igs_iflc_testdata.tar.gz
+# -----------------------------------------------------------------------------
+add_test(NAME igs_iflc_setup
+    COMMAND bash -c "tar xzf ${_IGSDATA}/igs_iflc_testdata.tar.gz -C ${_IGSDATA}"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_iflc_setup PROPERTIES
+    FIXTURES_SETUP  igs_iflc_data
+    TIMEOUT         30
+    LABELS          "regression;igs;ppp;iflc"
+)
+
+add_test(NAME igs_iflc_cleanup
+    COMMAND bash -c "rm -f \
+        ${_IGSDATA}/ECJ02_26050100_01H.obs \
+        ${_IGSDATA}/BRDM00DLR_S_20261210000_01D_MN.rnx \
+        ${_IGSDATA}/igs20_iflc_trim.atx \
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_01D_OSB.BIA \
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_05M_ORB.SP3 \
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_12H_ERP.ERP \
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_30S_CLK.CLK"
+)
+set_tests_properties(igs_iflc_cleanup PROPERTIES
+    FIXTURES_CLEANUP igs_iflc_data
+    LABELS           "regression;igs;ppp;iflc"
+)
+
+add_test(NAME igs_iflc_ppp
+    COMMAND $<TARGET_FILE:mrtk> post
+        -k ${CMAKE_SOURCE_DIR}/conf/igs/rnx2rtkp_iflc_fallback.toml
+        -ts 2026/05/01 0:00:00 -te 2026/05/01 1:00:00
+        -o ${CMAKE_BINARY_DIR}/out_igs_iflc_ppp.pos
+        ${_IGSDATA}/ECJ02_26050100_01H.obs
+        ${_IGSDATA}/BRDM00DLR_S_20261210000_01D_MN.rnx
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_05M_ORB.SP3
+        ${_IGSDATA}/COD0MGXFIN_20261210000_01D_30S_CLK.CLK
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_iflc_ppp PROPERTIES
+    FIXTURES_REQUIRED igs_iflc_data
+    TIMEOUT           180
+    LABELS            "regression;igs;ppp;iflc"
+)
+
+add_test(NAME igs_iflc_ppp_check
+    COMMAND ${Python3_EXECUTABLE} ${_COMPARE_POS_ABS}
+        --llh 35.666334193,139.792201653,59.8539
+        --tolerance 0.20
+        ${CMAKE_BINARY_DIR}/out_igs_iflc_ppp.pos
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_iflc_ppp_check PROPERTIES
+    DEPENDS           igs_iflc_ppp
+    FIXTURES_REQUIRED igs_iflc_data
+    LABELS            "absolute;igs;ppp;iflc"
+)

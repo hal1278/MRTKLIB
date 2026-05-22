@@ -48,6 +48,10 @@ Usage
                        [options] test.pos
     compare_pos_abs.py --f5 FILE --date YYYY/MM/DD
                        [options] test.pos
+    compare_pos_abs.py --llh LAT,LON,H [--ref-precision FLOAT]
+                       [options] test.pos
+    compare_pos_abs.py --ecef X,Y,Z [--ref-precision FLOAT]
+                       [options] test.pos
 
 Options
 -------
@@ -364,6 +368,17 @@ def plot_results(m, ref_label, output_path="abs_compare.png"):
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
+def _parse_triplet(text, label):
+    """Parse a comma-separated coordinate triplet."""
+    try:
+        values = [float(v) for v in text.split(",")]
+    except ValueError as exc:
+        raise ValueError(f"{label} must contain numeric values: {text!r}") from exc
+    if len(values) != 3:
+        raise ValueError(f"{label} must be three comma-separated values")
+    return values
+
+
 def _criterion(label, value_m, tolerance_m, ref_precision_m):
     """Evaluate and print one pass/fail criterion.
 
@@ -398,12 +413,18 @@ def main():  # noqa: D103
                      help="IGS SINEX file (.SNX or .SNX.gz)")
     ref.add_argument("--f5", metavar="FILE",
                      help="GSI F5 daily coordinate file")
+    ref.add_argument("--llh", metavar="LAT,LON,H",
+                     help="Fixed reference lat/lon/h (deg, deg, m)")
+    ref.add_argument("--ecef", metavar="X,Y,Z",
+                     help="Fixed reference ECEF coordinate (m)")
     p.add_argument("--station", metavar="CODE",
                    help="4-char station code (required with --sinex)")
     p.add_argument("--date", metavar="YYYY/MM/DD",
                    help="Evaluation date for F5 15-day window (required with --f5)")
     p.add_argument("--epoch", metavar="YYYY/MM/DD",
                    help="Target epoch for SINEX propagation (default: SINEX ref epoch)")
+    p.add_argument("--ref-precision", type=float, default=0.0,
+                   help="Reference precision in metres for --llh/--ecef (default 0)")
     p.add_argument("--tolerance", type=float, default=0.030,
                    help="Tolerance for criterion A in metres (default 0.030)")
     p.add_argument("--skip-epochs", type=int, default=0,
@@ -441,7 +462,7 @@ def main():  # noqa: D103
         print(f"Reference : {args.sinex}")
         print(f"Station   : {args.station.upper()} ({epoch_note})")
         print(f"Ref prec  : {ref_precision*1000:.2f} mm (SINEX formal 3D σ)")
-    else:
+    elif args.f5:
         if not args.date:
             print("FAIL: --date is required with --f5", file=sys.stderr)
             return 1
@@ -458,6 +479,33 @@ def main():  # noqa: D103
         print(f"Eval date : {args.date}  (±7-day median, {f5['n_days']} days)")
         print(f"Ref coord : {f5['lat']:.8f}°N  {f5['lon']:.8f}°E  {f5['h']:.4f} m")
         print(f"Ref prec  : {ref_precision*1000:.2f} mm (68th-pctile of F5 daily scatter)")
+    elif args.llh:
+        try:
+            lat, lon, h = _parse_triplet(args.llh, "--llh")
+        except ValueError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 1
+        true_xyz = blh2xyz(lat, lon, h)
+        ref_precision = args.ref_precision
+        ref_label = "fixed LLH"
+
+        print(f"Reference : fixed LLH")
+        print(f"Ref coord : {lat:.8f}°N  {lon:.8f}°E  {h:.4f} m")
+        print(f"Ref prec  : {ref_precision*1000:.2f} mm")
+    else:
+        try:
+            x, y, z = _parse_triplet(args.ecef, "--ecef")
+        except ValueError as exc:
+            print(f"FAIL: {exc}", file=sys.stderr)
+            return 1
+        true_xyz = np.array([x, y, z])
+        ref_precision = args.ref_precision
+        ref_label = "fixed ECEF"
+
+        lat, lon, h = xyz2blh(x, y, z)
+        print(f"Reference : fixed ECEF")
+        print(f"Ref coord : {lat:.8f}°N  {lon:.8f}°E  {h:.4f} m")
+        print(f"Ref prec  : {ref_precision*1000:.2f} mm")
 
     # ── Parse test .pos ──────────────────────────────────────────────────────
     if not os.path.isfile(args.test):

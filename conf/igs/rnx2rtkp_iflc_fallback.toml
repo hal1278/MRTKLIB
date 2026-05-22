@@ -1,0 +1,74 @@
+# MRTKLIB Configuration (TOML v1.0.0)
+# IGS-products float PPP for the issue-135 iono-free frequency fallback
+# regression. The signal set follows the supplied PPP-static sample and keeps
+# BDS C2I/C7I in the run so the fallback path is exercised by the test data.
+
+[positioning]
+mode = "ppp-static"
+signals = ["G1C", "G2L", "E1C", "E7Q", "J1C", "J2L", "C2I", "C7I"]
+solution_type = "combined"
+elevation_mask = 15.0
+dynamics = false
+satellite_ephemeris = "precise"
+systems = ["GPS", "Galileo", "QZSS", "Beidou"]
+correction = "igs"
+
+[positioning.corrections]
+satellite_antenna = true
+receiver_antenna = true
+phase_windup = "on"
+tidal_correction = "on"
+
+[positioning.atmosphere]
+ionosphere = "dual-freq"
+troposphere = "est-ztdgrad"
+
+[ambiguity_resolution]
+mode = "off"
+
+[rejection]
+innovation = 100.0
+
+[slip_detection]
+threshold = 0.05
+
+[kalman_filter]
+iterations = 1
+
+[kalman_filter.measurement_error]
+phase = 0.003
+phase_elevation = 0.003
+doppler = 10.0
+
+[kalman_filter.initial_std]
+bias = 30.0
+ionosphere = 0.03
+troposphere = 0.3
+
+[kalman_filter.process_noise]
+bias = 0.0001
+ionosphere = 0.001
+troposphere = 0.0001
+accel_h = 1.0
+accel_v = 0.1
+clock_stability = 5e-12
+
+[receiver]
+max_age = 30.0
+
+[antenna.rover]
+type = "TRM55971.00     NONE"
+delta_e = 0.0
+delta_n = 0.0
+delta_u = 0.0
+
+[output]
+format = "llh"
+height_type = "ellipsoidal"
+static_solution = "all"
+
+[files]
+satellite_atx = "./tests/data/igs/igs20_iflc_trim.atx"
+receiver_atx = "./tests/data/igs/igs20_iflc_trim.atx"
+bias_sinex = "./tests/data/igs/COD0MGXFIN_20261210000_01D_01D_OSB.BIA"
+eop = "./tests/data/igs/COD0MGXFIN_20261210000_01D_12H_ERP.ERP"
