@@ -5,6 +5,61 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.7] - 2026-05-21
+
+**Feature** — conventional **IGS precise-products float PPP** via a new
+`correction` configuration axis, plus a fix that lets **F9P-class multi-GNSS
+receivers** (GAL E5b / BDS B2I) actually use Galileo and BeiDou in iono-free PPP.
+
+### Added
+
+- **`correction` configuration axis** (#130, #136) — decouples the correction
+  source from `mode`. Implemented values `none | igs | qzs-madoca | qzs-clas`
+  (reserved, enum-only: `igs-rts | gal-has | bds-b2b`). `resolve_correction()`
+  infers the source from `mode` + `satellite_ephemeris` when `correction` is
+  omitted, and validates the (mode, correction) pair.
+- **IGS precise-products float PPP path** — `corr_meas()` IGS branch applies
+  optional P1-C1/P2-C2 DCB from `nav->cbias`, lets the float phase-ambiguity
+  absorb the satellite phase bias, and never discards a measurement for a
+  missing SSR bias. Reads SP3 / CLK / Bias-SINEX / ERP files.
+- **IGS-products PPP regression test** (#137) — GSI GEONET station 3034
+  (FUJISAWA), GPS+GAL, validated against the published GSI daily coordinate
+  (`igs_setup`/`igs_ppp`/`igs_ppp_check`/`igs_cleanup`).
+- **IFLC frequency-fallback regression test** (#135) — ECJ02 u-blox F9P,
+  1 h window, exercising the GAL E5b / BDS B2I iono-free fallback against a
+  full-day static-PPP reference coordinate (lightweight 0.9 MB data archive).
+- **`compare_pos_abs.py`** — `--llh` and `--ecef` fixed-reference modes.
+
+### Changed
+
+- **`corr_meas()`** now branches by correction source (IGS files / SSR / none),
+  replacing the previous SSR-only measurement path.
+- For `correction = igs`, the iono-free pair is selected from the **available**
+  observations (data-driven), and the legacy `pos2-sig` obsdef reshaping is
+  skipped so a receiver's actual 2nd band survives. A one-line-per-system stderr
+  notice reports any non-nominal 2nd-band auto-selection.
+
+### Fixed
+
+- **#135** — GAL E5b (`C7Q`) / BDS B2I (`C7I`) satellites are no longer silently
+  dropped from iono-free IGS-product PPP on receivers without E5a/B3I (e.g.
+  u-blox ZED-F9P). The fix is gated on `correction == igs`, is a no-op when the
+  conventional slot-1 band is present (IGS geodetic regression `.pos` is
+  bit-identical), and leaves MADOCA / CLAS / RTK paths unchanged.
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/pos/mrtk_opt.c`, `include/mrtklib/mrtk_opt.h` | `correction` enum + `resolve_correction()` |
+| `src/pos/mrtk_ppp.c` | `corr_meas` IGS/SSR/none branches; data-driven IFLC pair; auto-select notice |
+| `src/pos/mrtk_spp.c` | data-driven IFLC 2nd-frequency for `correction=igs` |
+| `apps/rnx2rtkp/rnx2rtkp.c` | `resolve_correction()` wiring; gate `apply_pppsig` off for IGS PPP |
+| `conf/igs/*.toml` | IGS PPP sample configs |
+| `tests/data/igs/*`, `CMakeLists.txt` | `igs_ppp` and `igs_iflc` regression tests |
+| `scripts/tests/compare_pos_abs.py` | `--llh` / `--ecef` reference modes |
+| `docs/design/configuration.md` | correction-axis design and validity matrix |
+
 ## [v0.6.6] - 2026-05-10
 
 **Refactor** — unified `mrtk` subcommand help format and added GNU-style
