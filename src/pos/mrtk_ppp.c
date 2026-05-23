@@ -582,11 +582,18 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
         L[i] = obs->L[i] * CLIGHT / freq[i] - dants[ant_idx] - dantr[ant_idx] - phw * CLIGHT / freq[i];
         P[i] = obs->P[i] - dants[ant_idx] - dantr[ant_idx];
 
-        if (corr == CORR_IGS) {
-            /* IGS precise products (files): RTKLIB-style float PPP. Apply optional
-             * P1-C1 / P2-C2 DCB from nav->cbias (GPS/GLO) if present; never discard
-             * the measurement for a missing satellite bias. The satellite phase bias
-             * is absorbed by the float phase-ambiguity state (no SSR pbias needed). */
+        if (corr == CORR_IGS || corr == CORR_IGS_RTS) {
+            /* RTKLIB-style float PPP measurement model, shared by IGS precise
+             * products (files, correction=igs) and IGS-RTS RTCM-SSR streams
+             * (correction=igs-rts, #138). The satellite orbit/clock already come
+             * from satpos_ssr (EPHOPT_SSRAPC) for igs-rts; here only the receiver
+             * measurement model differs from MADOCA. Apply optional P1-C1 / P2-C2
+             * DCB from nav->cbias (GPS/GLO) if present; never discard a measurement
+             * for a missing satellite bias. The satellite phase bias is absorbed by
+             * the float phase-ambiguity state. The per-signal SSR code/phase bias
+             * (MADOCA convention) is deliberately NOT applied here: RTCM-SSR uses a
+             * different bias convention and applying it degrades the solution
+             * (verified against upstream RTKLIB rnx2rtkp). */
             if (sys == SYS_GPS || sys == SYS_GLO) {
                 if (obs->code[i] == CODE_L1C) {
                     P[i] += nav->cbias[obs->sat - 1][1];
@@ -599,9 +606,11 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
             /* no satellite bias correction (SPP/DGPS/RTK route through pntpos/relpos,
              * not here; branch kept for completeness) */
         } else {
-            /* SSR path (qzs-madoca / gal-has / bds-b2b / igs-rts; also CORR_AUTO
-             * fallback). Satellite cbias/pbias come from nav->ssr_ch; a measurement
-             * with no valid SSR bias is dropped (required for PPP-AR, MADOCALIB design). */
+            /* SSR path (qzs-madoca / gal-has / bds-b2b; also CORR_AUTO fallback).
+             * Satellite cbias/pbias come from nav->ssr_ch; a measurement with no
+             * valid SSR bias is dropped (required for PPP-AR, MADOCALIB design).
+             * Note: igs-rts does NOT take this path -- it uses the RTKLIB-style
+             * measurement model above (RTCM-SSR has a different bias convention). */
             ssrcode = mcssr_sel_biascode(sys, obs->code[i]);
 
             /* for backward compatible to IS-QZSS-MDC-003 */

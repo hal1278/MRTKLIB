@@ -144,14 +144,20 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
         if (m == PMODE_PPP_RTK || m == PMODE_VRS_RTK) {
             opt->correction = CORR_QZS_CLAS;
         } else if (m == PMODE_PPP_KINEMA || m == PMODE_PPP_STATIC || m == PMODE_PPP_FIXED) {
+            /* igs-rts is never inferred: it shares sateph=brdc+ssrapc with
+             * qzs-madoca, so the two are indistinguishable here. Require an
+             * explicit `correction = "igs-rts"` to take the RTCM-SSR path. */
             opt->correction = (opt->sateph == EPHOPT_PREC) ? CORR_IGS : CORR_QZS_MADOCA;
         } else {
             opt->correction = CORR_NONE;
         }
     }
 
-    /* reserved sources: present in the schema but not implemented yet */
-    if (opt->correction == CORR_IGS_RTS || opt->correction == CORR_GAL_HAS || opt->correction == CORR_BDS_B2B) {
+    /* reserved sources: present in the schema but not implemented yet.
+     * igs-rts is NOT reserved any more (#138): the RTCM-SSR / IGS-SSR(MT4076)
+     * decode-and-apply pipeline is inherited from the MADOCA-via-RTCM path and
+     * runs through the same SSR branch of corr_meas. */
+    if (opt->correction == CORR_GAL_HAS || opt->correction == CORR_BDS_B2B) {
         if (msg) {
             snprintf(msg, msgsz, "correction source not implemented yet (correction=%s)", corr_name(opt->correction));
         }
@@ -163,10 +169,21 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
         case PMODE_PPP_KINEMA:
         case PMODE_PPP_STATIC:
         case PMODE_PPP_FIXED:
-            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA) {
+            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA &&
+                opt->correction != CORR_IGS_RTS) {
                 if (msg) {
-                    snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use igs or qzs-madoca)",
+                    snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use igs, igs-rts or qzs-madoca)",
                              corr_name(opt->correction), mode_name(m));
+                }
+                return 0;
+            }
+            /* igs-rts applies broadcast ephemeris + RTCM-SSR; it needs an SSR-aware
+             * satellite-ephemeris option (brdc+ssrapc or brdc+ssrcom). */
+            if (opt->correction == CORR_IGS_RTS && opt->sateph != EPHOPT_SSRAPC && opt->sateph != EPHOPT_SSRCOM) {
+                if (msg) {
+                    snprintf(msg, msgsz,
+                             "correction=igs-rts requires satellite_ephemeris=brdc+ssrapc or brdc+ssrcom (got %d)",
+                             opt->sateph);
                 }
                 return 0;
             }

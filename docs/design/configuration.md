@@ -129,7 +129,7 @@ modes are bare words (no `rtk-` prefix).
 
 | `mode` value | accepted `correction` |
 |--------------|-----------------------|
-| `ppp-static` / `ppp-kine` / `ppp-fixed` | `igs`, `qzs-madoca`, `gal-has`†, `bds-b2b`†, `igs-rts`† |
+| `ppp-static` / `ppp-kine` / `ppp-fixed` | `igs`, `igs-rts`‡, `qzs-madoca`, `gal-has`†, `bds-b2b`† |
 | `ppp-rtk` | `qzs-clas` |
 | `vrs-rtk` | `qzs-clas` |
 | `kinematic` / `static` / `fixed` / `movingbase` | `none` |
@@ -138,6 +138,12 @@ modes are bare words (no `rtk-` prefix).
 
 † Reserved value — accepted by the matrix but rejected with an explicit
 "not implemented" error until the corresponding decoder lands (§7).
+
+‡ `igs-rts` additionally requires `satellite_ephemeris = "brdc+ssrapc"` (or
+`"brdc+ssrcom"`): the RTCM-SSR corrections are applied on top of broadcast
+ephemeris, so an SSR-aware `sateph` is mandatory. It is also **never inferred**
+(§6.1) — it shares `brdc+ssrapc` with `qzs-madoca`, so the two are
+indistinguishable from options alone and `igs-rts` must be set explicitly.
 
 Dynamics (static / kinematic / fixed) is independent of `correction`: all three
 accept the same sources. The fixed variant (`ppp-fixed`) constrains the receiver
@@ -171,15 +177,13 @@ route through it. This spec therefore covers only the `ppp`-engine sources.
 Today `corr_meas` has exactly one behavior (SSR-mandatory), which is why the
 IGS path fails. Phase 1 introduces a branch on `correction`:
 
-**SSR path** — `correction ∈ { qzs-madoca, gal-has, bds-b2b, igs-rts }`
+**SSR (MADOCA) path** — `correction ∈ { qzs-madoca, gal-has, bds-b2b }`
 : Current behavior, unchanged. Satellite code/phase bias is read from
-  `nav->ssr_ch` (filled by the L6E / RTCM-SSR decoders); an observation lacking
+  `nav->ssr_ch` (filled by the L6E decoder); an observation lacking
   a valid SSR bias (`vcbias` / `vpbias`) is dropped. This is required for PPP-AR
-  and is the MADOCALIB design. Note `igs-rts` (RTCM-SSR stream) takes this path,
-  whereas `igs` (precise files) takes the IGS-files path below — the two IGS
-  values are deliberately distinct (§7).
+  and is the MADOCALIB design.
 
-**IGS-files path** — `correction = igs`
+**RTKLIB float-PPP path** — `correction ∈ { igs, igs-rts }`
 : RTKLIB-style float PPP, ported from
   [`upstream/RTKLIB/src/ppp.c`](https://github.com/h-shiono/MRTKLIB/blob/main/upstream/RTKLIB/src/ppp.c):
 
@@ -194,6 +198,19 @@ IGS path fails. Phase 1 introduces a branch on `correction`:
       `nav->osb` wiring — deferred to Phase 2 (§6.3); Phase-1 `igs` is float.
       Dynamics static / kinematic / fixed all work — `ppp-fixed` is the
       known-coordinate residual-analysis case.
+    - **`igs-rts` shares this measurement model**, not the MADOCA SSR path.
+      The satellite orbit/clock for `igs-rts` come from `satpos_ssr`
+      (`EPHOPT_SSRAPC`, broadcast + decoded RTCM-SSR), but the receiver-side
+      bias model is the RTKLIB one above: the per-signal RTCM-SSR code/phase
+      bias is **not** applied. RTCM-SSR uses a different bias convention than
+      MADOCA-CSSR (the code bias even has the opposite sign), and applying it
+      via the MADOCA path degrades the solution by metres. Verified against
+      upstream RTKLIB `rnx2rtkp` on a clean IGS station (AIRA): the RTKLIB
+      measurement model converges to the published station coordinate at the
+      real-time IGS-RTS float level (3D 1σ ≈ 0.2 m vs SINEX), while the MADOCA
+      SSR-bias model is biased by several metres. `igs` (precise files) and
+      `igs-rts` (real-time RTCM-SSR) remain distinct correction *values* — they
+      differ in orbit/clock source — but share the `corr_meas` measurement model.
 
 **No-correction path** — `correction = none`
 : No satellite bias applied. Used by `single` / `dgps` / the RTK relative modes (these engines
@@ -222,7 +239,14 @@ source is inferred so those configs keep working unchanged:
 | input stream format `STRFMT_L6E` | `qzs-madoca` |
 | input stream format `STRFMT_CLAS`, or `mode` is `ppp-rtk` / `vrs-rtk` | `qzs-clas` |
 | `mode` is `single` / `dgps` / `kinematic` / `static` / `fixed` / `movingbase` | `none` |
-| otherwise (PPP mode, no SSR stream) | `igs` |
+| PPP mode with `sateph = precise` | `igs` |
+| PPP mode with `sateph = brdc+ssrapc` / `brdc+ssrcom` | `qzs-madoca` |
+
+`igs-rts` is **never inferred**: a PPP mode with `brdc+ssrapc` infers to
+`qzs-madoca` (the historical default), because RTCM-SSR IGS-RTS and MADOCA-PPP
+both arrive as `brdc+ssrapc` SSR and cannot be told apart from the options
+alone. To take the IGS-RTS / RTCM-SSR path, set `correction = "igs-rts"`
+explicitly.
 
 The inference is a compatibility shim, not the recommended form. New configs
 should set `correction` explicitly.
@@ -281,30 +305,37 @@ Phase-2 items:
 
 ## 7. Reserved-but-unimplemented values
 
-`gal-has`, `bds-b2b`, and `igs-rts` are **reserved**: accepted by the validity
-matrix and the enum, but rejected at load time with an explicit "not
-implemented" message. The reservation policy is deliberately narrow — **only
-sources we intend to support are reserved**, and all three are open, published
-specifications. No commercial brand names appear as `correction` values; a
-brand (e.g. PointPerfect) is a *delivery service* for a format (SPARTN), not a
-dispatch key.
+`gal-has` and `bds-b2b` are **reserved**: accepted by the validity matrix and
+the enum, but rejected at load time with an explicit "not implemented" message.
+The reservation policy is deliberately narrow — **only sources we intend to
+support are reserved**, and both are open, published specifications. No
+commercial brand names appear as `correction` values; a brand (e.g.
+PointPerfect) is a *delivery service* for a format (SPARTN), not a dispatch key.
 
 - **`gal-has`** (Galileo HAS, E6-B SSR) and **`bds-b2b`** (BeiDou PPP-B2b,
   B2b-signal SSR) are both open global SSR services. They fit the existing
   `ppp` engine once a decoder fills the same internal SSR structures — no new
   engine expected. Names follow the `<system>-<service>` convention (§2.3).
-- **`igs-rts`** (IGS Real-Time Service) is an open, real-time **RTCM-SSR**
-  *stream* (e.g. `SSRC00CAS0`); it routes through the **SSR path** (§5), like
-  `qzs-madoca`. It is deliberately distinct from `igs`, which is post-processing
-  precise *files* on the IGS-files path. Keeping them separate avoids overloading
-  one value with two unrelated transport mechanisms.
+
+**`igs-rts`** (IGS Real-Time Service) is **implemented** (float PPP, #138). It is
+an open, real-time **RTCM-SSR / IGS-SSR (MT4076)** *stream* (e.g. IGS01 / IGS03,
+CNES `CLK9x`). Its satellite orbit/clock are decoded by the RTCM-SSR machinery
+and applied via `satpos_ssr` (`EPHOPT_SSRAPC`), but it shares the **RTKLIB
+float-PPP measurement model** with `igs` (§5) — *not* the MADOCA SSR-bias path
+(RTCM-SSR's per-signal bias convention differs from MADOCA-CSSR; applying it via
+the MADOCA path degrades the solution by metres, verified against upstream
+RTKLIB). It is deliberately distinct from `igs`, which is post-processing precise
+*files*: the two differ in orbit/clock source but share the measurement model. Integer
+PPP-AR with `igs-rts` needs a phase-bias product (e.g. CNES `CLK93`) and is a
+later step; the unlocked Phase-1 path is float.
 
 ## 8. Phasing
 
 **Phase 1 (this design's deliverable):**
 
 - Add the `correction` TOML key and enum. Implemented: `none`, `igs`,
-  `qzs-madoca`, `qzs-clas`. Reserved: `gal-has`, `bds-b2b`, `igs-rts`.
+  `igs-rts` (float, #138), `qzs-madoca`, `qzs-clas`. Reserved: `gal-has`,
+  `bds-b2b`.
 - Branch `corr_meas` (SSR / IGS-files / none) per §5.
 - IGS-files loader: SP3 / CLK / Bias-SINEX / DCB into the `nav` fields the
   IGS path reads.
@@ -315,7 +346,9 @@ dispatch key.
 
 - `dynamics` double-encoding cleanup (§6.3).
 - `ppp-rtk` / `vrs-rtk` dynamics symmetry, incl. `PMODE_PPPRTK_FIXED` (§6.3).
-- `igs-rts` (real-time IGS SSR stream).
+- ~~`igs-rts` (real-time IGS SSR stream)~~ — **done (float PPP, #138)**; the
+  pipeline was already present, the axis is now unlocked. Integer PPP-AR with
+  `igs-rts` (phase-bias product) remains later work.
 - `gal-has` / `bds-b2b` decoder implementations.
 - `nav->osb` wiring into the IGS path → integer IGS PPP-AR (`armode` with
   `igs`; needs a phase-bias product) (§6.3).

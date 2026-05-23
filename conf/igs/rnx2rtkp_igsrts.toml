@@ -1,0 +1,75 @@
+# MRTKLIB Configuration (TOML v1.0.0)
+# IGS Real-Time Service float PPP via RTCM-SSR / IGS-SSR (MT4076).
+#
+# Correction source is a real-time SSR stream recorded as an RTCM3 log
+# (orbit + clock + code-bias), e.g. IGS01 / IGS03 or CNES CLK9x. Feed it to
+# `mrtk post` alongside the rover obs and a broadcast navigation file:
+#
+#   mrtk post -k conf/igs/rnx2rtkp_igsrts.toml \
+#       rover.obs brdc.nav ssr_stream.rtcm3 -o out.pos
+#
+# Unlike `correction = "igs"` (post-processing precise SP3/CLK *files*),
+# `igs-rts` applies broadcast ephemeris corrected by the SSR stream, so it
+# requires satellite_ephemeris = "brdc+ssrapc" (or "brdc+ssrcom"). The SSR
+# code/phase bias is read on the same path as MADOCA-via-RTCM (see #138).
+
+[positioning]
+mode = "ppp-static"
+frequency = "l1+2"
+solution_type = "forward"
+elevation_mask = 15.0
+dynamics = false
+satellite_ephemeris = "brdc+ssrapc"
+systems = ["GPS", "Galileo"]
+correction = "igs-rts"
+
+[positioning.corrections]
+satellite_antenna = false # SSR_APC orbits are antenna-phase-center referenced
+receiver_antenna = true
+phase_windup = "on"
+tidal_correction = "on"
+
+[positioning.atmosphere]
+ionosphere = "dual-freq"
+troposphere = "est-ztdgrad"
+
+[ambiguity_resolution]
+mode = "off" # float PPP (RTS phase-bias product needed for integer AR)
+
+[rejection]
+innovation = 30.0
+
+[slip_detection]
+threshold = 0.05
+
+[kalman_filter]
+iterations = 1
+
+[kalman_filter.measurement_error]
+phase = 0.003
+phase_elevation = 0.003
+
+[kalman_filter.initial_std]
+bias = 30.0
+ionosphere = 0.03
+troposphere = 0.3
+
+[kalman_filter.process_noise]
+bias = 0.0001
+ionosphere = 0.001
+troposphere = 0.0001
+accel_h = 1.0
+accel_v = 0.1
+clock_stability = 5e-12
+
+[receiver]
+max_age = 30.0
+
+[output]
+format = "llh"
+height_type = "ellipsoidal"
+static_solution = "all"
+
+[files]
+satellite_atx = "./tests/data/igs/igs20_trim.atx"
+receiver_atx = "./tests/data/igs/igs20_trim.atx"
