@@ -142,12 +142,15 @@ mrtk post -k conf/igs/rnx2rtkp_igsrts.toml rover.obs brdc.nav ssr.rtcm3 -o out.p
 
 ### Real-time (`mrtk run`)
 
-Point the rover and correction input streams at the NTRIP mountpoints in your
-`mrtk run` config (`[streams.input.rover]` / `[streams.input.correction]`, type
-`ntripcli`), with the same `[positioning]` block as above, and start:
+Use the real-time sample
+[`conf/igs/rtkrcv_igsrts.toml`](https://github.com/h-shiono/MRTKLIB/blob/main/conf/igs/rtkrcv_igsrts.toml):
+it points `[streams.input.rover]` and `[streams.input.correction]` at NTRIP
+mountpoints (type `ntripcli`) through the stunnel endpoint, with the same
+`[positioning]` block as above. Replace `USER:PW` and the rover stream with your
+own receiver, then start:
 
 ```bash
-mrtk run -o conf/run-igsrts.toml -p 2401 -s
+mrtk run -o conf/igs/rtkrcv_igsrts.toml -p 2401 -s
 ```
 
 The correction-application pipeline (`decode_ssr*` → `satpos_ssr` → `corr_meas`)

@@ -1,0 +1,221 @@
+# MRTKLIB Configuration (TOML v1.0.0)
+# Real-time IGS-RTS float PPP (correction = "igs-rts") for `mrtk run`.
+#
+# Rover observations + correction (RTCM-SSR / IGS-SSR) arrive over NTRIP. CDDIS
+# serves NTRIP over TLS (port 443) — tunnel through stunnel and point the stream
+# paths at the local endpoint (127.0.0.1:2101). See docs/guide/quickstart-igs-rts.md
+# and docs/guide/ntrip.md. Replace USER:PW and the rover stream with your own.
+#
+#   stunnel ntrip-tls.conf            # 127.0.0.1:2101 -> caster.cddis...:443
+#   mrtk run -o conf/igs/rtkrcv_igsrts.toml -p 2401 -s
+
+[positioning]
+mode = "ppp-static"                 # ppp-kine for a moving rover
+frequency = "l1+2"
+solution_type = "forward"
+elevation_mask = 15.0
+dynamics = false
+satellite_ephemeris = "brdc+ssrapc" # SSRA = APC; use brdc+ssrcom for SSRC streams
+systems = ["GPS", "Galileo"]
+correction = "igs-rts"              # must be set explicitly (shares brdc+ssrapc with qzs-madoca)
+
+[positioning.snr_mask]
+rover_enabled = false
+base_enabled = false
+L1 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+L2 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+L5 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[positioning.corrections]
+satellite_antenna = false # SSR_APC orbits are antenna-phase-center based
+receiver_antenna = true
+phase_windup = "on"
+exclude_eclipse = false
+raim_fde = false
+iono_compensation = "off"
+tidal_correction = "on"
+
+[positioning.atmosphere]
+ionosphere = "dual-freq"
+troposphere = "est-ztdgrad"
+
+[ambiguity_resolution]
+mode = "off" # float PPP (RTS phase-bias product needed for AR)
+systems = 9
+
+[ambiguity_resolution.thresholds]
+ratio = 3.0
+ratio1 = 0.9999
+ratio2 = 0.25
+ratio3 = 0.1
+ratio4 = 0.05
+elevation_mask = 15.0
+hold_elevation = 0.0
+
+[ambiguity_resolution.counters]
+lock_count = 0
+min_fix = 10
+max_iterations = 99
+out_count = 5
+
+[rejection]
+innovation = 30.0
+gdop = 30.0
+
+[slip_detection]
+threshold = 0.05
+
+[kalman_filter]
+sync_solution = false
+iterations = 1
+
+[kalman_filter.measurement_error]
+code_phase_ratio_L1 = 100.0
+code_phase_ratio_L2 = 100.0
+phase = 0.003
+phase_elevation = 0.003
+phase_baseline = 0.0
+doppler = 1.0
+
+[kalman_filter.initial_std]
+bias = 30.0
+ionosphere = 0.03
+troposphere = 0.3
+
+[kalman_filter.process_noise]
+accel_h = 1.0
+accel_v = 0.1
+bias = 1.00e-04
+ionosphere = 0.001
+troposphere = 1.00e-04
+position = 0.0
+clock_stability = 5.00e-12
+
+[receiver]
+max_age = 30.0
+ignore_chi_error = false
+bds2_bias = false
+
+[antenna.rover]
+position_type = "single" # PPP seeds position from single-point; rover is estimated
+position_1 = 0.0
+position_2 = 0.0
+position_3 = 0.0
+type = "*"               # "*" = use rover-reported antenna; set the exact ANTEX name if absent
+delta_e = 0.0
+delta_n = 0.0
+delta_u = 0.0
+
+[antenna.base]
+position_type = "llh"
+position_1 = 0.0
+position_2 = 0.0
+position_3 = 0.0
+type = ""
+delta_e = 0.0
+delta_n = 0.0
+delta_u = 0.0
+max_average_epochs = 0
+init_reset = false
+
+[output]
+format = "llh"
+header = true
+options = true
+velocity = false
+time_system = "gpst"
+time_format = "hms"
+time_decimals = 3
+coordinate_format = "deg"
+field_separator = ""
+single_output = false
+max_solution_std = 0.0
+height_type = "ellipsoidal"
+geoid_model = "internal"
+static_solution = "all"
+nmea_interval_1 = 0.0
+nmea_interval_2 = 0.0
+solution_status = "off"
+
+[files]
+satellite_atx = ""
+receiver_atx = ""  # path to an ANTEX (igs20.atx) for receiver PCV
+station_pos = ""
+geoid = ""
+ionosphere = ""
+dcb = ""
+eop = ""
+ocean_loading = ""
+fcb = ""
+bias_sinex = ""
+temp_dir = ""
+geexe = ""
+solution_stat = ""
+trace = ""
+
+[server]
+time_interpolation = false
+sbas_satellite = "0"
+rinex_option_1 = ""
+rinex_option_2 = ""
+ppp_option = ""
+rtcm_option = ""
+cycle_ms = 10
+timeout_ms = 10000
+reconnect_ms = 10000
+nmea_cycle_ms = 5000
+buffer_size = 32768
+nav_msg_select = "all"
+proxy = ""
+swap_margin = 30
+
+[console]
+passwd = ""
+timetype = "gpst"
+soltype = "deg"
+solflag = "off"
+
+# --- Streams: rover obs + SSR correction over NTRIP (via the stunnel endpoint) ---
+# Replace the rover with your own receiver (serial://..., tcpcli://...) or an IGS
+# station mountpoint. The rover stream must also deliver broadcast ephemeris
+# (RTCM 1019/1020/1042/1044/1045/1046); if it does not, add a BCEP* stream in
+# [streams.input.base]. URL-encode special characters in the password (@ -> %40).
+[streams.input.rover]
+type = "ntripcli"
+path = "USER:PW@127.0.0.1:2101/AIRA00JPN?ver=2&host=caster.cddis.eosdis.nasa.gov"
+format = "rtcm3"
+
+[streams.input.base]
+type = "off"    # optional: BCEP00BKG0 here if the rover lacks ephemeris
+path = ""
+format = ""
+nmeareq = false
+nmealat = 0.0
+nmealon = 0.0
+
+[streams.input.correction]
+type = "ntripcli"
+path = "USER:PW@127.0.0.1:2101/SSRA02IGS0?ver=2&host=caster.cddis.eosdis.nasa.gov"
+format = "rtcm3"
+
+[streams.output.stream1]
+type = "file"
+path = "igsrts_realtime.pos"
+format = "llh"
+
+[streams.output.stream2]
+type = "off"
+path = ""
+format = "llh"
+
+[streams.log.stream1]
+type = "off"
+path = ""
+
+[streams.log.stream2]
+type = "off"
+path = ""
+
+[streams.log.stream3]
+type = "off"
+path = ""
