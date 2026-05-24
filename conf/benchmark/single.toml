@@ -14,7 +14,7 @@ dynamics = false                               # snapshot SPP does not use dynam
 satellite_ephemeris = "brdc"
 excluded_sats = ""
 systems = ["GPS", "Galileo", "QZSS", "BeiDou"]
-robust = "off"                                 # #116 P2: "off" | "igg3" (IGG-III robust pseudorange re-weighting)
+robust = "igg3"                                # #116 P2: "off" | "igg3" (IGG-III robust pseudorange re-weighting)
 robust_k0 = 1.5                                # IGG-III lower threshold (full weight below)
 robust_k1 = 4.0                                # IGG-III upper threshold (reject above)
 
@@ -49,11 +49,12 @@ iterations = 1
 [kalman_filter.measurement_error]
 # #116 P1: C/N0 (Sigma-epsilon) pseudorange weighting. snr_error > 0 enables the
 # term; snr_max is the reference C/N0 above which no extra penalty is applied.
-# Default-off: on this geodetic-grade dataset C/N0 weighting alone improves the
-# bulk (rate/median) but slightly worsens the p95 tail via chi-square gate
-# loosening; the tail is addressed by P2 (robust re-weighting) / P3 (RAIM).
+# Enabled here together with robust="igg3": the P1+P2 weighting plus the P3
+# pre-robust acceptance gate is a clean win on this dataset (rate +16pp, median
+# -43%, p95 improved). See docs/design/spp-accuracy.md §4.4. The library default
+# (prcopt_default) keeps these off, so non-benchmark runs are unchanged.
 snr_max = 50.0  # dB-Hz
-snr_error = 0.0 # m (0 = disabled)
+snr_error = 0.5 # m (0 = disabled)
 
 [antenna.rover]
 position_type = "single"

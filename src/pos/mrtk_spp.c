@@ -409,7 +409,7 @@ static int valsol(const double* azel, const int* vsat, int n, const prcopt_t* op
     }
     dops(ns, azels, opt->elmin, dop);
     trace(NULL, 4, "valsol  : n=%d nv=%d vv=%.1f cs=%.1f maxgdop=%.1f gdop=%.1f pdop=%.1f hdop=%.1f vdop=%.1f\n", n, nv,
-          vv, chisqr[nv - nx - 1], opt->maxgdop, dop[0], dop[1], dop[2], dop[3]);
+          vv, nv > nx ? chisqr[nv - nx - 1] : 0.0, opt->maxgdop, dop[0], dop[1], dop[2], dop[3]);
     if (dop[0] <= 0.0 || dop[0] > opt->maxgdop) {
         sprintf(msg, "gdop error nv=%d gdop=%.1f", nv, dop[0]);
         return 0;
@@ -450,7 +450,7 @@ static double median_abs(const double* x, int n, double* work) {
 /* estimate receiver position ------------------------------------------------*/
 static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts, const double* vare, const int* svh,
                   const nav_t* nav, const prcopt_t* opt, sol_t* sol, double* azel, int* vsat, double* resp, char* msg) {
-    double x[NX] = {0}, dx[NX], Q[NX * NX], *v, *H, *var, sig;
+    double x[NX] = {0}, dx[NX], Q[NX * NX], *v, *H, *var, *vpre, sig;
     int i, j, k, info, stat = 1, nv, ns;
 
     trace(NULL, 3, "estpos  : n=%d\n", n);
@@ -458,6 +458,7 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
     v = mat(n + NT, 1);
     H = mat(NX, n + NT);
     var = mat(n + NT, 1);
+    vpre = mat(n + NT, 1); /* #116 P3: pre-robust all-sat residuals for the acceptance gate */
 
     for (i = 0; i < 3; i++) {
         x[i] = sol->rr[i];
@@ -485,10 +486,21 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
          * standardized residuals are meaningful. Off when opt->robust==0, so the
          * default solution is bit-identical. var[] is stale here (recomputed by
          * rescode next iteration), so it doubles as the median scratch buffer. */
-        if (opt->robust == 1 && i >= 1 && ns >= 5) {
+        int gated = (opt->robust == 1 && i >= 1 && ns >= 5);
+        if (gated) {
             double k0 = opt->robustk[0] > 0.0 ? opt->robustk[0] : 1.5;
             double k1 = opt->robustk[1] > 0.0 ? opt->robustk[1] : 4.0;
-            double s0 = 1.4826 * median_abs(v, ns, var); /* MAD robust scale */
+            double s0;
+            /* #116 P3: snapshot the pre-robust residuals over ALL satellites for
+             * the acceptance gate. The gate must include the outlier rows the
+             * robust pass is about to suppress — otherwise it accepts epochs whose
+             * excluded sats disagree (consistent-bias urban epochs), which is the
+             * gate-defeat that exploded the tail in §4.3. The robust solution is
+             * still what gets output; only the accept/reject test uses vpre. */
+            for (j = 0; j < nv; j++) {
+                vpre[j] = v[j];
+            }
+            s0 = 1.4826 * median_abs(v, ns, var); /* MAD robust scale */
             if (s0 < 1.0) {
                 s0 = 1.0; /* guard against over-rejection when residuals are small */
             }
@@ -530,13 +542,16 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
             sol->ns = (uint8_t)ns;
             sol->age = sol->ratio = 0.0;
 
-            /* validate solution */
-            if (!opt->posopt[4] || (stat = valsol(azel, vsat, n, opt, v, nv, NX, msg))) {
+            /* validate solution (#116 P3: when the robust pass ran, gate on the
+             * pre-robust all-satellite residuals so the down-weighting cannot
+             * defeat the acceptance test) */
+            if (!opt->posopt[4] || (stat = valsol(azel, vsat, n, opt, gated ? vpre : v, nv, NX, msg))) {
                 sol->stat = opt->sateph == EPHOPT_SBAS ? SOLQ_SBAS : SOLQ_SINGLE;
             }
             free(v);
             free(H);
             free(var);
+            free(vpre);
             return stat;
         }
     }
@@ -547,6 +562,7 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
     free(v);
     free(H);
     free(var);
+    free(vpre);
     return 0;
 }
 /* RAIM FDE (failure detection and exclution) -------------------------------*/
