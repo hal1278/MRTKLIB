@@ -118,6 +118,57 @@ MRTKLIB ships with ready-to-use configuration files for common use cases:
 | `conf/malib/rnx2rtkp.toml` | General post-processing |
 | `conf/malib/rtkrcv.toml` | General real-time |
 
+### IGS Products (`correction = "igs"` / `"igs-rts"`)
+
+| File | Mode |
+|------|------|
+| `conf/igs/rnx2rtkp_ppp.toml` | Float PPP, precise SP3/CLK files |
+| `conf/igs/rnx2rtkp_igspppar.toml` | Integer PPP-AR, GPS+Galileo |
+| `conf/igs/rnx2rtkp_igspppar_gps.toml` | Integer PPP-AR, GPS-only |
+| `conf/igs/rnx2rtkp_igsrts.toml` | Float PPP, real-time RTCM-SSR stream |
+
+#### Integer PPP-AR with IGS products
+
+Resolving integer ambiguities from IGS precise products needs a satellite
+**phase-bias** product and the **uncombined** measurement model:
+
+```toml
+[positioning]
+correction = "igs"
+
+[positioning.atmosphere]
+ionosphere = "est-stec"     # uncombined -- per-frequency ambiguity states
+
+[ambiguity_resolution]
+mode = "continuous"
+
+[files]
+# COD MGEX IAR Bias-SINEX (carries L* phase + C* code OSB). Use bias_sinex=,
+# NOT dcb= (the legacy CODE-DCB parser ignores Bias-SINEX files).
+bias_sinex = "COD0MGXFIN_<yyyyddd>0000_01D_01D_OSB.BIA"
+```
+
+The float iono-free config (`ionosphere = "dual-freq"`) **cannot** resolve
+integers — it carries a single ambiguity per satellite, not per frequency, so
+`ambiguity_resolution` is a no-op there. Galileo (or more constellations) is
+recommended: GPS-only often has too few satellites for reliable narrow-lane
+fixing on short sessions, though the wide-lane still fixes.
+
+The float solution itself is cross-validated against RTKLIB 2.4.3: on the
+GEONET FUJISAWA dataset both reach ≈8.4 cm 3D (1σ) versus the GSI F5
+coordinate — i.e. MRTKLIB's IGS float PPP shows no meaningful degradation
+relative to RTKLIB. (RTKLIB has no integer PPP-AR, so the fixed solution has no
+upstream counterpart to compare against.)
+
+**Constellations.** Ambiguity resolution covers GPS, Galileo, QZSS and BeiDou
+(BDS-2/BDS-3), selected with the `[ambiguity_resolution].systems` bitmask
+(GPS=1, Galileo=8, QZSS=16, BeiDou=32). GLONASS is float-only (FDMA has no
+integer AR). Whether a constellation actually fixes also depends on the OSB
+product carrying phase biases for the **signals you process**: the COD MGEX OSB
+provides GPS and Galileo phase biases on the nominal `l1+2` pair, but its QZSS
+phase biases are L1/L5 only (no L2) and it carries no BeiDou phase biases —
+so GPS+Galileo is the dependable combination with that product today.
+
 ## Migration from .conf
 
 Use the included conversion script to migrate legacy `.conf` files:

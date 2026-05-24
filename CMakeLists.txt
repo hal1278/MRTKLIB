@@ -1173,6 +1173,7 @@ add_test(NAME igs_cleanup
         ${_IGSDATA}/BRDC00IGS_2026021_GE.rnx \
         ${_IGSDATA}/COD0MGXFIN_2026021_05M_ORB.SP3 \
         ${_IGSDATA}/COD0MGXFIN_2026021_30S_CLK.CLK \
+        ${_IGSDATA}/COD0MGXFIN_2026021_01D_OSB.BIA \
         ${_IGSDATA}/igs20_trim.atx \
         ${_IGSDATA}/93034.26.pos"
 )
@@ -1213,6 +1214,79 @@ set_tests_properties(igs_ppp_check PROPERTIES
     DEPENDS           igs_ppp
     FIXTURES_REQUIRED igs_data
     LABELS            "absolute;igs;ppp"
+)
+
+# ── IGS-products integer PPP-AR (#142) ───────────────────────────────────────
+# Uncombined measurement model + Bias-SINEX OSB phase biases. Two variants:
+#   igs_pppar_gps : GPS-only -- guards the uncombined OSB path and the
+#                   dual-frequency AR cascade (no EWL ambiguity); accuracy only,
+#                   since 6 satellites are too few for reliable narrow-lane fix.
+#   igs_pppar_ge  : GPS+Galileo -- asserts a real integer-fix rate (Q=1).
+add_test(NAME igs_pppar_gps
+    COMMAND $<TARGET_FILE:mrtk> post
+        -k ${CMAKE_SOURCE_DIR}/conf/igs/rnx2rtkp_igspppar_gps.toml
+        -ts 2026/01/21 0:00:00 -te 2026/01/21 2:00:00
+        -o ${CMAKE_BINARY_DIR}/out_igs_pppar_gps.pos
+        ${_IGSDATA}/30340210.26o
+        ${_IGSDATA}/BRDC00IGS_2026021_GE.rnx
+        ${_IGSDATA}/COD0MGXFIN_2026021_05M_ORB.SP3
+        ${_IGSDATA}/COD0MGXFIN_2026021_30S_CLK.CLK
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_pppar_gps PROPERTIES
+    FIXTURES_REQUIRED igs_data
+    TIMEOUT           180
+    LABELS            "regression;igs;ppp;pppar"
+)
+
+add_test(NAME igs_pppar_gps_check
+    COMMAND ${Python3_EXECUTABLE} ${_COMPARE_POS_ABS}
+        --f5 ${_IGSDATA}/93034.26.pos
+        --date 2026/01/21
+        --tolerance 0.15
+        --skip-epochs 30
+        ${CMAKE_BINARY_DIR}/out_igs_pppar_gps.pos
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_pppar_gps_check PROPERTIES
+    DEPENDS           igs_pppar_gps
+    FIXTURES_REQUIRED igs_data
+    LABELS            "absolute;igs;ppp;pppar"
+)
+
+add_test(NAME igs_pppar_ge
+    COMMAND $<TARGET_FILE:mrtk> post
+        -k ${CMAKE_SOURCE_DIR}/conf/igs/rnx2rtkp_igspppar.toml
+        -ts 2026/01/21 0:00:00 -te 2026/01/21 2:00:00
+        -o ${CMAKE_BINARY_DIR}/out_igs_pppar_ge.pos
+        ${_IGSDATA}/30340210.26o
+        ${_IGSDATA}/BRDC00IGS_2026021_GE.rnx
+        ${_IGSDATA}/COD0MGXFIN_2026021_05M_ORB.SP3
+        ${_IGSDATA}/COD0MGXFIN_2026021_30S_CLK.CLK
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_pppar_ge PROPERTIES
+    FIXTURES_REQUIRED igs_data
+    TIMEOUT           180
+    LABELS            "regression;igs;ppp;pppar"
+)
+
+# integer-fix assertion: GPS+GAL resolves narrow-lane (Q=1). Threshold 10% is a
+# conservative floor; observed ~31% on this 2 h window (100% once converged).
+add_test(NAME igs_pppar_ge_check
+    COMMAND ${Python3_EXECUTABLE} ${_COMPARE_POS_ABS}
+        --f5 ${_IGSDATA}/93034.26.pos
+        --date 2026/01/21
+        --tolerance 0.15
+        --skip-epochs 30
+        --min-fix-rate 10
+        ${CMAKE_BINARY_DIR}/out_igs_pppar_ge.pos
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(igs_pppar_ge_check PROPERTIES
+    DEPENDS           igs_pppar_ge
+    FIXTURES_REQUIRED igs_data
+    LABELS            "absolute;igs;ppp;pppar"
 )
 
 # -----------------------------------------------------------------------------
