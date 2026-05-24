@@ -38,6 +38,9 @@ static const toml_map_t toml_mapping[] = {
     {"positioning", "constellations", "pos1-navsys"},
     {"positioning", "excluded_sats", "pos1-exclsats"},
     {"positioning", "signals", "pos1-signals"},
+    {"positioning", "robust", "pos1-robust"},
+    {"positioning", "robust_k0", "pos1-robustk0"},
+    {"positioning", "robust_k1", "pos1-robustk1"},
 
     /* ── positioning.clas ──────────────────────────────────────────────────── */
     {"positioning.clas", "grid_selection_radius", "pos1-gridsel"},

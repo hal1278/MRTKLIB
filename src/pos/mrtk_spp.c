@@ -416,6 +416,37 @@ static int valsol(const double* azel, const int* vsat, int n, const prcopt_t* op
     }
     return 1;
 }
+/* IGG-III three-segment equivalent-weight factor (#116 P2) ------------------
+ * rt = standardized residual; returns a multiplicative weight in [0,1].
+ * |rt|<=k0: full weight; k0<|rt|<=k1: smooth down-weight; |rt|>k1: reject. */
+static double igg3_weight(double rt, double k0, double k1) {
+    double a = fabs(rt), t;
+    if (a <= k0) {
+        return 1.0;
+    }
+    if (a <= k1) {
+        t = (k1 - a) / (k1 - k0);
+        return (k0 / a) * t * t;
+    }
+    return 0.0;
+}
+/* ascending compare for qsort of doubles ------------------------------------*/
+static int cmp_dbl(const void* a, const void* b) {
+    double d = *(const double*)a - *(const double*)b;
+    return (d < 0.0) ? -1 : (d > 0.0 ? 1 : 0);
+}
+/* median of |x[0..n-1]| using work[] as scratch (work may equal nothing live)*/
+static double median_abs(const double* x, int n, double* work) {
+    int i;
+    if (n <= 0) {
+        return 0.0;
+    }
+    for (i = 0; i < n; i++) {
+        work[i] = fabs(x[i]);
+    }
+    qsort(work, n, sizeof(double), cmp_dbl);
+    return (n % 2) ? work[n / 2] : 0.5 * (work[n / 2 - 1] + work[n / 2]);
+}
 /* estimate receiver position ------------------------------------------------*/
 static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts, const double* vare, const int* svh,
                   const nav_t* nav, const prcopt_t* opt, sol_t* sol, double* azel, int* vsat, double* resp, char* msg) {
@@ -446,6 +477,27 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
             v[j] /= sig;
             for (k = 0; k < NX; k++) {
                 H[k + j * NX] /= sig;
+            }
+        }
+        /* #116 P2: IGG-III robust re-weighting of the pseudorange rows (0..ns-1;
+         * the trailing rank constraints are left untouched). Applied from the
+         * 2nd Gauss-Newton step (i>=1) so the clock is already estimated and the
+         * standardized residuals are meaningful. Off when opt->robust==0, so the
+         * default solution is bit-identical. var[] is stale here (recomputed by
+         * rescode next iteration), so it doubles as the median scratch buffer. */
+        if (opt->robust == 1 && i >= 1 && ns >= 5) {
+            double k0 = opt->robustk[0] > 0.0 ? opt->robustk[0] : 1.5;
+            double k1 = opt->robustk[1] > 0.0 ? opt->robustk[1] : 4.0;
+            double s0 = 1.4826 * median_abs(v, ns, var); /* MAD robust scale */
+            if (s0 < 1.0) {
+                s0 = 1.0; /* guard against over-rejection when residuals are small */
+            }
+            for (j = 0; j < ns; j++) {
+                double w = sqrt(igg3_weight(v[j] / s0, k0, k1));
+                v[j] *= w;
+                for (k = 0; k < NX; k++) {
+                    H[k + j * NX] *= w;
+                }
             }
         }
         /* least square estimation */

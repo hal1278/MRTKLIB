@@ -14,6 +14,9 @@ dynamics = false                               # snapshot SPP does not use dynam
 satellite_ephemeris = "brdc"
 excluded_sats = ""
 systems = ["GPS", "Galileo", "QZSS", "BeiDou"]
+robust = "off"                                 # #116 P2: "off" | "igg3" (IGG-III robust pseudorange re-weighting)
+robust_k0 = 1.5                                # IGG-III lower threshold (full weight below)
+robust_k1 = 4.0                                # IGG-III upper threshold (reject above)
 
 [positioning.snr_mask]
 rover_enabled = false
