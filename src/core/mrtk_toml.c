@@ -41,6 +41,8 @@ static const toml_map_t toml_mapping[] = {
     {"positioning", "robust", "pos1-robust"},
     {"positioning", "robust_k0", "pos1-robustk0"},
     {"positioning", "robust_k1", "pos1-robustk1"},
+    {"positioning", "tdcp", "pos1-tdcp"},
+    {"positioning", "tdcp_jump", "pos1-tdcpjump"},
 
     /* ── positioning.clas ──────────────────────────────────────────────────── */
     {"positioning.clas", "grid_selection_radius", "pos1-gridsel"},

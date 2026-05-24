@@ -17,6 +17,8 @@ systems = ["GPS", "Galileo", "QZSS", "BeiDou"]
 robust = "igg3"                                # #116 P2: "off" | "igg3" (IGG-III robust pseudorange re-weighting)
 robust_k0 = 1.5                                # IGG-III lower threshold (full weight below)
 robust_k1 = 4.0                                # IGG-III upper threshold (reject above)
+tdcp = true                                    # #116 P4: TDCP velocity + jump-rejection QC
+tdcp_jump = 5.0                                # reject epoch if code vs TDCP displacement differ by > this (m)
 
 [positioning.snr_mask]
 rover_enabled = false
@@ -42,6 +44,9 @@ mode = "off"
 [rejection]
 innovation = 30.0
 gdop = 30.0
+
+[slip_detection]
+doppler = 1.0 # #116 P4: Doppler-vs-phase cycle-slip threshold (cyc/s, 0=off)
 
 [kalman_filter]
 iterations = 1

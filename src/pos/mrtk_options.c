@@ -99,6 +99,8 @@ opt_t sysopts[] = {
     {"pos1-robust", 3, (void*)&prcopt_.robust, ROBOPT},
     {"pos1-robustk0", 1, (void*)&prcopt_.robustk[0], ""},
     {"pos1-robustk1", 1, (void*)&prcopt_.robustk[1], ""},
+    {"pos1-tdcp", 3, (void*)&prcopt_.tdcp, SWTOPT},
+    {"pos1-tdcpjump", 1, (void*)&prcopt_.tdcpjump, "m"},
     {"pos1-sateph", 3, (void*)&prcopt_.sateph, EPHOPT},
     {"pos1-posopt1", 3, (void*)&prcopt_.posopt[0], SWTOPT},
     {"pos1-posopt2", 3, (void*)&prcopt_.posopt[1], SWTOPT},
