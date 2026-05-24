@@ -733,6 +733,15 @@ static int update_states(double* x, double* P, const double* D, int nx, const do
     int i, info, sys;
     unsigned int tick = tickget();
 
+    /* nothing to update: skip the filter so it is not called with a zero-size
+     * gain matrix. This happens for the extra-wide-lane step on a dual-frequency
+     * setup (no 3rd frequency -> no EWL ambiguity); without the guard filter()
+     * invokes LAPACK DGETRF with n=0 (XERBLA "parameter 4 illegal") and returns
+     * an error, which previously aborted the whole AR before wide-/narrow-lane. */
+    if (na <= 0) {
+        return 0;
+    }
+
     R = zeros(na, na);
     for (i = 0; i < na; i++) {
         var = SQR(CONST_AMB);
