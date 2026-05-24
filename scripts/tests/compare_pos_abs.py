@@ -323,6 +323,9 @@ def compute_abs_metrics(true_xyz, test_data, skip_epochs=0):
         "p95_3d":   float(np.percentile(e3, 95)),
         "max_3d":   float(np.max(e3)),
         "fix_rate": sum(1 for q in q_list if q in (1, 6)) / n * 100.0,
+        # integer-fixed only (Q=1 = narrow-lane/RTK fix); excludes Q=6 PPP float.
+        # Used by --min-fix-rate to assert PPP-AR actually resolves ambiguities.
+        "fix_rate_int": sum(1 for q in q_list if q == 1) / n * 100.0,
     }
 
 
@@ -429,6 +432,8 @@ def main():  # noqa: D103
                    help="Tolerance for criterion A in metres (default 0.030)")
     p.add_argument("--skip-epochs", type=int, default=0,
                    help="Initial epochs to discard")
+    p.add_argument("--min-fix-rate", type=float, default=None,
+                   help="Require integer-fix rate (Q=1) >= this percent (PPP-AR test)")
     p.add_argument("--use-2d", action="store_true",
                    help="Evaluate pass/fail on 2D horizontal error (default: 3D)")
     p.add_argument("--plot", action="store_true",
@@ -553,7 +558,8 @@ def main():  # noqa: D103
     print(f"    95%   : {m['p95_3d']*100:8.3f} cm  (95th percentile)")
     print(f"    Max   : {m['max_3d']*100:8.3f} cm")
     print()
-    print(f"  Fix rate : {m['fix_rate']:.2f}%")
+    print(f"  Sol rate : {m['fix_rate']:.2f}%  (Q=1/6: fixed or PPP-float)")
+    print(f"  Fix rate : {m['fix_rate_int']:.2f}%  (Q=1: integer-fixed)")
     print(f"  Ref prec : {ref_precision*100:.3f} cm  ({ref_label})")
     print()
 
@@ -577,6 +583,14 @@ def main():  # noqa: D103
         ok_95 = _criterion("95% (3D)", m["p95_3d"], args.tolerance, ref_precision)
 
     passed = ok_1s and ok_95
+
+    if args.min_fix_rate is not None:
+        ok_fix = m["fix_rate_int"] >= args.min_fix_rate
+        tag = "PASS" if ok_fix else "FAIL"
+        rel = ">=" if ok_fix else "<"
+        print(f"{tag} [fix-rate]: {m['fix_rate_int']:.2f}% {rel} min {args.min_fix_rate:.2f}%")
+        passed = passed and ok_fix
+
     print()
     print("RESULT: PASS" if passed else "RESULT: FAIL")
     return 0 if passed else 1

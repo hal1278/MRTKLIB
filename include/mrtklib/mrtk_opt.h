@@ -227,7 +227,7 @@ typedef struct prcopt_t {         /* processing options type */
     int bds2bias;                 /* estimate of bias for each BeiDou2 satellite type (0:off,1:on) */
     int sattmode;                 /* 0:nominal */
     int pppsatcb;                 /* satellite code bias selection (0:auto,1:ssr,2:bia,3:dcb) */
-    int pppsatpb;                 /* satellite phase bias selection (0:auto,1:ssr,3:fcb) */
+    int pppsatpb;                 /* satellite phase bias selection (0:auto,1:ssr,2:bia,3:fcb) */
     int unbias;                   /* (0:use uncorrected code bias,1:do not use uncorrected code bias) */
     double maxbiasdt;             /* bias sinex  and fcb  code/phase bias timeout(s) */
     int maxaveep;                 /* max averaging epoches */

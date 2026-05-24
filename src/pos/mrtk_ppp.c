@@ -594,7 +594,29 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
              * (MADOCA convention) is deliberately NOT applied here: RTCM-SSR uses a
              * different bias convention and applying it degrades the solution
              * (verified against upstream RTKLIB rnx2rtkp). */
-            if (sys == SYS_GPS || sys == SYS_GLO) {
+            if (corr == CORR_IGS && opt->ionoopt == IONOOPT_EST) {
+                /* #142: uncombined IGS PPP-AR. Apply the per-signal absolute
+                 * Observable-Specific Bias (OSB) from the Bias-SINEX product
+                 * (nav->osb, populated by udsatcb()/udsatpb()): satellite code
+                 * bias to the pseudorange and satellite phase bias to the carrier
+                 * (both m, keyed by obs->code[]). Removing the satellite phase
+                 * bias makes the float ambiguity integer-recoverable so
+                 * ppp_amb_ILS can fix WL/NL. Gated on uncombined mode so the
+                 * float iono-free path (correction=igs, ionosphere=dual-freq)
+                 * stays bit-identical (#142 before/after guard). Sign: nav->osb
+                 * stores the OSB already negated (udsatcb/udsatpb apply *=-1), so
+                 * adding it here yields the formal observed-minus-OSB correction
+                 * (same consumer convention as the OSR engine). */
+                int c = obs->code[i] - 1;
+                if (c >= 0) {
+                    if (nav->osb.vscb[obs->sat - 1][c]) {
+                        P[i] += nav->osb.scb[obs->sat - 1][c];
+                    }
+                    if (nav->osb.vspb[obs->sat - 1][c]) {
+                        L[i] += nav->osb.spb[obs->sat - 1][c];
+                    }
+                }
+            } else if (sys == SYS_GPS || sys == SYS_GLO) {
                 if (obs->code[i] == CODE_L1C) {
                     P[i] += nav->cbias[obs->sat - 1][1];
                 }

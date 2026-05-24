@@ -187,6 +187,19 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
                 }
                 return 0;
             }
+            /* #142: integer PPP-AR for IGS precise products needs the uncombined
+             * measurement model. ppp_amb_ILS resolves per-frequency ambiguity
+             * states, which only exist when ionosphere=est-stec; with the
+             * iono-free combination there is one ambiguity per satellite and
+             * ppp_ar() is a no-op. Flag the misconfiguration rather than silently
+             * returning a float-only solution. */
+            if (opt->correction == CORR_IGS && opt->modear >= ARMODE_CONT && opt->ionoopt != IONOOPT_EST) {
+                if (msg) {
+                    snprintf(msg, msgsz,
+                             "correction=igs with ambiguity_resolution requires ionosphere=est-stec (uncombined)");
+                }
+                return 0;
+            }
             break;
         case PMODE_PPP_RTK:
         case PMODE_VRS_RTK:

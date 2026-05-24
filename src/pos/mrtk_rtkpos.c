@@ -2366,7 +2366,7 @@ static void udsatcb(gtime_t gt, nav_t* nav, osb_t* biaosb, const prcopt_t* popt)
 }
 
 /* update satellite phase bias ------------------------------------------------*/
-static void udsatpb(gtime_t gt, nav_t* nav, osb_t* fcbosb, const prcopt_t* popt) {
+static void udsatpb(gtime_t gt, nav_t* nav, osb_t* biaosb, osb_t* fcbosb, const prcopt_t* popt) {
     int i, j, sys, udcnt = 0, ssrcode = CODE_NONE;
     double vp = MAXAGESSRL6;
     char* p;
@@ -2433,6 +2433,43 @@ static void udsatpb(gtime_t gt, nav_t* nav, osb_t* fcbosb, const prcopt_t* popt)
         trace(NULL, 4, "%s fcb update satellite phase bias cnt=%d\n", time_str(gt, 0), udcnt);
         return;
     }
+
+    /* auto or bia (#142: satellite phase bias from the Bias-SINEX OSB product,
+     * e.g. COD MGEX IAR OSB.BIA). Mirrors the bia branch of udsatcb(): only
+     * reached when no SSR/FCB phase bias was found, so SSR-based engines
+     * (MADOCA/CLAS/VRS) and FCB users are unaffected. Stored negated (*=-1) to
+     * match the consumer-adds convention used for the code bias. */
+    if ((popt->pppsatpb == 0 || popt->pppsatpb == 2) && timediff(gt, biaosb->gt[0]) <= popt->maxbiasdt) {
+        for (i = 0; i < MAXSAT; i++) {
+            for (j = 0; j < MAXCODE; j++) {
+                if (biaosb->vspb[i][j] != 0) {
+                    udcnt++;
+                }
+            }
+        }
+        if (0 < udcnt) {
+            memcpy(nav->osb.vspb, biaosb->vspb, sizeof(nav->osb.vspb));
+            memcpy(nav->osb.spb, biaosb->spb, sizeof(nav->osb.spb));
+            for (i = 0; i < MAXSAT; i++) {
+                for (j = 0; j < MAXCODE; j++) {
+                    nav->osb.spb[i][j] *= -1;
+                }
+            }
+            nav->osb.gt[0] = biaosb->gt[0];
+        }
+    }
+    if (0 < udcnt || popt->pppsatpb == 2) {
+        if (udcnt == 0) {
+            /* forced bia but no valid OSB phase bias (e.g. expired past
+             * maxbiasdt): drop any stale phase biases so corr_meas() does not
+             * keep applying them. */
+            memset(nav->osb.vspb, 0x00, sizeof(nav->osb.vspb));
+            memset(nav->osb.spb, 0x00, sizeof(nav->osb.spb));
+        }
+        trace(NULL, 4, "%s bia update satellite phase bias cnt=%d dt=%.f\n", time_str(gt, 0), udcnt, popt->maxbiasdt);
+        return;
+    }
+
     trace(NULL, 3, "%s no update satellite phase bias \n", time_str(gt, 0));
     return;
 }
@@ -2576,7 +2613,7 @@ static void udbiass(gtime_t gt, prcopt_t* popt, nav_t* nav) {
 
     /* update satellite code bias and station codebias correction */
     udsatcb(gt, nav, biaosb, popt);
-    udsatpb(gt, nav, fcbosb, popt);
+    udsatpb(gt, nav, biaosb, fcbosb, popt);
     udstacb(gt, nav, biaosb, popt);
 
     free(biaosb);

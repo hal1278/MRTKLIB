@@ -78,7 +78,7 @@ static char signals_[1024];
 #define ARALPHAOPT "0:0.1%,1:0.5%,2:1%,3:5%,4:10%,5:20%"
 #define PSHFTOPT "0:off,1:table"
 #define SATCB "0:auto,1:ssr,2:bia,3:dcb"
-#define SATPB "0:auto,1:ssr,3:fcb"
+#define SATPB "0:auto,1:ssr,2:bia,3:fcb"
 #define CORROPT "-1:auto,0:none,1:igs,2:igs-rts,3:qzs-madoca,4:gal-has,5:bds-b2b,6:qzs-clas"
 opt_t sysopts[] = {
     {"pos1-posmode", 3, (void*)&prcopt_.mode, MODOPT},
