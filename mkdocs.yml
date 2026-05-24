@@ -102,7 +102,8 @@ nav:
   - Reference:
     - Configuration Options: reference/config-options.md
     - API Reference (Doxygen): reference/api.md
-    - Benchmark: reference/benchmark.md
+    - Benchmark (PPC kinematic): reference/benchmark.md
+    - Benchmark (GSDC smartphone): reference/benchmark-gsdc.md
     - Real-Time CLAS: reference/rtkrcv-clas-realtime.md
     - Test Methodology: reference/test-accuracy-methodology.md
   - Design:
