@@ -1,0 +1,122 @@
+# MRTKLIB Configuration (TOML v1.0.0)
+# Single-point positioning (SPP) baseline for the PPC-Dataset benchmark.
+# Classic single-frequency SPP: L1 + Klobuchar broadcast iono + Saastamoinen
+# tropo, broadcast ephemeris, elevation-only weighting, RAIM-FDE.
+# This is the "current SPP" baseline that issue #116 work is measured against;
+# see docs/design/spp-accuracy.md.
+
+[positioning]
+mode = "single"
+frequency = "l1"
+solution_type = "forward"
+elevation_mask = 15.0
+dynamics = false                               # snapshot SPP does not use dynamics
+satellite_ephemeris = "brdc"
+excluded_sats = ""
+systems = ["GPS", "Galileo", "QZSS", "BeiDou"]
+robust = "igg3"                                # #116 P2: "off" | "igg3" (IGG-III robust pseudorange re-weighting)
+robust_k0 = 1.5                                # IGG-III lower threshold (full weight below)
+robust_k1 = 4.0                                # IGG-III upper threshold (reject above)
+tdcp = true                                    # #116 P4: TDCP velocity + jump-rejection QC
+tdcp_jump = 5.0                                # reject epoch if code vs TDCP displacement differ by > this (m)
+
+[positioning.snr_mask]
+rover_enabled = false
+base_enabled = false
+L1 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+L2 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+L5 = [0, 0, 0, 0, 0, 0, 0, 0, 0]
+
+[positioning.corrections]
+satellite_antenna = false # broadcast ephemeris is already at the antenna phase center
+receiver_antenna = false  # SPP is metre-level; rover PCV (mm) is negligible
+phase_windup = "off"      # no carrier phase used in SPP
+raim_fde = true           # RAIM FDE outlier exclusion
+tidal_correction = "off"
+
+[positioning.atmosphere]
+ionosphere = "brdc"  # Klobuchar broadcast model (single-frequency)
+troposphere = "saas" # Saastamoinen + standard atmosphere
+
+[ambiguity_resolution]
+mode = "off"
+
+[rejection]
+innovation = 30.0
+gdop = 30.0
+
+[slip_detection]
+doppler = 1.0 # #116 P4: Doppler-vs-phase cycle-slip threshold (cyc/s, 0=off)
+
+[kalman_filter]
+iterations = 1
+
+[kalman_filter.measurement_error]
+# #116 P1: C/N0 (Sigma-epsilon) pseudorange weighting. snr_error > 0 enables the
+# term; snr_max is the reference C/N0 above which no extra penalty is applied.
+# Enabled here together with robust="igg3": the P1+P2 weighting plus the P3
+# pre-robust acceptance gate is a clean win on this dataset (rate +16pp, median
+# -43%, p95 improved). See docs/design/spp-accuracy.md §4.4. The library default
+# (prcopt_default) keeps these off, so non-benchmark runs are unchanged.
+snr_max = 50.0  # dB-Hz
+snr_error = 0.5 # m (0 = disabled)
+
+[antenna.rover]
+position_type = "single"
+type = "*"
+delta_e = 0.0
+delta_n = 0.0
+delta_u = 0.0
+
+[antenna.base]
+position_type = "llh"
+position_1 = 90.0
+position_2 = 0.0
+position_3 = -6335367.6285
+type = ""
+delta_e = 0.0
+delta_n = 0.0
+delta_u = 0.0
+max_average_epochs = 0
+init_reset = false
+
+[output]
+format = "nmea"
+header = true
+options = true
+velocity = false
+time_system = "gpst"
+time_format = "tow"         # GPS TOW for time matching
+time_decimals = 3
+coordinate_format = "deg"
+field_separator = ""
+single_output = false
+max_solution_std = 0.0
+height_type = "ellipsoidal"
+geoid_model = "internal"
+static_solution = "all"
+nmea_interval_1 = 0.0
+nmea_interval_2 = 0.0
+solution_status = "off"
+
+[files]
+satellite_atx = ""
+receiver_atx = ""
+station_pos = ""
+geoid = ""
+ionosphere = ""
+dcb = ""
+eop = ""
+ocean_loading = ""
+temp_dir = ""
+geexe = ""
+solution_stat = ""
+trace = ""
+
+[server]
+time_interpolation = true
+sbas_satellite = "0"
+rinex_option_1 = ""
+rinex_option_2 = ""
+ppp_option = ""
+rtcm_option = ""

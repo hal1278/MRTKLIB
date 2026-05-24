@@ -38,6 +38,11 @@ static const toml_map_t toml_mapping[] = {
     {"positioning", "constellations", "pos1-navsys"},
     {"positioning", "excluded_sats", "pos1-exclsats"},
     {"positioning", "signals", "pos1-signals"},
+    {"positioning", "robust", "pos1-robust"},
+    {"positioning", "robust_k0", "pos1-robustk0"},
+    {"positioning", "robust_k1", "pos1-robustk1"},
+    {"positioning", "tdcp", "pos1-tdcp"},
+    {"positioning", "tdcp_jump", "pos1-tdcpjump"},
 
     /* ── positioning.clas ──────────────────────────────────────────────────── */
     {"positioning.clas", "grid_selection_radius", "pos1-gridsel"},
@@ -138,6 +143,8 @@ static const toml_map_t toml_mapping[] = {
     {"kalman_filter.measurement_error", "phase_elevation", "stats-errphaseel"},
     {"kalman_filter.measurement_error", "phase_baseline", "stats-errphasebl"},
     {"kalman_filter.measurement_error", "doppler", "stats-errdoppler"},
+    {"kalman_filter.measurement_error", "snr_max", "stats-snrmax"},
+    {"kalman_filter.measurement_error", "snr_error", "stats-errsnr"},
     {"kalman_filter.measurement_error", "ura_ratio", "stats-uraratio"},
 
     /* ── kalman_filter.initial_std ─────────────────────────────────────────── */

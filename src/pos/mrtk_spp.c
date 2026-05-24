@@ -75,10 +75,11 @@ const double chisqr[100] = {10.8, 13.8, 16.3, 18.5, 20.5, 22.5, 24.3, 26.1, 27.9
 #define NX (3 + NT)        /* # of estimated parameters */
 #define MAXITR 10          /* max number of iteration for point pos */
 #define ERR_CBIAS 0.3      /* code bias error Std (m) */
+#define ERR_TDCP 0.03      /* #116 P4: TDCP phase-rate error Std (m/s) */
 #define MIN_EL (5.0 * D2R) /* min elevation for measurement error (rad) */
 
 /* pseudorange measurement error variance ------------------------------------*/
-static double varerr(const prcopt_t* opt, double el, int sys) {
+static double varerr(const prcopt_t* opt, double el, double snr, int sys) {
     double fact, varr;
     fact = sys == SYS_GLO ? EFACT_GLO : (sys == SYS_SBS ? EFACT_SBS : EFACT_GPS);
     if (el < MIN_EL) {
@@ -88,7 +89,18 @@ static double varerr(const prcopt_t* opt, double el, int sys) {
     if (opt->ionoopt == IONOOPT_IFLC) {
         varr *= SQR(3.0); /* iono-free */
     }
-    return SQR(fact) * varr;
+    varr = SQR(fact) * varr;
+
+    /* #116 P1: optional C/N0 (Sigma-epsilon) term, identical in form to the RTK
+     * varerr(). Off when err[6]<=0 (default) -> bit-identical to the previous
+     * elevation-only model; skipped when SNR is absent (snr==0) so a receiver
+     * that reports no C/N0 keeps the legacy behaviour. */
+    if (opt->err[6] > 0.0 && snr > 0.0) {
+        double e = fact * opt->err[6];
+        double d = opt->err[5] - snr; /* dB-Hz below snr_max */
+        varr += SQR(e) * pow(10.0, 0.1 * (d > 0.0 ? d : 0.0));
+    }
+    return varr;
 }
 /* get group delay parameter (m) ---------------------------------------------*/
 static double gettgd(int sat, const nav_t* nav, int type) {
@@ -352,7 +364,7 @@ static int rescode(int iter, const obsd_t* obs, int n, const double* rs, const d
         (*ns)++;
 
         /* variance of pseudorange error */
-        var[nv++] = varerr(opt, azel[1 + i * 2], sys) + vare[i] + vmeas + vion + vtrp;
+        var[nv++] = varerr(opt, azel[1 + i * 2], obs[i].SNR[0] * SNR_UNIT, sys) + vare[i] + vmeas + vion + vtrp;
 
         trace(NULL, 4, "sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat, azel[i * 2] * R2D,
               azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
@@ -398,17 +410,48 @@ static int valsol(const double* azel, const int* vsat, int n, const prcopt_t* op
     }
     dops(ns, azels, opt->elmin, dop);
     trace(NULL, 4, "valsol  : n=%d nv=%d vv=%.1f cs=%.1f maxgdop=%.1f gdop=%.1f pdop=%.1f hdop=%.1f vdop=%.1f\n", n, nv,
-          vv, chisqr[nv - nx - 1], opt->maxgdop, dop[0], dop[1], dop[2], dop[3]);
+          vv, nv > nx ? chisqr[nv - nx - 1] : 0.0, opt->maxgdop, dop[0], dop[1], dop[2], dop[3]);
     if (dop[0] <= 0.0 || dop[0] > opt->maxgdop) {
         sprintf(msg, "gdop error nv=%d gdop=%.1f", nv, dop[0]);
         return 0;
     }
     return 1;
 }
+/* IGG-III three-segment equivalent-weight factor (#116 P2) ------------------
+ * rt = standardized residual; returns a multiplicative weight in [0,1].
+ * |rt|<=k0: full weight; k0<|rt|<=k1: smooth down-weight; |rt|>k1: reject. */
+static double igg3_weight(double rt, double k0, double k1) {
+    double a = fabs(rt), t;
+    if (a <= k0) {
+        return 1.0;
+    }
+    if (a <= k1) {
+        t = (k1 - a) / (k1 - k0);
+        return (k0 / a) * t * t;
+    }
+    return 0.0;
+}
+/* ascending compare for qsort of doubles ------------------------------------*/
+static int cmp_dbl(const void* a, const void* b) {
+    double d = *(const double*)a - *(const double*)b;
+    return (d < 0.0) ? -1 : (d > 0.0 ? 1 : 0);
+}
+/* median of |x[0..n-1]| using work[] as scratch (work may equal nothing live)*/
+static double median_abs(const double* x, int n, double* work) {
+    int i;
+    if (n <= 0) {
+        return 0.0;
+    }
+    for (i = 0; i < n; i++) {
+        work[i] = fabs(x[i]);
+    }
+    qsort(work, n, sizeof(double), cmp_dbl);
+    return (n % 2) ? work[n / 2] : 0.5 * (work[n / 2 - 1] + work[n / 2]);
+}
 /* estimate receiver position ------------------------------------------------*/
 static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts, const double* vare, const int* svh,
                   const nav_t* nav, const prcopt_t* opt, sol_t* sol, double* azel, int* vsat, double* resp, char* msg) {
-    double x[NX] = {0}, dx[NX], Q[NX * NX], *v, *H, *var, sig;
+    double x[NX] = {0}, dx[NX], Q[NX * NX], *v, *H, *var, *vpre, sig;
     int i, j, k, info, stat = 1, nv, ns;
 
     trace(NULL, 3, "estpos  : n=%d\n", n);
@@ -416,6 +459,7 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
     v = mat(n + NT, 1);
     H = mat(NX, n + NT);
     var = mat(n + NT, 1);
+    vpre = mat(n + NT, 1); /* #116 P3: pre-robust all-sat residuals for the acceptance gate */
 
     for (i = 0; i < 3; i++) {
         x[i] = sol->rr[i];
@@ -435,6 +479,38 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
             v[j] /= sig;
             for (k = 0; k < NX; k++) {
                 H[k + j * NX] /= sig;
+            }
+        }
+        /* #116 P2: IGG-III robust re-weighting of the pseudorange rows (0..ns-1;
+         * the trailing rank constraints are left untouched). Applied from the
+         * 2nd Gauss-Newton step (i>=1) so the clock is already estimated and the
+         * standardized residuals are meaningful. Off when opt->robust==0, so the
+         * default solution is bit-identical. var[] is stale here (recomputed by
+         * rescode next iteration), so it doubles as the median scratch buffer. */
+        int gated = (opt->robust == 1 && i >= 1 && ns >= 5);
+        if (gated) {
+            double k0 = opt->robustk[0] > 0.0 ? opt->robustk[0] : 1.5;
+            double k1 = opt->robustk[1] > 0.0 ? opt->robustk[1] : 4.0;
+            double s0;
+            /* #116 P3: snapshot the pre-robust residuals over ALL satellites for
+             * the acceptance gate. The gate must include the outlier rows the
+             * robust pass is about to suppress — otherwise it accepts epochs whose
+             * excluded sats disagree (consistent-bias urban epochs), which is the
+             * gate-defeat that exploded the tail in §4.3. The robust solution is
+             * still what gets output; only the accept/reject test uses vpre. */
+            for (j = 0; j < nv; j++) {
+                vpre[j] = v[j];
+            }
+            s0 = 1.4826 * median_abs(v, ns, var); /* MAD robust scale */
+            if (s0 < 1.0) {
+                s0 = 1.0; /* guard against over-rejection when residuals are small */
+            }
+            for (j = 0; j < ns; j++) {
+                double w = sqrt(igg3_weight(v[j] / s0, k0, k1));
+                v[j] *= w;
+                for (k = 0; k < NX; k++) {
+                    H[k + j * NX] *= w;
+                }
             }
         }
         /* least square estimation */
@@ -467,13 +543,16 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
             sol->ns = (uint8_t)ns;
             sol->age = sol->ratio = 0.0;
 
-            /* validate solution */
-            if (!opt->posopt[4] || (stat = valsol(azel, vsat, n, opt, v, nv, NX, msg))) {
+            /* validate solution (#116 P3: when the robust pass ran, gate on the
+             * pre-robust all-satellite residuals so the down-weighting cannot
+             * defeat the acceptance test) */
+            if (!opt->posopt[4] || (stat = valsol(azel, vsat, n, opt, gated ? vpre : v, nv, NX, msg))) {
                 sol->stat = opt->sateph == EPHOPT_SBAS ? SOLQ_SBAS : SOLQ_SINGLE;
             }
             free(v);
             free(H);
             free(var);
+            free(vpre);
             return stat;
         }
     }
@@ -484,6 +563,7 @@ static int estpos(const obsd_t* obs, int n, const double* rs, const double* dts,
     free(v);
     free(H);
     free(var);
+    free(vpre);
     return 0;
 }
 /* RAIM FDE (failure detection and exclution) -------------------------------*/
@@ -576,11 +656,54 @@ static int raim_fde(const obsd_t* obs, int n, const double* rs, const double* dt
     free(resp_e);
     return stat;
 }
+/* SPP cycle-slip detection for TDCP (#116 P4) -------------------------------
+ * Sets slip[i]=1 for obs[i] that lost lock (LLI) or whose L1 phase rate
+ * disagrees with the Doppler beyond thresdop after removing the common-mode
+ * (receiver clock) offset — the single-receiver detector from demo5/detslp_dop,
+ * kept SPP-local so PPP/RTK are untouched. ssat holds the previous epoch's
+ * phase (pt/ph), populated by pntpos at the end of each epoch. */
+static void spp_detslp(const obsd_t* obs, int n, const ssat_t* ssat, double thresdop, int* slip) {
+    double dph, dpt, tt, mean = 0.0, dif[MAXOBS] = {0};
+    int i, sat, ndop = 0, valid[MAXOBS] = {0};
+
+    for (i = 0; i < n && i < MAXOBS; i++) {
+        slip[i] = (obs[i].LLI[0] & 1) ? 1 : 0; /* loss-of-lock indicator */
+        sat = obs[i].sat;
+        if (thresdop <= 0.0 || obs[i].L[0] == 0.0 || obs[i].D[0] == 0.0 || ssat[sat - 1].ph[0][0] == 0.0) {
+            continue;
+        }
+        tt = timediff(obs[i].time, ssat[sat - 1].pt[0][0]);
+        if (fabs(tt) < DTTOL || fabs(tt) > 3.0) {
+            continue;
+        }
+        dph = (obs[i].L[0] - ssat[sat - 1].ph[0][0]) / tt; /* phase rate (cyc/s) */
+        dpt = -obs[i].D[0];                                /* Doppler-predicted rate */
+        dif[i] = dph - dpt;
+        valid[i] = 1; /* explicit validity — dif can legitimately be 0.0 */
+        if (fabs(dif[i]) < 3.0 * thresdop) {
+            mean += dif[i];
+            ndop++;
+        }
+    }
+    if (ndop == 0) {
+        return;
+    }
+    mean /= ndop; /* common-mode (receiver clock) drift */
+    for (i = 0; i < n && i < MAXOBS; i++) {
+        if (valid[i] && fabs(dif[i] - mean) > thresdop) {
+            slip[i] = 1;
+        }
+    }
+}
 /* range rate residuals ------------------------------------------------------*/
+/* #116 P4: per satellite use the TDCP phase rate (mm/s-class) when the phase is
+ * locked and unslipped, otherwise fall back to the Doppler (preserving the
+ * Doppler-absence invariant). ssat/slip may be NULL/absent → pure Doppler. */
 static int resdop(const obsd_t* obs, int n, const double* rs, const double* dts, const nav_t* nav, const double* rr,
-                  const double* x, const double* azel, const int* vsat, double err, double* v, double* H) {
-    double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig;
-    int i, j, nv = 0;
+                  const double* x, const double* azel, const int* vsat, double err, const ssat_t* ssat, const int* slip,
+                  int tdcp, double* v, double* H) {
+    double freq, rate, pos[3], E[9], a[3], e[3], vs[3], cosel, sig, lam, meas, tt;
+    int i, j, nv = 0, sat, use;
 
     trace(NULL, 3, "resdop  : n=%d\n", n);
 
@@ -589,8 +712,29 @@ static int resdop(const obsd_t* obs, int n, const double* rs, const double* dts,
 
     for (i = 0; i < n && i < MAXOBS; i++) {
         freq = sat2freq(obs[i].sat, obs[i].code[0], nav);
+        if (freq == 0.0 || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) {
+            continue;
+        }
+        lam = CLIGHT / freq;
+        sat = obs[i].sat;
 
-        if (obs[i].D[0] == 0.0 || freq == 0.0 || !vsat[i] || norm(rs + 3 + i * 6, 3) <= 0.0) {
+        /* measured range rate (cyc/s) and its Std (m/s): TDCP primary, Doppler fallback */
+        use = 0;
+        meas = sig = 0.0;
+        if (tdcp && ssat && slip && !slip[i] && obs[i].L[0] != 0.0 && ssat[sat - 1].ph[0][0] != 0.0) {
+            tt = timediff(obs[i].time, ssat[sat - 1].pt[0][0]);
+            if (fabs(tt) >= DTTOL && fabs(tt) <= 3.0) {
+                meas = (obs[i].L[0] - ssat[sat - 1].ph[0][0]) / tt; /* == dph (cyc/s) */
+                sig = ERR_TDCP;                                     /* phase-rate Std (m/s) */
+                use = 1;
+            }
+        }
+        if (!use && obs[i].D[0] != 0.0) {
+            meas = -obs[i].D[0];                       /* Doppler-predicted rate (cyc/s) */
+            sig = (err <= 0.0) ? 1.0 : err * lam;      /* m/s */
+            use = 1;
+        }
+        if (!use) {
             continue;
         }
         /* LOS (line-of-sight) vector in ECEF */
@@ -609,11 +753,8 @@ static int resdop(const obsd_t* obs, int n, const double* rs, const double* dts,
             dot(vs, e, 3) +
             OMGE / CLIGHT * (rs[4 + i * 6] * rr[0] + rs[1 + i * 6] * x[0] - rs[3 + i * 6] * rr[1] - rs[i * 6] * x[1]);
 
-        /* Std of range rate error (m/s) */
-        sig = (err <= 0.0) ? 1.0 : err * CLIGHT / freq;
-
         /* range rate residual (m/s) */
-        v[nv] = (-obs[i].D[0] * CLIGHT / freq - (rate + x[3] - CLIGHT * dts[1 + i * 2])) / sig;
+        v[nv] = (meas * lam - (rate + x[3] - CLIGHT * dts[1 + i * 2])) / sig;
 
         /* design matrix */
         for (j = 0; j < 4; j++) {
@@ -624,11 +765,12 @@ static int resdop(const obsd_t* obs, int n, const double* rs, const double* dts,
     return nv;
 }
 /* estimate receiver velocity ------------------------------------------------*/
-static void estvel(const obsd_t* obs, int n, const double* rs, const double* dts, const nav_t* nav, const prcopt_t* opt,
-                   sol_t* sol, const double* azel, const int* vsat) {
+/* returns 1 if the velocity converged (sol->rr[3..5] written), 0 otherwise */
+static int estvel(const obsd_t* obs, int n, const double* rs, const double* dts, const nav_t* nav, const prcopt_t* opt,
+                  sol_t* sol, const double* azel, const int* vsat, const ssat_t* ssat, const int* slip) {
     double x[4] = {0}, dx[4], Q[16], *v, *H;
     double err = opt->err[4]; /* Doppler error (Hz) */
-    int i, j, nv;
+    int i, j, nv, stat = 0, tdcp = (opt->tdcp == 1 && ssat != NULL);
 
     trace(NULL, 3, "estvel  : n=%d\n", n);
 
@@ -637,7 +779,7 @@ static void estvel(const obsd_t* obs, int n, const double* rs, const double* dts
 
     for (i = 0; i < MAXITR; i++) {
         /* range rate residuals (m/s) */
-        if ((nv = resdop(obs, n, rs, dts, nav, sol->rr, x, azel, vsat, err, v, H)) < 4) {
+        if ((nv = resdop(obs, n, rs, dts, nav, sol->rr, x, azel, vsat, err, ssat, slip, tdcp, v, H)) < 4) {
             break;
         }
         /* least square estimation */
@@ -657,11 +799,13 @@ static void estvel(const obsd_t* obs, int n, const double* rs, const double* dts
             sol->qv[3] = (float)Q[1];  /* xy */
             sol->qv[4] = (float)Q[6];  /* yz */
             sol->qv[5] = (float)Q[2];  /* zx */
+            stat = 1;
             break;
         }
     }
     free(v);
     free(H);
+    return stat;
 }
 /* single-point positioning ----------------------------------------------------
  * compute receiver position, velocity, clock bias by single-point positioning
@@ -681,7 +825,10 @@ int pntpos(mrtk_ctx_t* ctx, const obsd_t* obs, int n, const nav_t* nav, const pr
            ssat_t* ssat, char* msg) {
     prcopt_t opt_ = *opt;
     double *rs, *dts, *var, *azel_, *resp;
-    int i, stat, vsat[MAXOBS] = {0}, svh[MAXOBS];
+    int i, stat, vsat[MAXOBS] = {0}, svh[MAXOBS], slip[MAXOBS] = {0};
+    double prev_rr[3];
+    gtime_t prev_time;
+    int has_prev;
 
     trace(ctx, 3, "pntpos  : tobs=%s n=%d\n", time_str(obs[0].time, 3), n);
 
@@ -691,6 +838,12 @@ int pntpos(mrtk_ctx_t* ctx, const obsd_t* obs, int n, const nav_t* nav, const pr
         strcpy(msg, "no observation data");
         return 0;
     }
+    /* #116 P4: snapshot the previous solution (for TDCP jump-rejection) before it
+     * is overwritten by this epoch */
+    prev_time = sol->time;
+    matcpy(prev_rr, sol->rr, 3, 1);
+    has_prev = (prev_time.time != 0 && norm(prev_rr, 3) > 0.0);
+
     sol->time = obs[0].time;
     msg[0] = '\0';
 
@@ -718,9 +871,35 @@ int pntpos(mrtk_ctx_t* ctx, const obsd_t* obs, int n, const nav_t* nav, const pr
     if (!stat && n >= 6 && opt->posopt[4]) {
         stat = raim_fde(obs, n, rs, dts, var, svh, nav, &opt_, sol, azel_, vsat, resp, msg);
     }
-    /* estimate receiver velocity with Doppler */
+    /* #116 P4: cycle-slip detection so TDCP only uses slip-free phase */
+    if (opt_.tdcp == 1 && ssat) {
+        spp_detslp(obs, n, ssat, opt_.thresdop, slip);
+    }
+    /* estimate receiver velocity (TDCP primary, Doppler fallback) */
     if (stat) {
-        estvel(obs, n, rs, dts, nav, &opt_, sol, azel_, vsat);
+        int velok = estvel(obs, n, rs, dts, nav, &opt_, sol, azel_, vsat, ssat, slip);
+
+        /* #116 P4b: TDCP jump-rejection — drop epochs whose code position change
+         * disagrees with the TDCP-derived displacement (velocity * dt). Catches
+         * the "jumpy" tail; the stable-bias tail is the EKF's remit (P6).
+         * Requires a valid velocity this epoch (estvel converged) — otherwise
+         * sol->rr[3..5] is stale/zero and would falsely reject moving epochs. */
+        if (opt_.tdcp == 1 && ssat && has_prev && velok) {
+            double tt = timediff(obs[0].time, prev_time);
+            if (fabs(tt) > DTTOL && fabs(tt) <= 3.0) {
+                double d[3], dn, thr = opt_.tdcpjump > 0.0 ? opt_.tdcpjump : 5.0;
+                for (i = 0; i < 3; i++) {
+                    d[i] = (sol->rr[i] - prev_rr[i]) - sol->rr[i + 3] * tt;
+                }
+                dn = norm(d, 3);
+                if (dn > thr) {
+                    sprintf(msg, "tdcp jump reject %.1fm", dn);
+                    trace(ctx, 2, "pntpos  : %s\n", msg);
+                    stat = 0;
+                    sol->stat = SOLQ_NONE;
+                }
+            }
+        }
     }
     if (azel) {
         for (i = 0; i < n * 2; i++) {
@@ -735,9 +914,16 @@ int pntpos(mrtk_ctx_t* ctx, const obsd_t* obs, int n, const nav_t* nav, const pr
             ssat[i].snr[0] = 0;
         }
         for (i = 0; i < n; i++) {
+            int f;
             ssat[obs[i].sat - 1].azel[0] = azel_[i * 2];
             ssat[obs[i].sat - 1].azel[1] = azel_[1 + i * 2];
             ssat[obs[i].sat - 1].snr[0] = obs[i].SNR[0];
+            /* #116 P4: store carrier phase for next-epoch TDCP / slip detection
+             * (unconditional — keep continuity even for this epoch's unused sats) */
+            for (f = 0; f < NFREQ; f++) {
+                ssat[obs[i].sat - 1].ph[0][f] = obs[i].L[f];
+                ssat[obs[i].sat - 1].pt[0][f] = obs[i].time;
+            }
             if (!vsat[i]) {
                 continue;
             }

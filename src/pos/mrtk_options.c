@@ -55,6 +55,7 @@ static char signals_[1024];
 #define IONOPT "0:off,1:brdc,2:sbas,3:dual-freq,4:est-stec,5:ionex-tec,6:qzs-brdc,9:est-adaptive"
 #define TRPOPT "0:off,1:saas,2:sbas,3:est-ztd,4:est-ztdgrad"
 #define EPHOPT "0:brdc,1:precise,2:brdc+sbas,3:brdc+ssrapc,4:brdc+ssrcom"
+#define ROBOPT "0:off,1:igg3"
 #define NAVOPT "1:gps+2:sbas+4:glo+8:gal+16:qzs+32:bds+64:navic"
 #define GAROPT "0:off,1:on"
 #define SOLOPT "0:llh,1:xyz,2:enu,3:nmea"
@@ -95,6 +96,11 @@ opt_t sysopts[] = {
     {"pos1-tidecorr", 3, (void*)&prcopt_.tidecorr, TIDEOPT},
     {"pos1-ionoopt", 3, (void*)&prcopt_.ionoopt, IONOPT},
     {"pos1-tropopt", 3, (void*)&prcopt_.tropopt, TRPOPT},
+    {"pos1-robust", 3, (void*)&prcopt_.robust, ROBOPT},
+    {"pos1-robustk0", 1, (void*)&prcopt_.robustk[0], ""},
+    {"pos1-robustk1", 1, (void*)&prcopt_.robustk[1], ""},
+    {"pos1-tdcp", 3, (void*)&prcopt_.tdcp, SWTOPT},
+    {"pos1-tdcpjump", 1, (void*)&prcopt_.tdcpjump, "m"},
     {"pos1-sateph", 3, (void*)&prcopt_.sateph, EPHOPT},
     {"pos1-posopt1", 3, (void*)&prcopt_.posopt[0], SWTOPT},
     {"pos1-posopt2", 3, (void*)&prcopt_.posopt[1], SWTOPT},
@@ -209,6 +215,8 @@ opt_t sysopts[] = {
     {"stats-errphaseel", 1, (void*)&prcopt_.err[2], "m"},
     {"stats-errphasebl", 1, (void*)&prcopt_.err[3], "m/10km"},
     {"stats-errdoppler", 1, (void*)&prcopt_.err[4], "Hz"},
+    {"stats-snrmax", 1, (void*)&prcopt_.err[5], "dBHz"},
+    {"stats-errsnr", 1, (void*)&prcopt_.err[6], "m"},
     {"stats-stdbias", 1, (void*)&prcopt_.std[0], "m"},
     {"stats-stdiono", 1, (void*)&prcopt_.std[1], "m"},
     {"stats-stdtrop", 1, (void*)&prcopt_.std[2], "m"},

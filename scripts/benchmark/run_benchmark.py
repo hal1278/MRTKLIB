@@ -22,7 +22,8 @@ Usage
     --dataset-dir DIR           PPC-Dataset root (default: data/benchmark)
     --l6-dir DIR                L6 file cache (default: data/benchmark/l6)
     --out-dir DIR               Results directory (default: data/benchmark/results)
-    --mode clas|madoca|rtk|both|all  (both=clas+madoca, all=clas+madoca+rtk, default: all)
+    --mode single|clas|madoca|rtk|both|all  (both=clas+madoca, all=clas+madoca+rtk, default: all)
+                                single = SPP baseline (rover.obs + base.nav only)
     --case ID[,ID...]           Run subset (default: all 6 runs)
     --rnx2rtkp PATH             rnx2rtkp binary path (default: auto-detect)
     --skip-download             Skip L6 download step
@@ -44,31 +45,45 @@ from compare_ppc import _match_epochs, compute_metrics, parse_nmea, parse_refere
 from download_l6 import ensure_case_l6
 
 # ---------------------------------------------------------------------------
-# Auto-detect rnx2rtkp
+# Auto-detect the positioning binary.
+# Since v0.6.0 post-processing lives in the unified `mrtk` binary as
+# `mrtk post`; the legacy standalone `rnx2rtkp` is kept as a fallback.
 # ---------------------------------------------------------------------------
 _CANDIDATE_BINS = [
+    "build/mrtk",
+    "build/Release/mrtk",
+    "build/Debug/mrtk",
     "build/rnx2rtkp",
     "build/Release/rnx2rtkp",
     "build/Debug/rnx2rtkp",
 ]
 
 
+def _post_argv(binary: str) -> list[str]:
+    """Build the argv prefix for a post-processing run.
+
+    The unified `mrtk` binary needs the `post` subcommand; the legacy
+    standalone `rnx2rtkp` is invoked directly.
+    """
+    return [binary, "post"] if os.path.basename(binary).startswith("mrtk") else [binary]
+
+
 def _find_rnx2rtkp(hint: str = "") -> str:
-    """Locate the rnx2rtkp binary.
+    """Locate the positioning binary (`mrtk` preferred, `rnx2rtkp` fallback).
 
     Args:
         hint: Explicit path supplied via --rnx2rtkp.  If non-empty, return
               as-is after verifying the file exists.
 
     Returns:
-        Path to rnx2rtkp binary.
+        Path to the positioning binary.
 
     Raises:
         SystemExit: If no binary can be found.
     """
     if hint:
         if not os.path.isfile(hint):
-            sys.exit(f"FAIL: rnx2rtkp not found at {hint!r}")
+            sys.exit(f"FAIL: binary not found at {hint!r}")
         return hint
     # Search relative to MRTKLIB root (parent of scripts/)
     root = Path(__file__).resolve().parent.parent.parent
@@ -79,11 +94,12 @@ def _find_rnx2rtkp(hint: str = "") -> str:
     # Fall back to PATH
     import shutil
 
-    p = shutil.which("rnx2rtkp")
-    if p:
-        return p
+    for name in ("mrtk", "rnx2rtkp"):
+        p = shutil.which(name)
+        if p:
+            return p
     sys.exit(
-        "FAIL: rnx2rtkp binary not found. "
+        "FAIL: positioning binary not found. "
         "Build first with 'cmake --build build', or pass --rnx2rtkp PATH."
     )
 
@@ -130,8 +146,7 @@ def _run_rnx2rtkp(
     nav = nav.resolve()
     l6_files = [f.resolve() for f in l6_files]
     output.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        rnx2rtkp,
+    cmd = _post_argv(rnx2rtkp) + [
         "-k", conf,
         "-k", city_conf,
         "-ts", str(week), f"{tow_start:.3f}",
@@ -236,10 +251,12 @@ def print_summary(rows: list[dict]) -> None:
         use_threshold = not math.isnan(m.get("threshold_2d", float("nan")))
 
         if use_threshold:
-            # PPP mode (MADOCA): single row; no integer fix, all output is PPP float
+            # Threshold modes: single row; no integer fix.
+            #   MADOCA → PPP float; SINGLE → SPP (Q=1). Metrics span every epoch.
+            tier_label = "SPP" if r["mode"] == "single" else "PPP"
             ppp_rate = f"{m['thr_rate']:.1f}%"
             ppp_ttff = _fmt_s(m["conv_thr_s"])
-            print(_row(r["case_id"], r["mode"], "PPP",
+            print(_row(r["case_id"], r["mode"], tier_label,
                        m["n_matched"], _fmt_sv(m["mean_sv_all"]), ppp_rate,
                        _fmt_m(m["rms_2d_all"]), _fmt_m(m["p68_2d_all"]),
                        _fmt_m(m["p95_2d_all"]), ppp_ttff,
@@ -268,6 +285,7 @@ def print_summary(rows: list[dict]) -> None:
     print(_SEP)
     print("  CLAS/RTK tiers: FIX=Q=4 | FF=Q=4+5 (excl SPP) | ALL=every epoch")
     print("  MADOCA tier:    PPP=all valid PPP-float epochs (Q=3); Rate%=<30cm fraction")
+    print("  SINGLE tier:    SPP=all valid SPP epochs (Q=1); Rate%=<2m fraction")
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +353,8 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
     # PPP modes use a 2D error threshold instead of Q=4 for fix/convergence
     _PPP_THRESHOLD = 0.30  # metres
+    # SPP has no integer fix; report the fraction of epochs within this 2D bound
+    _SPP_THRESHOLD = 2.0  # metres
 
     results = []
 
@@ -380,13 +400,16 @@ def run_benchmark(args: argparse.Namespace) -> int:
             elif mode == "madoca":
                 extra_files = l6_paths.get("madoca", [])
                 threshold = _PPP_THRESHOLD  # PPP: use <30cm threshold
+            elif mode == "single":
+                extra_files = []  # SPP: rover.obs + base.nav (broadcast eph) only
+                threshold = _SPP_THRESHOLD
             else:  # clas
                 extra_files = l6_paths.get("clas", [])
                 threshold = math.nan  # PPP-RTK uses Q=4
 
             print(f"\n[{case['id']}  /  {mode.upper()}]")
 
-            if not extra_files:
+            if not extra_files and mode != "single":
                 print(f"  WARNING: no input files found for {mode}; skipping.")
                 results.append({"case_id": case["id"], "mode": mode,
                                  "metrics": None, "status": "skip"})
@@ -394,11 +417,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
             # Skip if output is newer than all inputs
             if out.exists() and not args.force:
-                newest_in = max(
-                    obs.stat().st_mtime,
-                    nav.stat().st_mtime,
-                    max(f.stat().st_mtime for f in extra_files),
-                )
+                in_mtimes = [obs.stat().st_mtime, nav.stat().st_mtime]
+                in_mtimes += [f.stat().st_mtime for f in extra_files]
+                newest_in = max(in_mtimes)
                 if out.stat().st_mtime > newest_in:
                     print(f"  [cached]  {out.name}")
                     skip_run = True
@@ -446,7 +467,8 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
             # Progress line
             if not math.isnan(threshold):
-                rate_str = f"<{threshold*100:.0f}cm={m['thr_rate']:.1f}%"
+                thr_label = f"<{threshold:.1f}m" if threshold >= 1.0 else f"<{threshold*100:.0f}cm"
+                rate_str = f"{thr_label}={m['thr_rate']:.1f}%"
                 conv_str = _fmt_s(m["conv_thr_s"])
             else:
                 rate_str = f"Fix={m['fix_rate']:.1f}%  FF={m['ff_rate']:.1f}%"
@@ -483,9 +505,10 @@ def main() -> int:
                    help="L6 file cache directory (default: data/benchmark/l6)")
     p.add_argument("--out-dir", default="data/benchmark/results",
                    help="Output directory for NMEA results (default: data/benchmark/results)")
-    p.add_argument("--mode", choices=["clas", "madoca", "rtk", "both", "all"],
+    p.add_argument("--mode", choices=["single", "clas", "madoca", "rtk", "both", "all"],
                    default="all",
-                   help="Positioning mode (default: all = clas+madoca+rtk)")
+                   help="Positioning mode (default: all = clas+madoca+rtk; "
+                        "single = SPP baseline, rover.obs + base.nav only)")
     p.add_argument("--case", default="",
                    help="Comma-separated case IDs (default: all)")
     p.add_argument("--rnx2rtkp", default="",

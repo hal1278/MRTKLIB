@@ -294,6 +294,15 @@ typedef struct prcopt_t {         /* processing options type */
     int sigcfg_set;                   /* 1: sigcfg explicitly configured (overrides nf/pppsig) */
 
     int correction; /* correction source (CORR_???; CORR_AUTO=infer from mode+sateph) */
+
+    /* #116 P2: SPP robust estimation (appended for ABI stability) */
+    int robust;        /* SPP robust mode (0:off, 1:igg3 IGG-III equivalent weight) */
+    double robustk[2]; /* IGG-III thresholds {k0,k1} on standardized residual (<=0: code default) */
+
+    /* #116 P4: SPP TDCP auxiliary constraint (appended for ABI stability) */
+    int tdcp;         /* SPP TDCP mode (0:off, 1:on time-differenced carrier phase) */
+    double tdcpjump;  /* TDCP jump-rejection threshold (m); reject epoch if the code position
+                       * change disagrees with the TDCP displacement by more than this (<=0: code default) */
 } prcopt_t;
 
 /*============================================================================
