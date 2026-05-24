@@ -2,7 +2,8 @@
 # Converted from: clas.conf
 
 [positioning]
-mode = "ppp-rtk" # (9:ppp-rtk)
+mode = "ppp-rtk"        # (9:ppp-rtk)
+correction = "qzs-clas" # QZSS CLAS (L6D CSSR); explicit (was inferred from mode+sateph)
 # frequency           = "l1+2+3"  # GPS/QZSS L1+L2+L5, Galileo E1+E5
 signals = ["G1C", "G2W", "E1C", "E5Q", "E7Q", "J1C", "J5Q", "J2X"]
 solution_type = "forward"                                          # (0:forward)

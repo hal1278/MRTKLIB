@@ -3,6 +3,7 @@
 
 [positioning]
 mode = "ppp-kine"
+correction = "qzs-madoca"           # QZSS MADOCA-PPP (L6E SSR); explicit (was inferred from mode+sateph)
 frequency = "l1+2"
 solution_type = "forward"
 elevation_mask = 10.0

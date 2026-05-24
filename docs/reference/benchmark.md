@@ -4,14 +4,15 @@ This benchmark evaluates MRTKLIB's kinematic (vehicle-mounted) positioning
 performance using the open-data [PPC2024 (Precise Positioning Challenge)][ppc]
 dataset collected for the contest organised by the Institute of Navigation Japan
 (測位航法学会).  It covers six urban driving runs
-(Nagoya × 3, Tokyo × 3) and supports four positioning modes:
+(Nagoya × 3, Tokyo × 3) and supports four positioning modes.  Each benchmark
+config sets the [`correction`](../design/configuration.md) axis explicitly:
 
-| Mode | Engine | Correction |
-|------|--------|------------|
-| CLAS | PPP-RTK | QZSS L6D (IS-QZSS-L6-003) |
-| MADOCA | PPP | QZSS L6E (MADOCA-PPP) |
-| RTK | Kinematic RTK | Rover + base station RINEX |
-| single | SPP (single-point) | None — broadcast ephemeris only (`base.nav`) |
+| Mode | Engine | `correction` | Correction source |
+|------|--------|--------------|-------------------|
+| CLAS | PPP-RTK | `qzs-clas` | QZSS L6D (IS-QZSS-L6-003) |
+| MADOCA | PPP | `qzs-madoca` | QZSS L6E (MADOCA-PPP) |
+| RTK | Kinematic RTK | `none` | Rover + base station RINEX |
+| single | SPP (single-point) | `none` | Broadcast ephemeris only (`base.nav`) |
 
 > **Note:** This benchmark is intentionally excluded from the regular CTest
 > suite because it requires large external datasets.  Run it on demand.
