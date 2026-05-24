@@ -62,6 +62,7 @@ incrementally back-ported to each engine:
 | **v0.6.7** | PPP | IGS-products float PPP via the `correction = "igs"` axis (precise SP3/CLK + Bias-SINEX/DCB); iono-free 2nd-frequency fallback for F9P-class receivers ([#130](https://github.com/h-shiono/MRTKLIB/issues/130) / [#135](https://github.com/h-shiono/MRTKLIB/issues/135)) | ✅ Released |
 | **v0.6.8** | PPP | Real-time IGS-RTS float PPP via `correction = "igs-rts"` (RTCM-SSR / IGS-SSR MT4076; IGS01/03, CNES `CLK9x`, BKG) ([#138](https://github.com/h-shiono/MRTKLIB/issues/138)) | ✅ Released |
 | **v0.6.9** | PPP-AR | IGS-products integer PPP-AR: `correction = "igs"` + Bias-SINEX OSB phase biases in the uncombined model; dual-frequency PPP-AR zero-ambiguity (DGETRF) guard ([#142](https://github.com/h-shiono/MRTKLIB/issues/142)) | ✅ Released |
+| **v0.6.10** | SPP | Single-point positioning accuracy (opt-in / default-off): C/N0 weighting, IGG-III robust estimation + pre-robust acceptance gate, TDCP velocity + jump rejection; PPC benchmark `single` mode (fix rate +20 pp, RMS −56 %) ([#116](https://github.com/h-shiono/MRTKLIB/issues/116)) | ✅ Released |
 | **v0.6.x** | All | Doxygen docstring coverage expansion | 💭 Backlog |
 
 > [!NOTE]

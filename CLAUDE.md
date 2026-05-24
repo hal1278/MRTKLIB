@@ -38,6 +38,10 @@ See [`docs/releases/changelog.md`](docs/releases/changelog.md) for the full hist
 | v0.6.4 | rtkrcv status-path stability + GitHub Community Profile |
 | v0.6.5 | First official `mrtk cssr2rtcm3` release + 24-hour endurance test |
 | v0.6.6 | Unified subcommand help format + GNU-style long-option aliases |
+| v0.6.7 | IGS-products float PPP via `correction = "igs"` |
+| v0.6.8 | Real-time IGS-RTS float PPP via `correction = "igs-rts"` |
+| v0.6.9 | IGS-products integer PPP-AR (Bias-SINEX OSB phase biases) |
+| v0.6.10 | SPP accuracy (opt-in): C/N0 weighting, IGG-III robust, TDCP |
 
 ### Test Status
 

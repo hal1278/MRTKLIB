@@ -5,6 +5,51 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.10] - 2026-05-24
+
+**Feature** — single-point positioning (SPP) accuracy enhancements: C/N0
+weighting, IGG-III robust estimation with a pre-robust acceptance gate, and
+time-differenced carrier phase (TDCP) velocity + jump rejection. All opt-in and
+**default-off**, so existing behaviour is bit-identical.
+
+### Added
+
+- **SPP C/N0 (Sigma-ε) pseudorange weighting** (#116) — `varerr()` gains an
+  optional SNR-dependent variance term, identical in form to the RTK engine's.
+  Exposed as `[kalman_filter.measurement_error] snr_max / snr_error` (legacy
+  `stats-snrmax` / `stats-errsnr`); this also makes the RTK engine's
+  previously-unreachable SNR term configurable. `snr_error = 0` (default) → off.
+- **SPP IGG-III robust re-weighting** (#116) — `estpos()` down-weights/rejects
+  pseudorange outliers via a three-segment equivalent-weight function on the
+  MAD-standardised residual. Gated by `[positioning] robust = "igg3"`
+  (`robust_k0` / `robust_k1`); `robust = "off"` (default) → bit-identical.
+- **SPP pre-robust acceptance gate** (#116) — when robust is active, the
+  chi-square gate runs on the pre-robust all-satellite residuals so the
+  weighting cannot defeat it (the piece that turns C/N0 + robust into a clean
+  win rather than a tail-inflating one).
+- **SPP TDCP velocity, slip detection and jump rejection** (#116) — `resdop()`
+  uses the time-differenced carrier-phase rate (mm/s-class) when locked and
+  slip-free, falling back to Doppler; a SPP-local cycle-slip detector and a
+  TDCP-vs-code jump-rejection QC remove position spikes. Gated by
+  `[positioning] tdcp` / `tdcp_jump`; `tdcp = false` (default) → bit-identical.
+- **Benchmark `single` mode** — `scripts/benchmark/run_benchmark.py` gains an
+  SPP mode (and prefers the unified `mrtk post`, with `rnx2rtkp` fallback);
+  `conf/benchmark/single.toml` enables the features for evaluation.
+- **Design record** [`docs/design/spp-accuracy.md`](docs/design/spp-accuracy.md)
+  — rationale, per-step before/after benchmarks, and the deferred P5/P6.
+
+### Performance
+
+- On the PPC-Dataset (six urban-driving runs, mean), enabling the features
+  improves SPP vs the baseline: **<2 m fix rate 41.2 → 61.2 %**, median (p68)
+  **5.61 → 2.83 m**, p95 **17.71 → 12.42 m**, RMS **17.07 → 7.54 m**.
+
+### Notes
+
+- P5 (common-mode clock-jump) and P6 (position EKF) are deferred to a smartphone
+  benchmark follow-up ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)),
+  where clock jumps and large jitter actually occur.
+
 ## [v0.6.9] - 2026-05-24
 
 **Feature** — IGS-product **integer PPP-AR**: resolve integer ambiguities for
