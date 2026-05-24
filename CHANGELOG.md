@@ -5,6 +5,60 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.9] - 2026-05-24
+
+**Feature** — IGS-product **integer PPP-AR**: resolve integer ambiguities for
+`correction = "igs"` using satellite phase biases from a Bias-SINEX OSB product
+(post-processing).
+
+### Added
+
+- **Integer PPP-AR for `correction = "igs"`** (#142) — in the uncombined
+  measurement model (`ionosphere = "est-stec"`), `corr_meas()` applies the
+  per-signal satellite **code bias to `P`** and **phase bias to `L`** from the
+  Bias-SINEX OSB (e.g. COD MGEX IAR `OSB.BIA`), making the float ambiguity
+  integer-recoverable so `ppp_amb_ILS` can fix wide-/narrow-lane. Gated on
+  uncombined mode, so the float iono-free path stays bit-identical.
+- **Bias-SINEX phase-bias source** in `udsatpb()` (`pppsatpb` gains `2:bia`) —
+  previously only SSR/FCB fed `nav->osb.spb`, so file-based OSB phase biases were
+  loaded then dropped. Only reached when no SSR/FCB phase bias exists, so
+  MADOCA / CLAS / VRS are unaffected.
+- **Configs** `conf/igs/rnx2rtkp_igspppar.toml` (GPS+Galileo) and
+  `conf/igs/rnx2rtkp_igspppar_gps.toml` (GPS-only).
+- **Regression tests** `igs_pppar_ge` (GPS+GAL, asserts integer-fix rate via the
+  new `compare_pos_abs.py --min-fix-rate`) and `igs_pppar_gps` (GPS-only,
+  accuracy + dual-frequency AR path). Validated on GEONET FUJISAWA vs the GSI F5
+  coordinate; the IGS float PPP is cross-checked against upstream RTKLIB 2.4.3
+  (≈8.4 cm 3D, equivalent).
+- **IGS-RTS PPP quick-start guide** `docs/guide/quickstart-igs-rts.md` and
+  real-time sample `conf/igs/rtkrcv_igsrts.toml` (#148).
+
+### Fixed
+
+- **PPP-AR zero-ambiguity Kalman update** — the extra-wide-lane step called the
+  filter with `na = 0` on a dual-frequency setup, invoking LAPACK `DGETRF` with
+  `n = 0` and aborting the whole AR before wide-/narrow-lane. Now guarded
+  (`na <= 0` is a no-op). Latent bug; benefits any dual-frequency PPP-AR.
+  Multi-frequency AR (MADOCA / CLAS) is unaffected.
+
+### Changed
+
+- `resolve_correction()` — `correction = "igs"` with ambiguity resolution now
+  requires `ionosphere = "est-stec"` (the iono-free combination has one ambiguity
+  per satellite, so AR would otherwise be a silent no-op).
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/pos/mrtk_ppp.c` | apply OSB per-signal code/phase bias in `corr_meas` for uncombined `igs` |
+| `src/pos/mrtk_rtkpos.c` | Bias-SINEX phase-bias source in `udsatpb` (+ stale-bias clearing) |
+| `src/pos/mrtk_ppp_ar.c` | guard zero-ambiguity Kalman update (DGETRF n=0) |
+| `src/pos/mrtk_opt.c`, `src/pos/mrtk_options.c`, `include/mrtklib/mrtk_opt.h` | `igs`+AR validity; `pppsatpb` `2:bia` |
+| `conf/igs/rnx2rtkp_igspppar*.toml`, `tests/data/igs/igs_testdata.tar.gz`, `CMakeLists.txt` | PPP-AR configs + regression tests + trimmed OSB |
+| `scripts/tests/compare_pos_abs.py` | `--min-fix-rate` integer-fix-rate assertion |
+| `docs/guide/configuration.md`, `docs/guide/quickstart-igs-rts.md`, `conf/igs/rtkrcv_igsrts.toml` | PPP-AR + RTKLIB cross-val docs; IGS-RTS guide (#148) |
+
 ## [v0.6.8] - 2026-05-23
 
 **Feature** — real-time **IGS-RTS float PPP** via the `correction = "igs-rts"`

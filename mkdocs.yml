@@ -109,6 +109,9 @@ nav:
     - Positioning Configuration Model: design/configuration.md
   - Releases:
     - Changelog: releases/changelog.md
+    - v0.6.9: releases/release-notes-v0.6.9.md
+    - v0.6.8: releases/release-notes-v0.6.8.md
+    - v0.6.7: releases/release-notes-v0.6.7.md
     - v0.6.6: releases/release-notes-v0.6.6.md
     - v0.6.5: releases/release-notes-v0.6.5.md
     - v0.6.4: releases/release-notes-v0.6.4.md
