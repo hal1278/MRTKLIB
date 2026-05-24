@@ -110,7 +110,7 @@ def _run_mrtk(mrtk: str, confs: list[str], obs: Path, navs: list[Path],
 # Summary table
 # ---------------------------------------------------------------------------
 _HDR = (f"{'Case':<42} {'N':>5} {'nSV':>5} {'<2m%':>6} "
-        f"{'RMS2D':>8} {'p68':>8} {'p95':>8} {'max':>8}")
+        f"{'RMS2D':>8} {'p50':>8} {'p95':>8} {'score':>8}")
 _SEP = "-" * len(_HDR)
 
 
@@ -118,8 +118,19 @@ def _m(v: float) -> str:
     return "nan" if math.isnan(v) else f"{v:.2f}"
 
 
+def gsdc_score(m: dict) -> float:
+    """Official GSDC metric for one case: mean of the 50th and 95th percentile
+    2D horizontal error (metres)."""
+    return (m["p50_2d_all"] + m["p95_2d_all"]) / 2.0
+
+
 def print_summary(rows: list[dict]) -> None:
-    """Print the fixed-width GSDC SPP summary table."""
+    """Print the fixed-width GSDC SPP summary table.
+
+    The ``score`` column is the official Google Smartphone Decimeter Challenge
+    metric — the mean of the 50th and 95th percentile horizontal error — here
+    computed on the train split (which has public ground truth).
+    """
     print()
     print(_SEP)
     print(_HDR)
@@ -132,8 +143,8 @@ def print_summary(rows: list[dict]) -> None:
             continue
         print(f"{cid:<42} {m['n_matched']:>5} {m['mean_sv_all']:>5.1f} "
               f"{m['thr_rate']:>5.1f}% {_m(m['rms_2d_all']):>8} "
-              f"{_m(m['p68_2d_all']):>8} {_m(m['p95_2d_all']):>8} "
-              f"{_m(m['max_2d_all']):>8}")
+              f"{_m(m['p50_2d_all']):>8} {_m(m['p95_2d_all']):>8} "
+              f"{_m(gsdc_score(m)):>8}")
     print(_SEP)
     ok = [r["metrics"] for r in rows if r["metrics"]]
     if ok:
@@ -142,9 +153,11 @@ def print_summary(rows: list[dict]) -> None:
               f"{np.mean([m['mean_sv_all'] for m in ok]):>5.1f} "
               f"{np.mean([m['thr_rate'] for m in ok]):>5.1f}% "
               f"{np.mean([m['rms_2d_all'] for m in ok]):>8.2f} "
-              f"{np.mean([m['p68_2d_all'] for m in ok]):>8.2f} "
-              f"{np.mean([m['p95_2d_all'] for m in ok]):>8.2f}")
-    print("  N=matched epochs  <2m%=fraction within 2 m 2D  p68/p95=2D pctiles  (all in m)")
+              f"{np.mean([m['p50_2d_all'] for m in ok]):>8.2f} "
+              f"{np.mean([m['p95_2d_all'] for m in ok]):>8.2f} "
+              f"{np.mean([gsdc_score(m) for m in ok]):>8.2f}")
+    print("  score = mean(p50, p95) 2D horizontal [m] = official GSDC metric "
+          "(here on the train split)")
 
 
 def run(args: argparse.Namespace) -> int:
@@ -218,8 +231,8 @@ def run(args: argparse.Namespace) -> int:
             rows.append({"id": case["id"], "metrics": None, "status": "no-match"})
             continue
         print(f"  N={m['n_matched']}  <2m={m['thr_rate']:.1f}%  "
-              f"RMS2D={m['rms_2d_all']:.2f}m  p68={m['p68_2d_all']:.2f}m  "
-              f"p95={m['p95_2d_all']:.2f}m  ({dt:.1f}s)")
+              f"p50={m['p50_2d_all']:.2f}m  p95={m['p95_2d_all']:.2f}m  "
+              f"score={gsdc_score(m):.2f}m  ({dt:.1f}s)")
         rows.append({"id": case["id"], "metrics": m, "status": "ok"})
 
     print_summary(rows)

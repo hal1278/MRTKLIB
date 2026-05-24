@@ -123,6 +123,7 @@ def main() -> int:
 
     thr = args.threshold
     thr_label = f"<{thr:.1f}m" if thr >= 1.0 else f"<{thr * 100:.0f}cm"
+    score = (m["p50_2d_all"] + m["p95_2d_all"]) / 2.0
     print(f"Reference : {args.ref}")
     print(f"Result    : {args.result}")
     print()
@@ -130,11 +131,13 @@ def main() -> int:
     print(f"{thr_label} rate    : {m['thr_rate']:.1f}%")
     print(f"mean nSV       : {m['mean_sv_all']:.1f}")
     print()
-    print("  2D horizontal (all epochs):")
+    print("  2D horizontal error (all epochs):")
+    print(f"    p50    : {_fmt(m['p50_2d_all'])}")
+    print(f"    p95    : {_fmt(m['p95_2d_all'])}")
     print(f"    RMS    : {_fmt(m['rms_2d_all'])}")
-    print(f"    p68    : {_fmt(m['p68_2d_all'])}  (1-sigma)")
-    print(f"    95%    : {_fmt(m['p95_2d_all'])}")
     print(f"    Max    : {_fmt(m['max_2d_all'])}")
+    print()
+    print(f"  GSDC score (mean of p50 & p95) : {_fmt(score)}")
     print()
     print("  ENU RMS (all epochs):")
     print(f"    East/North/Up : {m['rms_e']:.3f} / {m['rms_n']:.3f} / {m['rms_u']:.3f} m")

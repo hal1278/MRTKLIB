@@ -94,7 +94,7 @@ done
 | C (pseudorange) | `RawPseudorangeMeters` | already reconstructed by Google |
 | L (carrier) | `AccumulatedDeltaRangeMeters` / λ | only when ADR state = VALID; LLI set on RESET/CYCLE_SLIP |
 | D (Doppler) | −`PseudorangeRateMetersPerSecond` / λ | |
-| S (C/N0) | `Cn0DbHz` | → RINEX SSI 1–9 |
+| S (C/N0) | `Cn0DbHz` | full dB-Hz in the S obs (e.g. `S1C` = `40.200`); a 1–9 SSI digit is also appended to every field per RINEX |
 
 with λ = c / `CarrierFrequencyHz`.  Satellite id is `(ConstellationType, Svid)`
 → `G/R/E/C/J` (QZSS PRN = Svid − 192).  Epoch GPS time = `utcTimeMillis`/1000
@@ -165,6 +165,28 @@ python scripts/benchmark/run_gsdc_benchmark.py --case all
 
 ---
 
+## Scoring (official GSDC metric)
+
+The Google Smartphone Decimeter Challenge scores each run by the **mean of the
+50th and 95th percentile horizontal positioning error** (metres); the per-run
+scores are averaged to give the leaderboard number.  The official competition
+computes this over the **36 test runs** (public/private split), whose ground
+truth is withheld.
+
+This benchmark reports the **same metric** (`score` column = `(p50 + p95) / 2`)
+but on the **train** split, which has public ground truth, so the numbers are
+directly interpretable on the leaderboard's scale.  Top GSDC entries reach
+~1–2 m using carrier-phase PPP/RTK + IMU + map-matching; the SPP-only figures
+here are a code-pseudorange baseline, not a leaderboard-competitive solution.
+
+The runner also prints `<2 m` rate, RMS and matched-epoch count `N`
+(availability) for engineering insight.  Per-epoch ENU error is taken against
+the matched ground-truth coordinate (moving-base projection), exactly as in the
+[PPC benchmark](benchmark.md#metrics-definitions); reference and NMEA GGA epochs
+are matched by UTC seconds-of-day within 0.15 s.
+
+---
+
 ## Baseline results (v0.6.10, curated subset)
 
 GNSS-only SPP, broadcast ephemeris, all matched epochs (no skip).  Two
@@ -176,37 +198,39 @@ P5/P6 effort:
 - **P1–P4** — `single.toml` as shipped: + C/N0 weighting, IGG-III robust +
   pre-robust gate, TDCP jump rejection.
 
+`score` is the official GSDC metric; lower is better.
+
 ### P0 (classic SPP)
 
-| Case | N | nSV | <2 m | RMS 2D | p68 | p95 |
-|------|--:|----:|-----:|-------:|----:|----:|
-| mtv-sb-101 / pixel4 | 1289 | 14.3 | 21.5% | 4.30 m | 4.40 m | 7.61 m |
-| sf-mtv-280 / pixel4 | 1680 | 11.6 | 20.7% | 4.98 m | 4.94 m | 8.94 m |
-| sjc-c / mi8 | 1266 | 15.0 | 24.7% | 4.71 m | 4.32 m | 8.72 m |
-| mtv-f / sm-g988b | 2284 | 19.9 | 37.0% | 3.35 m | 3.43 m | 6.03 m |
-| lax-d / pixel5 | 1716 | 12.4 | 22.1% | 4.30 m | 4.26 m | 7.56 m |
-| routen / pixel7pro | 1545 | 14.7 | 22.7% | 4.58 m | 4.48 m | 8.68 m |
-| **mean** | **1630** | **14.6** | **24.8%** | **4.37 m** | **4.31 m** | **7.92 m** |
+| Case | N | nSV | <2 m | RMS 2D | p50 | p95 | **score** |
+|------|--:|----:|-----:|-------:|----:|----:|----------:|
+| mtv-sb-101 / pixel4 | 1289 | 14.3 | 21.5% | 4.30 m | 3.34 m | 7.61 m | 5.47 m |
+| sf-mtv-280 / pixel4 | 1680 | 11.6 | 20.7% | 4.98 m | 3.68 m | 8.94 m | 6.31 m |
+| sjc-c / mi8 | 1266 | 15.0 | 24.7% | 4.71 m | 3.16 m | 8.72 m | 5.94 m |
+| mtv-f / sm-g988b | 2284 | 19.9 | 37.0% | 3.35 m | 2.58 m | 6.03 m | 4.30 m |
+| lax-d / pixel5 | 1716 | 12.4 | 22.1% | 4.30 m | 3.37 m | 7.56 m | 5.47 m |
+| routen / pixel7pro | 1545 | 14.7 | 22.7% | 4.58 m | 3.41 m | 8.68 m | 6.05 m |
+| **mean** | **1630** | **14.6** | **24.8%** | **4.37 m** | **3.26 m** | **7.92 m** | **5.59 m** |
 
 ### P1–P4 (`single.toml`)
 
-| Case | N | nSV | <2 m | RMS 2D | p68 | p95 |
-|------|--:|----:|-----:|-------:|----:|----:|
-| mtv-sb-101 / pixel4 | 685 | 14.4 | 36.8% | 3.00 m | 3.09 m | 5.45 m |
-| sf-mtv-280 / pixel4 | 370 | 11.8 | 34.3% | 3.12 m | 3.27 m | 5.47 m |
-| sjc-c / mi8 | 815 | 15.1 | 36.0% | 3.62 m | 3.30 m | 6.88 m |
-| mtv-f / sm-g988b | 2072 | 19.9 | 42.2% | 2.93 m | 3.09 m | 5.26 m |
-| lax-d / pixel5 | 735 | 12.5 | 37.6% | 3.13 m | 3.22 m | 5.25 m |
-| routen / pixel7pro | 768 | 14.8 | 28.6% | 3.86 m | 3.84 m | 6.64 m |
-| **mean** | **907** | **14.7** | **35.9%** | **3.28 m** | **3.30 m** | **5.82 m** |
+| Case | N | nSV | <2 m | RMS 2D | p50 | p95 | **score** |
+|------|--:|----:|-----:|-------:|----:|----:|----------:|
+| mtv-sb-101 / pixel4 | 685 | 14.4 | 36.8% | 3.00 m | 2.41 m | 5.45 m | 3.93 m |
+| sf-mtv-280 / pixel4 | 370 | 11.8 | 34.3% | 3.12 m | 2.63 m | 5.47 m | 4.05 m |
+| sjc-c / mi8 | 815 | 15.1 | 36.0% | 3.62 m | 2.51 m | 6.88 m | 4.69 m |
+| mtv-f / sm-g988b | 2072 | 19.9 | 42.2% | 2.93 m | 2.33 m | 5.26 m | 3.80 m |
+| lax-d / pixel5 | 735 | 12.5 | 37.6% | 3.13 m | 2.42 m | 5.25 m | 3.84 m |
+| routen / pixel7pro | 768 | 14.8 | 28.6% | 3.86 m | 3.03 m | 6.64 m | 4.84 m |
+| **mean** | **907** | **14.7** | **35.9%** | **3.28 m** | **2.56 m** | **5.82 m** | **4.19 m** |
 
 ### Reading the two tables
 
-P1–P4 improves accuracy across the board (`<2 m` +11 pp, p68 −1.0 m, p95
-−2.1 m, RMS −1.1 m) **but the matched-epoch count drops ~44 %** (mean 1630 →
-907): the QC rejects the noisy/blunder epochs rather than solving them poorly.
-This availability/accuracy trade-off is exactly the gap the remaining work
-targets:
+P1–P4 improves the GSDC score from **5.59 m → 4.19 m (−25 %)** (p50 3.26 →
+2.56 m, p95 7.92 → 5.82 m, `<2 m` +11 pp) **but the matched-epoch count drops
+~44 %** (mean 1630 → 907): the QC rejects the noisy/blunder epochs rather than
+solving them poorly.  This availability/accuracy trade-off is exactly the gap
+the remaining work targets:
 
 - **P6 (position EKF)** should *coast* through the rejected epochs, recovering
   availability without giving back accuracy — and smartphone jitter (3–4 m, vs
@@ -218,15 +242,6 @@ targets:
 Google's own WLS (the `WlsPosition*` column) lands at ~2.3 m 2D RMS on the open
 trips, so MRTKLIB's untuned SPP is already in the same regime; the headroom is
 in availability and the urban tail.
-
----
-
-## Metrics
-
-Identical to the [PPC benchmark](benchmark.md#metrics-definitions): per-epoch ENU
-error against the matched ground-truth coordinate (moving-base projection), 2D
-RMS / p68 (1σ) / p95, and the `<2 m` fraction.  Reference epochs are
-matched to NMEA GGA epochs by UTC seconds-of-day within 0.15 s.
 
 ---
 
