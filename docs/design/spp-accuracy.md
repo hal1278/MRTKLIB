@@ -116,7 +116,7 @@ the maintainer explicitly wants improved and which TDCP/EKF cannot.
 | **P0** | `single` mode in PPC benchmark + baseline *(shipped)* | tooling | measurement harness | none |
 | **P1** | C-N0 (Sigma-ε) weighting in `varerr()`, TOML-gated *(implemented)* | WLS | bulk (rate/median); defeats gate → §4.2 | low |
 | **P2** | IGG-III robust re-weighting in `estpos()` (MAD scale) *(implemented)* | WLS | bulk (rate +11pp, median); defeats gate → §4.3 | low |
-| **P3** | **Weighting-proof acceptance gate** (a-priori chi-square / covariance / RAIM integrity) — unblocks P1+P2's tail | WLS | **tail (p95/RMS), the dominant error** | medium |
+| **P3** | Pre-robust all-satellite acceptance gate *(implemented)* — unblocks P1+P2 → clean win (§4.4) | WLS | **tail control; rate +16pp, median −43%** | medium |
 | **P4** | TDCP auxiliary constraint: velocity tightening + between-epoch consistency / slip gating | WLS + light coupling | precision; jump rejection | medium |
 | **P5** | Common-mode clock-jump correction + logging / reset strategy | infra | low-cost-receiver continuity; EKF prerequisite | medium |
 | **P6** | SPP-EKF: coupled pos/vel/accel/clock + Doppler/TDCP, dynamics, reuse `rtk_t` | **EKF (new)** | kinematic smoothing / precision | medium |
@@ -227,10 +227,49 @@ epochs it used to catch (N rises) and those epochs land in the tail. The
 weighting defeats the gate.
 
 This precisely scopes **P3**: restore an acceptance gate that the weighting
-cannot defeat (e.g. chi-square on a-priori variances, a formal-covariance /
-post-exclusion-DOP integrity check, or proper RAIM protection levels). With the
-gate restored, the tokyo_run2 result shows P1+P2+P3 should be a clean win across
-the board. Until then P1 and P2 stay default-off.
+cannot defeat. With the gate restored, the tokyo_run2 result predicts P1+P2+P3
+should be a clean win across the board.
+
+### 4.4 P3 result — the gate is the fix (measured 2026-05-24)
+
+A baseline diagnostic with the gate disabled (`raim_fde = false`) settles the
+mechanism: the number of *converged* epochs (e.g. nagoya_run1 7477, nagoya_run2
+9364) **exceeds** the P1+P2 epoch count (6846 / 8573), which in turn exceeds P0
+(5832 / 6101). So the bad epochs **already converge in the baseline** — robust
+does not rescue non-converging epochs (it is *not* a convergence problem). P0's
+`valsol()` correctly rejects them (gate-off p95 ≈ 62 m); weighting merely defeats
+that gate. **It is a gate problem.**
+
+The first P3 attempt — chi-square over the robust *inliers* (excluding the
+down-weighted sats) — did **not** work (tail unchanged), because the
+consistent-bias inliers are mutually consistent and pass. The fix is the
+opposite: gate on the **pre-robust residuals over *all* satellites** (including
+the ones the robust pass is about to suppress), evaluated at the robust solution,
+and output the robust solution for accepted epochs. An epoch is accepted only if
+the robust solution fits *every* satellite at nominal noise — so the suppressed
+outliers' large residuals re-trigger rejection of the consistent-bias epochs,
+while the genuinely clean epochs pass and keep their improved solution.
+
+Result (P1+P2+P3, `robust="igg3"` k0=1.5/k1=4.0 + C/N0 snr_error=0.5), mean over
+the six runs:
+
+| Metric | P0 baseline | **P1+P2+P3** | change |
+|--------|------------:|-------------:|-------:|
+| <2 m fix rate | 41.2% | **57.5%** | **+16.3 pp** |
+| p68 (median) | 5.61 m | **3.19 m** | **−43%** |
+| p95 (tail) | 17.71 m | **15.73 m** | **−11%** (improved) |
+| RMS 2D | 17.07 m | 16.55 m | slightly better |
+
+A **clean win on every aggregate metric**: rate and median improve sharply and
+the p95 tail *improves* (5 of 6 runs) rather than regressing. The epoch count
+returns to ≈P0 (the gate again rejects the bad epochs), yet the absolute number
+of <2 m epochs rises by ~900. The residual extreme tail (a few worst urban
+epochs, visible in nagoya_run1's RMS) is the consistent-bias class that snapshot
+methods cannot catch — that is the remit of the temporal work (P4 TDCP / P6 EKF).
+
+P1+P2+P3 is therefore enabled together in [`single.toml`](../../conf/benchmark/single.toml);
+the library default (`prcopt_default`) keeps all three off, so non-benchmark and
+existing-test behaviour is bit-identical.
 
 ## 5. Design
 
@@ -335,8 +374,8 @@ The benchmark ([§4.3](#43-p2-result-and-the-gate-defeat-finding-measured-2026-0
 shows this is a large bulk win that **defeats the chi-square gate** and inflates
 the tail. That is the central finding: weighting (P1) and robust re-weighting
 (P2) improve the solution but make `valsol()`'s residual-based test pass for
-epochs it should reject. The fix is P3 (a weighting-proof acceptance gate), not
-more estimator work. The same robust pass is later exposed in the EKF
+epochs it should reject. The fix is the P3 gate ([§5.8](#58-pre-robust-acceptance-gate-p3-implemented)),
+not more estimator work. The same robust pass is later exposed in the EKF
 measurement update (P6), giving the robust-WLS + TDCP-EKF hybrid validated in
 Remote Sensing 12(16):2550 (2020).
 
@@ -354,6 +393,21 @@ A satellite flagged as slipped drops only its TDCP row for that epoch; its
 pseudorange row is still used. The existing `detslp_*` helpers are `rtk_t`-bound
 file statics in [`mrtk_ppp.c`](../../src/pos/mrtk_ppp.c); sharing them with SPP
 needs a small refactor to a common helper, designed at P4.
+
+### 5.8 Pre-robust acceptance gate (P3, implemented)
+
+When the robust pass runs, `estpos()` snapshots the standardized residuals over
+**all** satellites *before* the IGG-III re-weighting (`vpre`) and feeds those to
+`valsol()` instead of the down-weighted residuals. The accept/reject chi-square
+therefore tests whether the (robust) solution is consistent with *every*
+satellite at nominal noise, so the outliers the robust pass suppresses still
+re-trigger rejection — the weighting can no longer defeat the gate. The robust
+solution is what gets written to `sol`; only the gate statistic uses `vpre`.
+
+The discarded first attempt gated over the robust *inliers* (excluding the
+suppressed sats); §4.4 shows that fails, because consistent-bias urban epochs
+have mutually-consistent inliers. Including all sats is the whole point. The gate
+is active only when `robust != "off"`, so the default path is unchanged.
 
 ### 5.8 C/N0 (Sigma-epsilon) weighting (P1, implemented)
 
