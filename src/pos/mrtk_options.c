@@ -209,6 +209,8 @@ opt_t sysopts[] = {
     {"stats-errphaseel", 1, (void*)&prcopt_.err[2], "m"},
     {"stats-errphasebl", 1, (void*)&prcopt_.err[3], "m/10km"},
     {"stats-errdoppler", 1, (void*)&prcopt_.err[4], "Hz"},
+    {"stats-snrmax", 1, (void*)&prcopt_.err[5], "dBHz"},
+    {"stats-errsnr", 1, (void*)&prcopt_.err[6], "m"},
     {"stats-stdbias", 1, (void*)&prcopt_.std[0], "m"},
     {"stats-stdiono", 1, (void*)&prcopt_.std[1], "m"},
     {"stats-stdtrop", 1, (void*)&prcopt_.std[2], "m"},

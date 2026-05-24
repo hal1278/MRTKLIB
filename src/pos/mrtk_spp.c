@@ -78,7 +78,7 @@ const double chisqr[100] = {10.8, 13.8, 16.3, 18.5, 20.5, 22.5, 24.3, 26.1, 27.9
 #define MIN_EL (5.0 * D2R) /* min elevation for measurement error (rad) */
 
 /* pseudorange measurement error variance ------------------------------------*/
-static double varerr(const prcopt_t* opt, double el, int sys) {
+static double varerr(const prcopt_t* opt, double el, double snr, int sys) {
     double fact, varr;
     fact = sys == SYS_GLO ? EFACT_GLO : (sys == SYS_SBS ? EFACT_SBS : EFACT_GPS);
     if (el < MIN_EL) {
@@ -88,7 +88,18 @@ static double varerr(const prcopt_t* opt, double el, int sys) {
     if (opt->ionoopt == IONOOPT_IFLC) {
         varr *= SQR(3.0); /* iono-free */
     }
-    return SQR(fact) * varr;
+    varr = SQR(fact) * varr;
+
+    /* #116 P1: optional C/N0 (Sigma-epsilon) term, identical in form to the RTK
+     * varerr(). Off when err[6]<=0 (default) -> bit-identical to the previous
+     * elevation-only model; skipped when SNR is absent (snr==0) so a receiver
+     * that reports no C/N0 keeps the legacy behaviour. */
+    if (opt->err[6] > 0.0 && snr > 0.0) {
+        double e = fact * opt->err[6];
+        double d = opt->err[5] - snr; /* dB-Hz below snr_max */
+        varr += SQR(e) * pow(10.0, 0.1 * (d > 0.0 ? d : 0.0));
+    }
+    return varr;
 }
 /* get group delay parameter (m) ---------------------------------------------*/
 static double gettgd(int sat, const nav_t* nav, int type) {
@@ -352,7 +363,7 @@ static int rescode(int iter, const obsd_t* obs, int n, const double* rs, const d
         (*ns)++;
 
         /* variance of pseudorange error */
-        var[nv++] = varerr(opt, azel[1 + i * 2], sys) + vare[i] + vmeas + vion + vtrp;
+        var[nv++] = varerr(opt, azel[1 + i * 2], obs[i].SNR[0] * SNR_UNIT, sys) + vare[i] + vmeas + vion + vtrp;
 
         trace(NULL, 4, "sat=%2d azel=%5.1f %4.1f res=%7.3f sig=%5.3f\n", obs[i].sat, azel[i * 2] * R2D,
               azel[1 + i * 2] * R2D, resp[i], sqrt(var[nv - 1]));
