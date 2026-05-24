@@ -35,35 +35,19 @@ With the MADOCALIB integration complete, users can process L6E (orbit/clock/bias
 
 ### Algorithm Improvements
 
-In addition to library integration, selected algorithm improvements from community forks are
-incrementally back-ported to each engine:
+MRTKLIB's positioning engines have been progressively modernized across releases
+(community-fork back-ports, new correction sources, tooling). Per-version detail
+is in the [CHANGELOG](CHANGELOG.md) and [release notes](docs/releases/):
 
-| Version | Engine | Improvements | Status |
-|---------|--------|-------------|--------|
-| **v0.4.1** | RTK | demo5 Partial AR (PAR), `detslp_dop` / `detslp_code`, full-constellation `varerr`, false-fix persistence fix | ✅ Released |
-| **v0.4.2** | PPP-RTK, PPP | demo5 `detslp_dop` / `detslp_code`, GLONASS clock guard in `ephpos()`, PAR variance gate + arfilter, full-constellation EFACT, adaptive outlier threshold (PPP-RTK only) | ✅ Released |
-| **v0.4.3** | PPP-RTK | Real-time CLAS PPP-RTK via `rtkrcv` (BINEX+L6, SBF+L6, RTCM3+UBX; 97.7% fix rate) | ✅ Released |
-| **v0.4.4** | PPP-RTK | Dual-channel CLAS real-time via `rtkrcv` (base stream slot repurposed for L6 ch2) | ✅ Released |
-| **v0.5.0** | All | TOML configuration (replaces legacy `.conf`); legacy `doc/` removed | ✅ Released |
-| **v0.5.1** | PPP-RTK | Bug fix: dual-channel CLAS RT fix rate degradation ([#35](https://github.com/h-shiono/MRTKLIB/issues/35)); `gen_l6_tag.py` tick_scale fix | ✅ Released |
-| **v0.5.2** | All | Code quality: mandatory braces on control flow, nested/complex ternary elimination (67 files) | ✅ Released |
-| **v0.5.3** | All | Code quality: full `clang-format` application (116 files, Google style) | ✅ Released |
-| **v0.5.4** | All | Signals update: frequency / physical band separation and structuring | ✅ Released |
-| **v0.5.5** | PPP-RTK | Bug fix: CLAS real-time positioning via UBX does not work ([#31](https://github.com/h-shiono/MRTKLIB/issues/31)) | ✅ Released |
-| **v0.5.6** | All | RINEX 4.00 CNAV/CNV2 NAV support (GPS, QZSS, BDS) | ✅ Released |
-| **v0.5.7** | — | Port RTKLIB `convbin` and `str2str` CLI applications | ✅ Released |
-| **v0.6.0** | All | Single CLI App: Unified `mrtk` binary with subcommands (`run`, `post`, `relay`, `convert`, etc.); BSS reduced from 3 GB to 34 MB | ✅ Released |
-| **v0.6.1** | All | Config UX: `systems` string list, `excluded_sats` list, `taplo` formatter, section reorganization | ✅ Released |
-| **v0.6.2** | — | Documentation: MkDocs Material site + Doxygen API reference + GitHub Pages deployment | ✅ Released |
-| **v0.6.3** | Stream | NTRIP v2 (HTTP/1.1) protocol support with auto-negotiation, chunked transfer encoding, URL percent-decoding | ✅ Released |
-| **v0.6.4** | rtkrcv / Repo | rtkrcv status-path stability fixes (data race + OOB + async-signal-safe SIGSEGV handler); GitHub Community Profile (issue/PR templates, labels, CONTRIBUTING/SECURITY/CoC) | ✅ Released |
-| **v0.6.5** | cssr2rtcm3 | First official release of `mrtk cssr2rtcm3` (real-time CSSR→RTCM3 MSM converter) and `mrtk l6extract`; Septentrio mosaic-G5 P3 hardware integration guide; 24-hour static endurance test | ✅ Released |
-| **v0.6.6** | CLI | Unified `mrtk` subcommand help format and added GNU-style long-option aliases (`--config`, `--output`, `--start`, `--end`, `--interval`, `--trace`, `--input`, `--nav`, `--device`, `--port`, `--freq`, `--help`); legacy binary headers (`usage: rtkrcv`, `usage: rnx2rtkp`, …) removed | ✅ Released |
-| **v0.6.7** | PPP | IGS-products float PPP via the `correction = "igs"` axis (precise SP3/CLK + Bias-SINEX/DCB); iono-free 2nd-frequency fallback for F9P-class receivers ([#130](https://github.com/h-shiono/MRTKLIB/issues/130) / [#135](https://github.com/h-shiono/MRTKLIB/issues/135)) | ✅ Released |
-| **v0.6.8** | PPP | Real-time IGS-RTS float PPP via `correction = "igs-rts"` (RTCM-SSR / IGS-SSR MT4076; IGS01/03, CNES `CLK9x`, BKG) ([#138](https://github.com/h-shiono/MRTKLIB/issues/138)) | ✅ Released |
-| **v0.6.9** | PPP-AR | IGS-products integer PPP-AR: `correction = "igs"` + Bias-SINEX OSB phase biases in the uncombined model; dual-frequency PPP-AR zero-ambiguity (DGETRF) guard ([#142](https://github.com/h-shiono/MRTKLIB/issues/142)) | ✅ Released |
-| **v0.6.10** | SPP | Single-point positioning accuracy (opt-in / default-off): C/N0 weighting, IGG-III robust estimation + pre-robust acceptance gate, TDCP velocity + jump rejection; PPC benchmark `single` mode (fix rate +20 pp, RMS −56 %) ([#116](https://github.com/h-shiono/MRTKLIB/issues/116)) | ✅ Released |
-| **v0.6.x** | All | Doxygen docstring coverage expansion | 💭 Backlog |
+| Era | Theme |
+|-----|-------|
+| **v0.4.x** | demo5 RTK / PPP-RTK algorithm port (PAR, `detslp_dop` / `detslp_code`, full-constellation `varerr`, false-fix fixes); real-time CLAS PPP-RTK (1ch / 2ch) |
+| **v0.5.x** | TOML configuration; code-quality sweeps (`clang-format`, mandatory braces); signals restructuring; RINEX 4.00 CNAV; `convbin` / `str2str` ports |
+| **v0.6.x** | Unified `mrtk` CLI; NTRIP v2; `mrtk cssr2rtcm3` (CSSR→RTCM3); IGS-products float / RTS / integer PPP-AR (the `correction` axis); SPP accuracy |
+
+**Latest — v0.6.10:** single-point positioning accuracy (opt-in / default-off) — C/N0 weighting, IGG-III robust estimation + pre-robust gate, TDCP velocity + jump rejection ([#116](https://github.com/h-shiono/MRTKLIB/issues/116))
+
+**Next:** SPP P5/P6 (clock-jump + position EKF) on a smartphone (GSDC) benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)); Doxygen docstring coverage
 
 > [!NOTE]
 > demo5 algorithm improvements are adapted from **[demo5 RTKLIB](https://github.com/rtklibexplorer/RTKLIB)**

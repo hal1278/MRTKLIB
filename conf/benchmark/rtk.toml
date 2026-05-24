@@ -2,7 +2,8 @@
 # Converted from: rtk.conf
 
 [positioning]
-mode = "kinematic" # (2:kinematic)
+mode = "kinematic"  # (2:kinematic)
+correction = "none" # relative RTK uses rover+base, no SSR correction (explicit)
 # frequency           = "l1+2+3"  # triple-freq
 signals = ["G1C", "G2W", "G5X", "E1C", "E5Q", "E7Q", "J1C", "J5Q", "J2X", "C2I", "C6I", "C7I"]
 solution_type = "forward"

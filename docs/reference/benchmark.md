@@ -4,13 +4,15 @@ This benchmark evaluates MRTKLIB's kinematic (vehicle-mounted) positioning
 performance using the open-data [PPC2024 (Precise Positioning Challenge)][ppc]
 dataset collected for the contest organised by the Institute of Navigation Japan
 (測位航法学会).  It covers six urban driving runs
-(Nagoya × 3, Tokyo × 3) and supports three positioning modes:
+(Nagoya × 3, Tokyo × 3) and supports four positioning modes.  Each benchmark
+config sets the [`correction`](../design/configuration.md) axis explicitly:
 
-| Mode | Engine | Correction |
-|------|--------|------------|
-| CLAS | PPP-RTK | QZSS L6D (IS-QZSS-L6-003) |
-| MADOCA | PPP | QZSS L6E (MADOCA-PPP) |
-| RTK | Kinematic RTK | Rover + base station RINEX |
+| Mode | Engine | `correction` | Correction source |
+|------|--------|--------------|-------------------|
+| CLAS | PPP-RTK | `qzs-clas` | QZSS L6D (IS-QZSS-L6-003) |
+| MADOCA | PPP | `qzs-madoca` | QZSS L6E (MADOCA-PPP) |
+| RTK | Kinematic RTK | `none` | Rover + base station RINEX |
+| single | SPP (single-point) | `none` | Broadcast ephemeris only (`base.nav`) |
 
 > **Note:** This benchmark is intentionally excluded from the regular CTest
 > suite because it requires large external datasets.  Run it on demand.
@@ -112,6 +114,10 @@ python download_l6.py --mode both
 This downloads the CLAS L6D and MADOCA L6E files for all six runs into
 `data/benchmark/l6/`.  Use `--dry-run` to preview the URLs without downloading.
 
+> **`single` mode needs no correction data** — it uses only `rover.obs` +
+> `base.nav` (broadcast ephemeris). Skip this step and run
+> `run_benchmark.py --mode single --skip-download`.
+
 Options:
 
 | Option | Default | Description |
@@ -140,7 +146,7 @@ Full options:
 | `--dataset-dir DIR` | `data/benchmark` | PPC-Dataset root |
 | `--l6-dir DIR` | `data/benchmark/l6` | L6 file cache |
 | `--out-dir DIR` | `data/benchmark/results` | NMEA output dir |
-| `--mode clas\|madoca\|rtk\|both\|all` | `all` | Positioning mode (`both`=clas+madoca, `all`=all three) |
+| `--mode single\|clas\|madoca\|rtk\|both\|all` | `all` | Positioning mode (`single`=SPP, `both`=clas+madoca, `all`=clas+madoca+rtk) |
 | `--case ID[,ID...]` | all | Run specific cases only |
 | `--rnx2rtkp PATH` | auto | Path to rnx2rtkp binary |
 | `--skip-download` | off | Skip L6 download |
@@ -175,6 +181,7 @@ MADOCA-PPP never produces an integer fix and is reported as a single **PPP** tie
 | **FF** | CLAS, RTK | Q=4, 5 | Fix + float; excludes SPP fallback (Q=1) |
 | **ALL** | CLAS, RTK | any | Every matched epoch including SPP |
 | **PPP** | MADOCA | Q=3 | All valid PPP-float epochs (Q=0 already filtered) |
+| **SPP** | single | Q=1 | All valid single-point epochs; Rate% = fraction with 2D error < 2 m |
 
 **Rate% column:**
 - FIX / FF rows: fraction of that tier among all matched epochs
@@ -465,6 +472,80 @@ explicitly excluded from PPP to avoid undifferenced-observation regression.
 
 ---
 
+## v0.6.10 Single-Point Positioning (SPP) Benchmark Results
+
+MRTKLIB v0.6.10 ([#116](https://github.com/h-shiono/MRTKLIB/issues/116)) adds
+opt-in, **default-off** accuracy improvements to the single-point (`single`)
+engine — historically a near-verbatim RTKLIB 2.4.3 snapshot WLS solver:
+
+1. **C/N0 (Sigma-ε) pseudorange weighting** — down-weight low-C/N0 signals.
+2. **IGG-III robust re-weighting** + a **pre-robust acceptance gate** that keeps
+   the chi-square test effective under weighting (without it, weighting inflates
+   the error tail).
+3. **TDCP velocity** (time-differenced carrier phase, mm/s-class) with Doppler
+   fallback, a SPP-local cycle-slip detector, and a **jump-rejection QC** that
+   drops epochs whose code position change disagrees with the TDCP displacement.
+
+The full design rationale, staged per-feature analysis, and the deferred work
+are in [`docs/design/spp-accuracy.md`](../design/spp-accuracy.md).
+
+### Configuration
+
+The features are gated under `[positioning]` / `[kalman_filter.measurement_error]`
+and shipped enabled together in `conf/benchmark/single.toml`:
+
+```toml
+[positioning]
+mode = "single"
+correction = "none"
+robust = "igg3"     # IGG-III robust + pre-robust gate
+tdcp = true         # TDCP velocity + jump rejection
+tdcp_jump = 5.0     # m
+
+[slip_detection]
+doppler = 1.0       # Doppler-vs-phase slip threshold (cyc/s)
+
+[kalman_filter.measurement_error]
+snr_max = 50.0      # dB-Hz
+snr_error = 0.5     # m  (0 = C/N0 weighting off)
+```
+
+`prcopt_default` keeps all of these off, so any other configuration is
+bit-identical to the previous snapshot WLS.
+
+### Results: baseline (off) → v0.6.10 (enabled)
+
+`--mode single --skip-epochs 60`. **Rate%** is the fraction of epochs with 2D
+horizontal error < 2 m.
+
+| Case | Rate% | RMS 2D | p68 (1σ) | p95 |
+|------|------:|-------:|---------:|----:|
+| nagoya_run1 | 57.1 → **81.6 %** | 27.92 → **15.10 m** | 3.31 → **1.59 m** | 17.82 → **10.08 m** |
+| nagoya_run2 | 56.9 → **75.5 %** | 11.12 → **6.17 m** | 3.41 → **1.44 m** | 20.30 → **13.00 m** |
+| nagoya_run3 | 25.7 → **44.3 %** | 10.59 → **8.34 m** | 12.15 → **6.98 m** | 18.36 → **17.60 m** |
+| tokyo_run1  | 33.0 → **56.5 %** | 11.59 → **7.34 m** | 6.90 → **2.57 m** | 24.41 → **14.91 m** |
+| tokyo_run2  | 44.3 → **66.9 %** | 5.19 → **3.45 m** | 3.91 → **2.03 m** | 10.67 → **7.23 m** |
+| tokyo_run3  | 30.1 → **42.2 %** | 36.02 → **4.84 m** | 3.91 → **2.34 m** | 14.69 → **11.69 m** |
+| **Mean** | **41.2 → 61.2 %** | **17.07 → 7.54 m** | **5.61 → 2.83 m** | **17.71 → 12.42 m** |
+
+### Key findings (v0.6.10)
+
+- **All six runs improve** on every aggregate metric: <2 m rate **+20 pp**,
+  median **−50 %**, p95 **−30 %**, RMS **−56 %**.
+- The **jump-rejection QC collapses the extreme tail** — e.g. tokyo_run3 RMS
+  36.02 → 4.84 m — by removing code position spikes that the precise TDCP
+  displacement contradicts.
+- C/N0 weighting and robust estimation alone improve the bulk (rate, median) but
+  defeat the snapshot chi-square gate; the **pre-robust gate** is what turns them
+  into a clean win rather than a tail-inflating one.
+- The residual tail is **consistent NLOS bias**, which snapshot methods cannot
+  detect. P5 (common-mode clock-jump correction) and P6 (position EKF) need a
+  smartphone dataset where clock jumps and large jitter occur, and are deferred
+  to the GSDC benchmark follow-up
+  ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)).
+
+---
+
 ## Metrics Definitions
 
 | Metric | Description |
@@ -485,19 +566,20 @@ coordinate as the reference origin (moving-base projection).
 ## Configuration
 
 The benchmark uses layered configuration files.  Each run is processed with
-`rnx2rtkp -k <mode>.conf -k <city>.conf`, so the city conf overrides only
+`mrtk post -k <mode>.toml -k <city>.toml`, so the city conf overrides only
 the keys it specifies.
 
 **Mode confs** (common settings per algorithm):
 
-- `conf/benchmark/clas.conf` — CLAS PPP-RTK
-- `conf/benchmark/madoca.conf` — MADOCA PPP
-- `conf/benchmark/rtk.conf` — Baseline RTK
+- `conf/benchmark/clas.toml` — CLAS PPP-RTK
+- `conf/benchmark/madoca.toml` — MADOCA PPP
+- `conf/benchmark/rtk.toml` — Baseline RTK
+- `conf/benchmark/single.toml` — SPP (single-point), with the v0.6.10 accuracy features enabled
 
 **City confs** (antenna types and reference-station coordinates):
 
-- `conf/benchmark/nagoya.conf` — Nagoya overrides
-- `conf/benchmark/tokyo.conf` — Tokyo overrides
+- `conf/benchmark/nagoya.toml` — Nagoya overrides
+- `conf/benchmark/tokyo.toml` — Tokyo overrides
 
 Key differences from the standard test configurations:
 
