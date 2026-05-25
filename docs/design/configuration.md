@@ -96,6 +96,57 @@ The prefix matters because service *names* are not unique: "HAS" (High
 Accuracy Service) is a generic label other systems may reuse, so `gal-has`
 pins the provider. `none` is the absence of an augmentation source.
 
+### 2.4 `correction` vs `satellite_ephemeris` — why both
+
+A natural objection: RTKLIB already switches the correction source through
+`satellite_ephemeris` (`sateph`, the `EPHOPT_*` enum) — `brdc` / `precise` /
+`brdc+ssrapc` / `brdc+ssrcom`. So isn't a separate `correction` axis redundant?
+
+No — `sateph` and `correction` control **different layers**, and `sateph` alone
+becomes insufficient as soon as more than one SSR source exists.
+
+| axis | what it selects | where it dispatches |
+|------|-----------------|---------------------|
+| `satellite_ephemeris` (`EPHOPT_*`) | the **satellite orbit/clock computation** | `satpos()` → `ephpos` (brdc) / `peph2pos` (precise) / `satpos_ssr` (brdc+ssrapc/com) |
+| `correction` | the **receiver-side bias/measurement model**, the **decoder**, and the **engine** | `corr_meas()` bias branch (§5); the SSR decoder/loader; the engine class (§2.1) |
+
+`sateph` answers *"how is the corrected satellite position/clock computed?"* —
+which is enough to choose **SSR vs precise files**, exactly what RTKLIB relies
+on. But it cannot express two things MRTKLIB needs:
+
+1. **The measurement (bias) model.** `qzs-madoca` and `igs-rts` both run with
+   `satellite_ephemeris = "brdc+ssrapc"`, yet require **different** `corr_meas`
+   handling: MADOCA-CSSR applies the per-signal SSR code/phase bias from
+   `nav->ssr_ch` (and drops an observation that lacks it), whereas RTCM-SSR
+   (`igs-rts`) uses the RTKLIB float model (DCB + iono-free, no SSR bias) — the
+   two even use **opposite code-bias sign conventions**. `sateph` is identical
+   for both, so it cannot pick the right branch. This is not hypothetical:
+   [#138](https://github.com/h-shiono/MRTKLIB/issues/138) first routed `igs-rts`
+   through the MADOCA branch (because it shares `brdc+ssrapc`) and the solution
+   was biased by **metres** until it was switched to the RTKLIB branch.
+   `correction` is the key `corr_meas` branches on (§5), and it is precisely why
+   `igs-rts` is **never auto-inferred** — `brdc+ssrapc` alone is ambiguous
+   between `qzs-madoca` and `igs-rts` (§6.1).
+
+2. **The format / decoder.** CSSR (QZSS L6E/L6D), RTCM-SSR / IGS-SSR, Galileo
+   HAS, and BeiDou B2b all map to `EPHOPT_SSRAPC`, but each needs a different
+   decoder. RTKLIB distinguishes them **implicitly, by the input stream format**
+   (`STRFMT_*`); MRTKLIB makes the choice **explicit** via `correction` (the
+   stream format is kept only as a backward-compat inference, §6.1).
+
+(`correction` additionally implies the **engine** — only `qzs-clas` selects the
+`ppp-rtk` / `vrs-rtk` engines with gridded atmosphere; `sateph` has no say in
+that, §2.1.)
+
+So the two axes are **orthogonal, not redundant**: `sateph` selects the
+orbit/clock source; `correction` selects the bias model, decoder, and engine.
+RTKLIB needed no `correction` axis because its scope was narrow — broadcast,
+precise files, and a single SSR format (RTCM-SSR) with one bias model, for which
+`sateph` plus the stream format suffice. MRTKLIB adds MADOCA-CSSR, CLAS, and
+RTCM-SSR — multiple sources that share `brdc+ssrapc` but demand different
+decoders and measurement models — which is what makes the explicit `correction`
+axis necessary.
+
 ## 3. Configuration surface
 
 ```toml
