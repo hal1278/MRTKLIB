@@ -162,8 +162,20 @@ Project-wide rules are in [CLAUDE.md §4](CLAUDE.md). The headline items:
    */
   ```
 
-- **`clang-format`** is the source of truth for formatting. Run it on
-  your changes before committing.
+- **Formatters are the source of truth for style.** Run them on your
+  changes before committing. The project pins exact tool versions so the
+  output is reproducible across machines and CI:
+
+  | Language | Tool | Version | Config | Fix command |
+  |----------|------|---------|--------|-------------|
+  | C / C++ | `clang-format` | 21.1.6 | `.clang-format` (Google / 4-space / 120-col) | `clang-format -i <files>` |
+  | TOML | `taplo` | 0.10.0 | `taplo.toml` | `taplo fmt` |
+  | Python | `ruff format` | 0.15.2 | `ruff.toml` | `ruff format` |
+
+  Vendored / upstream-derived code is excluded from `clang-format` via
+  `.clang-format-ignore` (`src/core/tomlc99`, `util/`) — do not reformat it.
+  `ruff check` (lint) is **not** part of the formatting gate and is tracked
+  separately.
 - **`extern "C"`** compatibility on headers that are still consumed by
   legacy C files.
 - **`const`-correctness** on pointer parameters that are not written to.

@@ -123,8 +123,11 @@ mrtklib/
 
 ### Formatting
 
-- **C / C++:** `.clang-format` (Google base) is authoritative. Run before committing.
+Pinned tool versions (must match CI and `CONTRIBUTING.md`): clang-format **21.1.6**, taplo **0.10.0**, ruff **0.15.2**.
+
+- **C / C++:** `.clang-format` (Google base) is authoritative. Run before committing. Vendored / upstream-derived code (`src/core/tomlc99`, `util/`) is excluded via `.clang-format-ignore` — do not reformat it.
 - **TOML:** `taplo` is the formatter, configured by `taplo.toml` at the repo root. Run `taplo fmt` (or use the VS Code "Even Better TOML" extension) on any edit under `conf/`, root-level config files, or new TOML samples before committing.
+- **Python:** `ruff format` is the formatter, configured by `ruff.toml`. Run `ruff format` on any edit under `scripts/` before committing. `ruff check` (lint) is a separate concern, **not** part of the formatting gate.
 
 ### Style — what NOT to add
 
