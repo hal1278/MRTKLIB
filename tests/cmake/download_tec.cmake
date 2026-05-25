@@ -1,6 +1,9 @@
 # download_tec.cmake
-# Downloads IONEX TEC file from CODE (Univ. of Bern) if not present.
-# Called as a CTest FIXTURES_SETUP script.
+# Ensures the IONEX TEC file is present for the recvbias regression test.
+#
+# The compressed file is vendored in the repo (tests/data/malib/*.INX.gz) so CI
+# is deterministic and works offline; the network download from CODE (Univ. of
+# Bern) is only a fallback for when the vendored copy is absent.
 #
 # Usage:
 #   cmake -DTESTDATA_DIR=<path/to/data> -P download_tec.cmake
@@ -19,19 +22,26 @@ if(EXISTS "${TEC_FILE}")
     return()
 endif()
 
-message(STATUS "download_tec: downloading ${TEC_URL}")
-file(DOWNLOAD "${TEC_URL}" "${TEC_GZ}"
-    STATUS dl_status
-    SHOW_PROGRESS
-)
-list(GET dl_status 0 dl_rc)
-list(GET dl_status 1 dl_msg)
+# Prefer the vendored compressed copy; only hit the network if it is missing.
+if(EXISTS "${TEC_GZ}")
+    message(STATUS "download_tec: using vendored ${TEC_GZ}")
+    set(_vendored TRUE)
+else()
+    message(STATUS "download_tec: downloading ${TEC_URL}")
+    file(DOWNLOAD "${TEC_URL}" "${TEC_GZ}"
+        STATUS dl_status
+        SHOW_PROGRESS
+    )
+    list(GET dl_status 0 dl_rc)
+    list(GET dl_status 1 dl_msg)
 
-if(NOT dl_rc EQUAL 0)
-    file(REMOVE "${TEC_GZ}")
-    message(FATAL_ERROR
-        "download_tec: download failed (${dl_rc}: ${dl_msg})\n"
-        "  URL: ${TEC_URL}")
+    if(NOT dl_rc EQUAL 0)
+        file(REMOVE "${TEC_GZ}")
+        message(FATAL_ERROR
+            "download_tec: download failed (${dl_rc}: ${dl_msg})\n"
+            "  URL: ${TEC_URL}")
+    endif()
+    set(_vendored FALSE)
 endif()
 
 # Decompress .gz -> .INX
@@ -40,7 +50,11 @@ execute_process(
     OUTPUT_FILE "${TEC_FILE}"
     RESULT_VARIABLE gz_rc
 )
-file(REMOVE "${TEC_GZ}")
+
+# Keep the vendored archive in place; only clean up a freshly downloaded one.
+if(NOT _vendored)
+    file(REMOVE "${TEC_GZ}")
+endif()
 
 if(NOT gz_rc EQUAL 0)
     file(REMOVE "${TEC_FILE}")
