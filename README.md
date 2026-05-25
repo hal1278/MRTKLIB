@@ -52,7 +52,10 @@ is in the [CHANGELOG](CHANGELOG.md) and [release notes](docs/releases/):
 > [!NOTE]
 > demo5 algorithm improvements are adapted from **[demo5 RTKLIB](https://github.com/rtklibexplorer/RTKLIB)**
 > by Tim Everett (rtklibexplorer).  Benchmark results use the
-> [PPC-Dataset](https://github.com/taroz/PPC-Dataset) (Taro Suzuki, Chiba Institute of Technology).
+> [PPC-Dataset](https://github.com/taroz/PPC-Dataset) (Taro Suzuki, Chiba Institute of Technology)
+> for kinematic positioning and the
+> [Google Smartphone Decimeter Challenge 2023](https://www.kaggle.com/competitions/smartphone-decimeter-2023)
+> dataset for smartphone SPP.
 
 ### Known Limitations
 
@@ -159,12 +162,20 @@ This project stands on the shoulders of giants:
 
 For detailed licensing information, please refer to [LICENSE](LICENSE).
 
-## 🗄️ Benchmark Dataset
+## 🗄️ Benchmark Datasets
 
-The kinematic positioning benchmark uses the **PPC-Dataset** (Precise Positioning
-Challenge 2024), kindly released as open data by:
+**Kinematic (geodetic).** The **PPC-Dataset** (Precise Positioning Challenge
+2024), kindly released as open data by:
 
 > **Taro Suzuki**, Chiba Institute of Technology
 > <https://github.com/taroz/PPC-Dataset>
 
-See [docs/benchmark.md](docs/benchmark.md) for usage instructions.
+**Smartphone (SPP).** The **Google Smartphone Decimeter Challenge 2023**
+(GSDC-2023), released on Kaggle by Google for the ION GNSS+ conference and used
+here under the Kaggle competition rules:
+
+> <https://www.kaggle.com/competitions/smartphone-decimeter-2023>
+
+See [docs/reference/benchmark.md](docs/reference/benchmark.md) (kinematic) and
+[docs/reference/benchmark-gsdc.md](docs/reference/benchmark-gsdc.md) (smartphone)
+for usage instructions.
