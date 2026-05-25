@@ -108,7 +108,7 @@ def _run_mrtk(mrtk: str, confs: list[str], obs: Path, navs: list[Path],
 # ---------------------------------------------------------------------------
 # Summary table
 # ---------------------------------------------------------------------------
-_HDR = (f"{'Case':<42} {'N':>5} {'nSV':>5} {'<2m%':>6} "
+_HDR = (f"{'Case':<42} {'N':>5} {'Cov%':>6} {'nSV':>5} {'<2m%':>6} "
         f"{'RMS2D':>8} {'p50':>8} {'p95':>8} {'score':>8}")
 _SEP = "-" * len(_HDR)
 
@@ -138,9 +138,12 @@ def print_summary(rows: list[dict]) -> None:
         m = r["metrics"]
         cid = r["id"][:42]
         if m is None:
-            print(f"{cid:<42} {'—':>5}  [{r['status']}]")
+            d = "—"
+            print(f"{cid:<42} {d:>5} {d:>6} {d:>5} {d:>6} "
+                  f"{d:>8} {d:>8} {d:>8} {d:>8}  [{r['status']}]")
             continue
-        print(f"{cid:<42} {m['n_matched']:>5} {m['mean_sv_all']:>5.1f} "
+        print(f"{cid:<42} {m['n_matched']:>5} {r['coverage']:>5.1f}% "
+              f"{m['mean_sv_all']:>5.1f} "
               f"{m['thr_rate']:>5.1f}% {_m(m['rms_2d_all']):>8} "
               f"{_m(m['p50_2d_all']):>8} {_m(m['p95_2d_all']):>8} "
               f"{_m(gsdc_score(m)):>8}")
@@ -149,6 +152,7 @@ def print_summary(rows: list[dict]) -> None:
     if ok:
         import numpy as np
         print(f"{'MEAN':<42} {int(np.mean([m['n_matched'] for m in ok])):>5} "
+              f"{np.mean([r['coverage'] for r in rows if r['metrics']]):>5.1f}% "
               f"{np.mean([m['mean_sv_all'] for m in ok]):>5.1f} "
               f"{np.mean([m['thr_rate'] for m in ok]):>5.1f}% "
               f"{np.mean([m['rms_2d_all'] for m in ok]):>8.2f} "
@@ -229,10 +233,12 @@ def run(args: argparse.Namespace) -> int:
             print("  FAIL: no matching epochs")
             rows.append({"id": case["id"], "metrics": None, "status": "no-match"})
             continue
+        ref_usable = max(0, len(ref) - args.skip_epochs)
+        coverage = m["n_matched"] / ref_usable * 100.0 if ref_usable else math.nan
         print(f"  N={m['n_matched']}  <2m={m['thr_rate']:.1f}%  "
               f"p50={m['p50_2d_all']:.2f}m  p95={m['p95_2d_all']:.2f}m  "
-              f"score={gsdc_score(m):.2f}m  ({dt:.1f}s)")
-        rows.append({"id": case["id"], "metrics": m, "status": "ok"})
+              f"score={gsdc_score(m):.2f}m  cov={coverage:.1f}%  ({dt:.1f}s)")
+        rows.append({"id": case["id"], "metrics": m, "coverage": coverage, "status": "ok"})
 
     print_summary(rows)
     return 0

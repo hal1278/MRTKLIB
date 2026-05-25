@@ -121,8 +121,8 @@ the maintainer explicitly wants improved and which TDCP/EKF cannot.
 | **P2** | IGG-III robust re-weighting in `estpos()` (MAD scale) *(implemented)* | WLS | bulk (rate +11pp, median); defeats gate → §4.3 | low |
 | **P3** | Pre-robust all-satellite acceptance gate *(implemented)* — unblocks P1+P2 → clean win (§4.4) | WLS | **tail control; rate +16pp, median −43%** | medium |
 | **P4** | TDCP velocity + jump-rejection QC + slip detection *(implemented)* — §4.5 | WLS + light coupling | **tail/RMS −56% vs P0; rate +20pp** | medium |
-| **P5** | Common-mode clock-jump correction + logging / reset strategy | infra | low-cost-receiver continuity; EKF prerequisite | medium |
-| **P6** | SPP position EKF (loosely-coupled) — *investigated, reverted* (§4.6) | EKF | no gain on PPC; diverges | — |
+| **P5** | Common-mode clock-jump correction + logging / reset strategy | infra | low-cost-receiver continuity; EKF prerequisite — *N/A on the GSDC `device_gnss.csv` source* (§4.7) | medium |
+| **P6** | SPP position EKF (loosely-coupled) — *investigated, reverted twice* (§4.6 PPC, §4.7 GSDC) | EKF | no accuracy gain (PPC or smartphone); smoothing adds lag | — |
 
 Each step ships as an independent, reviewable commit, must pass the full
 `ctest --output-on-failure`, and records numerical deltas (CLAUDE.md §7.2 —
@@ -348,6 +348,67 @@ smartphone/static benchmark — the GSDC / SDC sets, where jitter is large and
 clock jumps actually occur (which also makes that the right venue for P5's
 clock-jump correction).
 
+### 4.7 P6 re-attempt on smartphone data (GSDC) — confirmed and reverted (2026-05-25)
+
+[#165](https://github.com/h-shiono/MRTKLIB/issues/165) built the GSDC-2023
+smartphone SPP benchmark precisely to give P6 (and P5) the favourable data §4.6
+said they needed: large per-epoch jitter and real outage bursts. The loosely
+coupled position EKF was re-implemented there — this time *tuned* (a robust
+innovation gate, a covariance-bounded coast, and TDCP/Doppler velocity rows to
+pin the velocity state) and finally as a **coast-only sidecar** (accepted WLS
+epochs pass through unchanged; the EKF only fills the epochs the P1–P4 QC
+rejects). Measured on the curated-6 anchor (official GSDC metric = mean of the
+2D-horizontal p50 and p95, plus a `Cov%` = predicted ÷ reference epochs):
+
+| Variant | N | Cov% | p50 | p95 | score |
+|---------|---:|---:|---:|---:|---:|
+| P1–P4 (snapshot WLS) | 907 | 52.3 | 2.56 | 5.82 | **4.19** |
+| P6 untuned (no gate / no coast bound) | 1665 | — | 185 | 3297 | **1741** *(diverges)* |
+| P6 smoothing-only (coast disabled) | 906 | 52.3 | 2.61 | 6.07 | **4.34** |
+| P6 coast-only (tuned) | 941 | 54.4 | 2.59 | 6.00 | **4.29** |
+
+Two findings, both confirming and **extending §4.6 to smartphone data**:
+
+1. **Smoothing actively hurts — it is not merely neutral.** With the coast
+   disabled (so only the measured epochs are touched), the EKF makes accuracy
+   *worse* (4.19 → 4.34). The constant-velocity/acceleration model lags real
+   stop-go / turning smartphone motion, and that lag outweighs the jitter it
+   removes; the post-P1–P4 WLS is already good enough that there is no net
+   averaging gain. This is the *second* independent negative result for the
+   loosely-coupled position EKF (PPC in §4.6, GSDC here).
+2. **The matched-only metric cannot reward P6's only contribution.**
+   `compute_metrics` scores the epochs a run *predicts*; ground-truth epochs left
+   unpredicted are simply absent. So it rewards aggressive QC (P1–P4 discarding
+   ~48 % of epochs) and penalises coast (the filled epochs are harder than the
+   median, so they raise p50/p95). The real GSDC requires a position for *every*
+   sample-submission epoch, so the +2.1 pp of coverage P6 recovers would there
+   replace default/penalty rows — but our harness, by design, undercounts that.
+   The lasting fix kept from this work is the **`Cov%` column** (added to
+   `run_gsdc_benchmark.py` / `compare_gsdc.py`), which surfaces the
+   availability⇄accuracy trade-off for *every* config without re-scoring the
+   already-published P1–P4 numbers over all epochs.
+
+**P5 is not applicable on this data either.** P5 targets the millisecond
+common-mode clock steering of low-cost receivers, but the chosen OBS source —
+Google's derived `device_gnss.csv` — already reconstructs the clock: across all
+six curated trips the `HardwareClockDiscontinuityCount` never increments (zero
+common-mode jumps). The remaining slips are per-satellite and already handled by
+the converter's `LLI`-on-`ADR_RESET`/`SLIP` plus P4's `spp_detslp`. P5's premise
+holds only for the raw `gnss_log.txt` path, which #165 deliberately did not use.
+demo5 confirms there is no smartphone clock-jump primitive to port: its
+`pntpos.c` is clean and only `ppp.c` carries a *day-boundary* ambiguity reset.
+
+**Decision: P6 reverted (the finding is the deliverable, not the code).** As a
+reference implementation, MRTKLIB should carry only algorithms that earn their
+place; a default-off EKF known not to improve accuracy is debt, not a feature.
+The C code (`spp_filter` option, `spp_posfilt()`, the `pntpos` velocity-covariance
+clear, the `gsdc_p6.toml` overlay) was reverted; the `Cov%` benchmark metric was
+kept. The only credible accuracy path left for SPP is a **tightly-coupled**
+raw-pseudorange/Doppler EKF with clock + inter-system-bias states (§5.2/§5.3 —
+*not* pursued now); a loose post-filter over the WLS output structurally cannot
+absorb the clock/ISB and NLOS-bias errors that dominate the residual tail.
+Independently cross-reviewed (Codex), which reached the same conclusion.
+
 ## 5. Design
 
 ### 5.1 Architecture decision — reuse `rtk_t` for `PMODE_SINGLE`
@@ -444,6 +505,13 @@ Gated by `[positioning] tdcp` (default off → bit-identical). Measured effect:
 [§4.5](#45-p4-result--tdcp-velocity--jump-rejection-measured-2026-05-24).
 
 ### 5.5 Common-mode clock-jump correction (P5)
+
+> **Status: deferred — no validation target in the available data ([§4.7](#47-p6-re-attempt-on-smartphone-data-gsdc--confirmed-and-reverted-2026-05-25)).**
+> PPC is geodetic (clocks do not step) and the GSDC `device_gnss.csv` source has
+> its clock already reconstructed (zero `HardwareClockDiscontinuityCount`
+> increments). P5 only bites on the raw `gnss_log.txt` smartphone path or a live
+> low-cost stream, neither of which is currently benchmarked. Design retained for
+> when such data is available.
 
 Low-cost receivers steer their clock, producing simultaneous millisecond jumps
 on every satellite's carrier phase. `rescode()` already processes all visible
@@ -657,7 +725,14 @@ primary, ○ corroborating / applied.
   (epoch-propagated, not a station webpage coordinate).
 - **`detslp_*` sharing.** Exact refactor to expose cycle-slip detection to SPP
   without disturbing PPP/RTK — settled at P4.
-- **demo5 clock-jump parity.** Read the demo5 `pntpos.c` implementation before
-  P5 rather than assuming behaviour (CLAUDE.md §3).
+- **demo5 clock-jump parity.** *Resolved ([§4.7](#47-p6-re-attempt-on-smartphone-data-gsdc--confirmed-and-reverted-2026-05-25)):* demo5 has no
+  smartphone clock-jump primitive to port — `pntpos.c` is clean and only `ppp.c`
+  carries a day-boundary ambiguity reset. P5 deferred for want of a data source
+  that actually exhibits common-mode clock jumps.
 - **IGG-III thresholds.** The `k0`/`k1` segment thresholds need tuning against
   the P0 baseline; start from the literature range and validate per [§4.1](#41-p0-baseline-measured-2026-05-24).
+- **Tightly-coupled SPP EKF (Stage B).** The only credible remaining accuracy
+  lever ([§4.7](#47-p6-re-attempt-on-smartphone-data-gsdc--confirmed-and-reverted-2026-05-25)): a raw-pseudorange/Doppler EKF with clock + ISB states
+  (§5.2/§5.3), able to absorb errors the loose post-filter cannot. Not pursued
+  now; the residual tail is largely NLOS bias, which no filter fixes (needs
+  3DMA / external aiding).

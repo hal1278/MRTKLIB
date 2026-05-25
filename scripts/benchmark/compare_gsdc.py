@@ -124,10 +124,14 @@ def main() -> int:
     thr = args.threshold
     thr_label = f"<{thr:.1f}m" if thr >= 1.0 else f"<{thr * 100:.0f}cm"
     score = (m["p50_2d_all"] + m["p95_2d_all"]) / 2.0
+    ref_usable = max(0, len(ref_rows) - args.skip_epochs)
+    coverage = m["n_matched"] / ref_usable * 100.0 if ref_usable else math.nan
     print(f"Reference : {args.ref}")
     print(f"Result    : {args.result}")
     print()
+    print(f"Reference epochs : {ref_usable}")
     print(f"Matched epochs : {m['n_matched']}")
+    print(f"Coverage       : {coverage:.1f}%")
     print(f"{thr_label} rate    : {m['thr_rate']:.1f}%")
     print(f"mean nSV       : {m['mean_sv_all']:.1f}")
     print()
