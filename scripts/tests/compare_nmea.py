@@ -9,6 +9,7 @@ Usage:
     python compare_nmea.py ref.nmea test.nmea --tolerance 0.10
     python compare_nmea.py ref.nmea test.nmea --tolerance 0.10 --skip-epochs 60 --plot
 """
+
 import argparse
 import sys
 
@@ -33,15 +34,15 @@ def parse_nmea(filepath):
                 continue
 
             # Remove checksum
-            if '*' in line:
-                line = line[:line.index('*')]
+            if "*" in line:
+                line = line[: line.index("*")]
 
-            fields = line.split(',')
+            fields = line.split(",")
             if len(fields) < 10:
                 continue
 
             # Parse GGA sentences
-            if fields[0] in ('$GPGGA', '$GNGGA'):
+            if fields[0] in ("$GPGGA", "$GNGGA"):
                 try:
                     time_str = fields[1]  # HHMMSS.ss
                     lat_str = fields[2]
@@ -107,7 +108,7 @@ def compute_metrics(ref_data, test_data, skip_epochs=0):
     errors_3d = np.array(errors_3d)
 
     n = len(common_keys)
-    rms_3d = np.sqrt(np.mean(errors_3d ** 2))
+    rms_3d = np.sqrt(np.mean(errors_3d**2))
     max_3d = np.max(errors_3d)
 
     rms_e = np.sqrt(np.mean(enu_errors[:, 0] ** 2))
@@ -142,6 +143,7 @@ def compute_metrics(ref_data, test_data, skip_epochs=0):
 def plot_results(metrics, output_path="compare_nmea_result.png"):
     """Generate ENU error time-series and Q-flag comparison plot."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -156,17 +158,15 @@ def plot_results(metrics, output_path="compare_nmea_result.png"):
     ax1.plot(epochs, enu[:, 2] * 100, label="Up", alpha=0.8, linewidth=0.8)
     ax1.set_ylabel("ENU Error [cm]")
     ax1.set_title(
-        f"ENU Error (3D RMS: {metrics['rms_3d']*100:.2f} cm, "
-        f"Max: {metrics['max_3d']*100:.2f} cm)"
+        f"ENU Error (3D RMS: {metrics['rms_3d'] * 100:.2f} cm, "
+        f"Max: {metrics['max_3d'] * 100:.2f} cm)"
     )
     ax1.legend(loc="upper right")
     ax1.grid(True, alpha=0.3)
     ax1.axhline(y=0, color="k", linewidth=0.5)
 
-    ax2.scatter(epochs, metrics["ref_q"], s=8, label="Reference", alpha=0.6,
-                marker="o")
-    ax2.scatter(epochs, metrics["test_q"], s=8, label="Test", alpha=0.6,
-                marker="x")
+    ax2.scatter(epochs, metrics["ref_q"], s=8, label="Reference", alpha=0.6, marker="o")
+    ax2.scatter(epochs, metrics["test_q"], s=8, label="Test", alpha=0.6, marker="x")
     ax2.set_ylabel("NMEA Quality")
     ax2.set_xlabel("Epoch")
     ax2.set_title(
@@ -184,26 +184,28 @@ def plot_results(metrics, output_path="compare_nmea_result.png"):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Statistical comparison of NMEA GGA output files"
-    )
+    parser = argparse.ArgumentParser(description="Statistical comparison of NMEA GGA output files")
     parser.add_argument("ref", help="Reference NMEA file path")
     parser.add_argument("test", help="Test NMEA file path")
     parser.add_argument(
-        "--tolerance", type=float, default=0.10,
-        help="Maximum allowed 3D RMS error in metres (default: 0.10)"
+        "--tolerance",
+        type=float,
+        default=0.10,
+        help="Maximum allowed 3D RMS error in metres (default: 0.10)",
     )
     parser.add_argument(
-        "--skip-epochs", type=int, default=0,
-        help="Number of initial epochs to skip for convergence transient"
+        "--skip-epochs",
+        type=int,
+        default=0,
+        help="Number of initial epochs to skip for convergence transient",
     )
     parser.add_argument(
-        "--plot", action="store_true",
-        help="Generate comparison plot (compare_nmea_result.png)"
+        "--plot", action="store_true", help="Generate comparison plot (compare_nmea_result.png)"
     )
     parser.add_argument(
-        "--skip-fixrate", action="store_true",
-        help="Skip fix rate degradation check (for float-only solutions)"
+        "--skip-fixrate",
+        action="store_true",
+        help="Skip fix rate degradation check (for float-only solutions)",
     )
     args = parser.parse_args()
 
@@ -216,6 +218,7 @@ def main():
     print()
 
     import os
+
     if not os.path.isfile(args.ref):
         print(f"FAIL: Reference file not found: {args.ref}", file=sys.stderr)
         return 1
@@ -238,19 +241,18 @@ def main():
     # Compute metrics
     metrics = compute_metrics(ref_data, test_data, skip_epochs=args.skip_epochs)
     if metrics is None:
-        print("FAIL: No common epochs between reference and test",
-              file=sys.stderr)
+        print("FAIL: No common epochs between reference and test", file=sys.stderr)
         return 1
 
     # Report
     print(f"Matched   : {metrics['n_common']} common epochs")
     print()
     print("  ENU RMS Error:")
-    print(f"    East  : {metrics['rms_e']*100:8.3f} cm")
-    print(f"    North : {metrics['rms_n']*100:8.3f} cm")
-    print(f"    Up    : {metrics['rms_u']*100:8.3f} cm")
-    print(f"    3D    : {metrics['rms_3d']*100:8.3f} cm")
-    print(f"    3D Max: {metrics['max_3d']*100:8.3f} cm")
+    print(f"    East  : {metrics['rms_e'] * 100:8.3f} cm")
+    print(f"    North : {metrics['rms_n'] * 100:8.3f} cm")
+    print(f"    Up    : {metrics['rms_u'] * 100:8.3f} cm")
+    print(f"    3D    : {metrics['rms_3d'] * 100:8.3f} cm")
+    print(f"    3D Max: {metrics['max_3d'] * 100:8.3f} cm")
     print()
     print("  Fix Rate (Quality=4: RTK Fix):")
     print(f"    Reference : {metrics['ref_fix_rate']:6.2f}%")
@@ -268,19 +270,16 @@ def main():
 
     # Criterion 1: 3D RMS under tolerance
     if metrics["rms_3d"] >= args.tolerance:
-        print(f"FAIL: 3D RMS ({metrics['rms_3d']:.6f} m) >= "
-              f"tolerance ({args.tolerance:.6f} m)")
+        print(f"FAIL: 3D RMS ({metrics['rms_3d']:.6f} m) >= tolerance ({args.tolerance:.6f} m)")
         passed = False
     else:
-        print(f"PASS: 3D RMS ({metrics['rms_3d']:.6f} m) < "
-              f"tolerance ({args.tolerance:.6f} m)")
+        print(f"PASS: 3D RMS ({metrics['rms_3d']:.6f} m) < tolerance ({args.tolerance:.6f} m)")
 
     # Criterion 2: Fix rate not degraded by more than 5.0% (relaxed for PPP-RTK)
     if args.skip_fixrate:
         print("SKIP: Fix rate check disabled (--skip-fixrate)")
     elif fix_delta < -5.0:
-        print(f"FAIL: Fix rate degraded by {fix_delta:.2f}% "
-              f"(threshold: -5.0%)")
+        print(f"FAIL: Fix rate degraded by {fix_delta:.2f}% (threshold: -5.0%)")
         passed = False
     else:
         print(f"PASS: Fix rate delta ({fix_delta:+.2f}%) within threshold")

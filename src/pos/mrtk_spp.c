@@ -730,8 +730,8 @@ static int resdop(const obsd_t* obs, int n, const double* rs, const double* dts,
             }
         }
         if (!use && obs[i].D[0] != 0.0) {
-            meas = -obs[i].D[0];                       /* Doppler-predicted rate (cyc/s) */
-            sig = (err <= 0.0) ? 1.0 : err * lam;      /* m/s */
+            meas = -obs[i].D[0];                  /* Doppler-predicted rate (cyc/s) */
+            sig = (err <= 0.0) ? 1.0 : err * lam; /* m/s */
             use = 1;
         }
         if (!use) {

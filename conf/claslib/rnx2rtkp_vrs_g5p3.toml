@@ -14,7 +14,7 @@ excluded_sats = ""                                                 # (prn ...)
 systems = ["GPS", "Galileo", "QZSS"]
 
 [positioning.clas]
-grid_selection_radius = 1000    # [m]
+grid_selection_radius = 1000   # [m]
 receiver_type = "SEPT POLARX5" # User receiver type (mosaic-G5 uses Septentrio bias group)
 
 [positioning.snr_mask]
@@ -113,21 +113,21 @@ baseline_sigma = 0.0    # (m)
 max_age = 30.0          # (s)
 
 [antenna.rover]
-type = "*" # User antenna type (no model for mosaic-G5 P3)
-position_type = "single"      # (0:llh,1:xyz,2:single,3:posfile,4:rinexhead,5:rtcm)
-delta_e = 0.0                 # (m)
-delta_n = 0.0                 # (m)
-delta_u = 0.0                 # (m)
+type = "*"               # User antenna type (no model for mosaic-G5 P3)
+position_type = "single" # (0:llh,1:xyz,2:single,3:posfile,4:rinexhead,5:rtcm)
+delta_e = 0.0            # (m)
+delta_n = 0.0            # (m)
+delta_u = 0.0            # (m)
 
 [antenna.base]
-position_type = "rinexh"      # (0:llh,1:xyz,2:single,3:posfile,4:rinexhead,5:rtcm)
-position_1 = 0.0              # (deg|m)
-position_2 = 0.0              # (deg|m)
-position_3 = 0.0              # (m|m)
+position_type = "rinexh" # (0:llh,1:xyz,2:single,3:posfile,4:rinexhead,5:rtcm)
+position_1 = 0.0         # (deg|m)
+position_2 = 0.0         # (deg|m)
+position_3 = 0.0         # (m|m)
 type = "*"
-delta_e = 0.0                 # (m)
-delta_n = 0.0                 # (m)
-delta_u = 0.0                 # (m)
+delta_e = 0.0            # (m)
+delta_n = 0.0            # (m)
+delta_u = 0.0            # (m)
 
 [output]
 format = "llh"               # (0:llh,1:xyz,2:enu,3:nmea)

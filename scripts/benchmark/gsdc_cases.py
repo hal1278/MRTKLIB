@@ -21,12 +21,12 @@ from pathlib import Path
 # San Jose, downtown Los Angeles canyon, mixed route).  ``--case all`` runs
 # every discovered train case instead.
 CURATED: list[str] = [
-    "2020-06-25-00-34-us-ca-mtv-sb-101/pixel4",   # suburban highway, Pixel 4
-    "2020-07-17-23-13-us-ca-sf-mtv-280/pixel4",   # SF -> MTV, urban + highway
-    "2020-12-10-22-52-us-ca-sjc-c/mi8",           # San Jose, Xiaomi Mi8
-    "2021-04-02-20-43-us-ca-mtv-f/sm-g988b",      # Mountain View, Samsung S20
-    "2021-12-07-19-22-us-ca-lax-d/pixel5",        # downtown LA canyon, Pixel 5
-    "2023-09-05-23-07-us-ca-routen/pixel7pro",    # mixed route, Pixel 7 Pro
+    "2020-06-25-00-34-us-ca-mtv-sb-101/pixel4",  # suburban highway, Pixel 4
+    "2020-07-17-23-13-us-ca-sf-mtv-280/pixel4",  # SF -> MTV, urban + highway
+    "2020-12-10-22-52-us-ca-sjc-c/mi8",  # San Jose, Xiaomi Mi8
+    "2021-04-02-20-43-us-ca-mtv-f/sm-g988b",  # Mountain View, Samsung S20
+    "2021-12-07-19-22-us-ca-lax-d/pixel5",  # downtown LA canyon, Pixel 5
+    "2023-09-05-23-07-us-ca-routen/pixel7pro",  # mixed route, Pixel 7 Pro
 ]
 
 
@@ -58,14 +58,16 @@ def discover_cases(dataset_dir: Path, split: str = "train") -> list[dict]:
         device = gnss.parent.name
         trip = gnss.parent.parent.name
         gt = gnss.parent / "ground_truth.csv"
-        cases.append({
-            "id": f"{trip}/{device}",
-            "trip": trip,
-            "device": device,
-            "gnss_csv": gnss,
-            "ground_truth": gt if gt.is_file() else None,
-            "date": trip_date(trip),
-        })
+        cases.append(
+            {
+                "id": f"{trip}/{device}",
+                "trip": trip,
+                "device": device,
+                "gnss_csv": gnss,
+                "ground_truth": gt if gt.is_file() else None,
+                "date": trip_date(trip),
+            }
+        )
     return cases
 
 

@@ -24,8 +24,8 @@ extern "C" {
  * by mrtk_normalize_args() as a pre-pass over argv.
  */
 typedef struct {
-    const char *long_opt;  /**< long-form flag, e.g. "--config" */
-    const char *short_opt; /**< short-form flag the parser already handles, e.g. "-k" */
+    const char* long_opt;  /**< long-form flag, e.g. "--config" */
+    const char* short_opt; /**< short-form flag the parser already handles, e.g. "-k" */
 } mrtk_optmap_t;
 
 /**
@@ -40,7 +40,7 @@ typedef struct {
  * @param[in,out]  argv  argument vector (pointers may be reassigned)
  * @param[in]      map   NULL-terminated alias table (terminator: {NULL, NULL})
  */
-void mrtk_normalize_args(int argc, char **argv, const mrtk_optmap_t *map);
+void mrtk_normalize_args(int argc, char** argv, const mrtk_optmap_t* map);
 
 /**
  * @brief Returns 1 if `arg` is a generic help flag (`-h` or `--help`), else 0.
@@ -51,7 +51,7 @@ void mrtk_normalize_args(int argc, char **argv, const mrtk_optmap_t *map);
  *
  * @param[in]  arg  argument string (must not be NULL)
  */
-int mrtk_is_help_flag(const char *arg);
+int mrtk_is_help_flag(const char* arg);
 
 #ifdef __cplusplus
 }

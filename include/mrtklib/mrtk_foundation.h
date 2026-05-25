@@ -266,13 +266,13 @@ extern "C" {
 typedef enum {
     MRTK_BAND_UNKNOWN = 0,
     /* GPS */
-    MRTK_BAND_GPS_L1,   /* 1575.42 MHz */
-    MRTK_BAND_GPS_L2,   /* 1227.60 MHz */
-    MRTK_BAND_GPS_L5,   /* 1176.45 MHz */
+    MRTK_BAND_GPS_L1, /* 1575.42 MHz */
+    MRTK_BAND_GPS_L2, /* 1227.60 MHz */
+    MRTK_BAND_GPS_L5, /* 1176.45 MHz */
     /* GLONASS */
-    MRTK_BAND_GLO_G1,   /* ~1602 MHz (FDMA) */
-    MRTK_BAND_GLO_G2,   /* ~1246 MHz (FDMA) */
-    MRTK_BAND_GLO_G3,   /* 1202.025 MHz */
+    MRTK_BAND_GLO_G1, /* ~1602 MHz (FDMA) */
+    MRTK_BAND_GLO_G2, /* ~1246 MHz (FDMA) */
+    MRTK_BAND_GLO_G3, /* 1202.025 MHz */
     /* Galileo */
     MRTK_BAND_GAL_E1,   /* 1575.42 MHz */
     MRTK_BAND_GAL_E5a,  /* 1176.45 MHz */
@@ -280,13 +280,13 @@ typedef enum {
     MRTK_BAND_GAL_E6,   /* 1278.75 MHz */
     MRTK_BAND_GAL_E5ab, /* 1191.795 MHz */
     /* QZSS */
-    MRTK_BAND_QZS_L1,   /* 1575.42 MHz */
-    MRTK_BAND_QZS_L2,   /* 1227.60 MHz */
-    MRTK_BAND_QZS_L5,   /* 1176.45 MHz */
-    MRTK_BAND_QZS_L6,   /* 1278.75 MHz */
+    MRTK_BAND_QZS_L1, /* 1575.42 MHz */
+    MRTK_BAND_QZS_L2, /* 1227.60 MHz */
+    MRTK_BAND_QZS_L5, /* 1176.45 MHz */
+    MRTK_BAND_QZS_L6, /* 1278.75 MHz */
     /* SBAS */
-    MRTK_BAND_SBS_L1,   /* 1575.42 MHz */
-    MRTK_BAND_SBS_L5,   /* 1176.45 MHz */
+    MRTK_BAND_SBS_L1, /* 1575.42 MHz */
+    MRTK_BAND_SBS_L5, /* 1176.45 MHz */
     /* BDS */
     MRTK_BAND_BDS_B1I,  /* 1561.098 MHz */
     MRTK_BAND_BDS_B1C,  /* 1575.42 MHz */
@@ -295,8 +295,8 @@ typedef enum {
     MRTK_BAND_BDS_B2ab, /* 1191.795 MHz */
     MRTK_BAND_BDS_B3,   /* 1268.52 MHz */
     /* NavIC */
-    MRTK_BAND_IRN_L5,   /* 1176.45 MHz */
-    MRTK_BAND_IRN_S,    /* 2492.028 MHz */
+    MRTK_BAND_IRN_L5, /* 1176.45 MHz */
+    MRTK_BAND_IRN_S,  /* 2492.028 MHz */
     MRTK_BAND_MAX
 } mrtk_band_t;
 

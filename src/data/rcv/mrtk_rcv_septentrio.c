@@ -20,6 +20,7 @@
 #include <string.h>
 
 #include "mrtklib/mrtk_bits.h"
+#include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_eph.h"
 #include "mrtklib/mrtk_madoca.h"
 #include "mrtklib/mrtk_mat.h"
@@ -27,7 +28,6 @@
 #include "mrtklib/mrtk_obs.h"
 #include "mrtklib/mrtk_rcvraw.h"
 #include "mrtklib/mrtk_rtcm.h"
-#include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_sys.h"
 #include "mrtklib/mrtk_time.h"
 #include "mrtklib/mrtk_trace.h"
@@ -124,14 +124,14 @@
 #define SBF_NAVICRAW 4093   /* SBF NavIC/IRNSS subframe */
 
 /* Decoded navigation blocks */
-#define SBF_GPSNAV   5891   /* SBF GPS decoded ephemeris */
-#define SBF_GLONAV   4004   /* SBF GLONASS decoded ephemeris */
-#define SBF_GALNAV   4002   /* SBF Galileo decoded ephemeris */
-#define SBF_BDSNAV   4081   /* SBF BDS decoded ephemeris */
-#define SBF_QZSSNAV  4095   /* SBF QZSS decoded ephemeris */
+#define SBF_GPSNAV 5891  /* SBF GPS decoded ephemeris */
+#define SBF_GLONAV 4004  /* SBF GLONASS decoded ephemeris */
+#define SBF_GALNAV 4002  /* SBF Galileo decoded ephemeris */
+#define SBF_BDSNAV 4081  /* SBF BDS decoded ephemeris */
+#define SBF_QZSSNAV 4095 /* SBF QZSS decoded ephemeris */
 
 /* Position blocks */
-#define SBF_PVTGEOD  4007   /* SBF PVTGeodetic */
+#define SBF_PVTGEOD 4007 /* SBF PVTGeodetic */
 
 /* get fields (little-endian) ------------------------------------------------*/
 #define U1(p) (*((uint8_t*)(p)))
@@ -170,19 +170,19 @@ static double R8(const uint8_t* p) {
 /* convert N-bit week number to full week ------------------------------------*/
 static uint16_t adjust_WN10(uint16_t ref_WN, uint16_t WN) {
     int16_t offset = (ref_WN % 1024) - WN;
-    if (offset >  512) offset -= 1024;
+    if (offset > 512) offset -= 1024;
     if (offset < -511) offset += 1024;
     return ref_WN + offset;
 }
 static uint16_t adjust_WN12(uint16_t ref_WN, uint16_t WN) {
     int16_t offset = (ref_WN % 4096) - WN;
-    if (offset >  2048) offset -= 4096;
+    if (offset > 2048) offset -= 4096;
     if (offset < -2047) offset += 4096;
     return ref_WN + offset;
 }
 static uint16_t adjust_WN14(uint16_t ref_WN, uint16_t WN) {
     int16_t offset = (ref_WN % 8192) - WN;
-    if (offset >  4096) offset -= 8192;
+    if (offset > 4096) offset -= 8192;
     if (offset < -4095) offset += 8192;
     return ref_WN + offset;
 }
@@ -512,9 +512,14 @@ static int decode_measepoch(raw_t* raw) {
         {
             int has_obs = 0, ki;
             for (ki = 0; ki < NFREQ + NEXOBS; ki++) {
-                if (raw->obs.data[n].code[ki] != 0) { has_obs = 1; break; }
+                if (raw->obs.data[n].code[ki] != 0) {
+                    has_obs = 1;
+                    break;
+                }
             }
-            if (has_obs) { n++; }
+            if (has_obs) {
+                n++;
+            }
         }
     }
     raw->obs.n = n;
@@ -1061,8 +1066,7 @@ static int decode_qzsrawl6d(raw_t* raw, rtcm_t* rtcm) {
     unsigned char buff[256];
 
     if (raw->len < 272) {
-        trace(NULL, 2, "SBF decode_qzsrawl6d frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_qzsrawl6d frame length error: len=%d\n", raw->len);
         return -1;
     }
 
@@ -1071,22 +1075,21 @@ static int decode_qzsrawl6d(raw_t* raw, rtcm_t* rtcm) {
     week = U2(p + 4);
     raw->time = gpst2time(week, tow * 0.001);
 
-    svid      = U1(p + 6);
-    parity    = U1(p + 7);
-    rscnt     = U1(p + 8);
-    source    = U1(p + 9);
+    svid = U1(p + 6);
+    parity = U1(p + 7);
+    rscnt = U1(p + 8);
+    source = U1(p + 9);
     rxchannel = U1(p + 11);
 
     prn = svid - 180 + MINPRNQZS - 1;
     sat = satno(SYS_QZS, prn);
 
     if (sat == 0) {
-        trace(NULL, 2, "SBF decode_qzsrawl6d SVID error: SVID=%d prn=%d\n",
-              svid, prn);
+        trace(NULL, 2, "SBF decode_qzsrawl6d SVID error: SVID=%d prn=%d\n", svid, prn);
         return -1;
     }
-    trace(NULL, 3, "SBF QZSRawL6D: %s prn=%d SVID=%d Parity=%d Source=%d\n",
-          time_str(raw->time, 0), prn, svid, parity, source);
+    trace(NULL, 3, "SBF QZSRawL6D: %s prn=%d SVID=%d Parity=%d Source=%d\n", time_str(raw->time, 0), prn, svid, parity,
+          source);
 
     if (parity == 0) {
         trace(NULL, 2, "SBF decode_qzsrawl6d RS decode error\n");
@@ -1095,10 +1098,10 @@ static int decode_qzsrawl6d(raw_t* raw, rtcm_t* rtcm) {
 
     /* extract 252 bytes (63 x 4B words) → use first 250 bytes */
     for (i = 0, j = 0; i < 63; i++, j += 4) {
-        buff[j]     = (U4(p + 12 + i * 4) >> 24) & 0xFF;
+        buff[j] = (U4(p + 12 + i * 4) >> 24) & 0xFF;
         buff[j + 1] = (U4(p + 12 + i * 4) >> 16) & 0xFF;
-        buff[j + 2] = (U4(p + 12 + i * 4) >>  8) & 0xFF;
-        buff[j + 3] =  U4(p + 12 + i * 4)        & 0xFF;
+        buff[j + 2] = (U4(p + 12 + i * 4) >> 8) & 0xFF;
+        buff[j + 3] = U4(p + 12 + i * 4) & 0xFF;
     }
 
     memcpy(rtcm->buff, buff, 250);
@@ -1179,8 +1182,7 @@ static int decode_gpsnav(raw_t* raw) {
     trace(NULL, 4, "SBF decode_gpsnav: len=%d\n", raw->len);
 
     if (raw->len < 140) {
-        trace(NULL, 2, "SBF decode_gpsnav frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_gpsnav frame length error: len=%d\n", raw->len);
         return -1;
     }
     prn = U1(raw->buff + 14);
@@ -1219,16 +1221,12 @@ static int decode_gpsnav(raw_t* raw) {
     eph.OMGd = R4(raw->buff + 128) * PI;
     eph.idot = R4(raw->buff + 132) * PI;
     eph.week = adjgpsweek(week);
-    eph.toe = gpst2time(adjgpsweek(adjust_WN10(week, U2(raw->buff + 138))),
-                        eph.toes);
-    eph.toc = gpst2time(adjgpsweek(adjust_WN10(week, U2(raw->buff + 136))),
-                        tocs);
+    eph.toe = gpst2time(adjgpsweek(adjust_WN10(week, U2(raw->buff + 138))), eph.toes);
+    eph.toc = gpst2time(adjgpsweek(adjust_WN10(week, U2(raw->buff + 136))), tocs);
     eph.ttr = raw->time;
 
     if (!strstr(raw->opt, "-EPHALL")) {
-        if (eph.iode == raw->nav.eph[sat - 1].iode &&
-            eph.iodc == raw->nav.eph[sat - 1].iodc)
-            return 0;
+        if (eph.iode == raw->nav.eph[sat - 1].iode && eph.iodc == raw->nav.eph[sat - 1].iodc) return 0;
     }
     eph.sat = sat;
     raw->nav.eph[sat - 1] = eph;
@@ -1247,8 +1245,7 @@ static int decode_glonav(raw_t* raw) {
     trace(NULL, 4, "SBF decode_glonav: len=%d\n", raw->len);
 
     if (raw->len < 96) {
-        trace(NULL, 2, "SBF decode_glonav frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_glonav frame length error: len=%d\n", raw->len);
         return -1;
     }
     prn = U1(p + 6) - 37;
@@ -1302,8 +1299,7 @@ static int decode_galnav(raw_t* raw) {
     trace(NULL, 4, "SBF decode_galnav: len=%d\n", raw->len);
 
     if (raw->len < 149) {
-        trace(NULL, 2, "SBF decode_galnav frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_galnav frame length error: len=%d\n", raw->len);
         return -1;
     }
     prn = U1(p + 6) - 70;
@@ -1315,12 +1311,10 @@ static int decode_galnav(raw_t* raw) {
     eph.week = U2(p + 4);
     code = U1(p + 7);
     if (code != 2 && code != 16) {
-        trace(NULL, 2, "SBF decode_galnav code error: prn=%d code=%d\n", prn,
-              code);
+        trace(NULL, 2, "SBF decode_galnav code error: prn=%d code=%d\n", prn, code);
         return -1;
     }
-    eph.code = code == 2 ? (1 << 0) | (1 << 2) | (1 << 9)
-                         : (1 << 1) | (1 << 8);
+    eph.code = code == 2 ? (1 << 0) | (1 << 2) | (1 << 9) : (1 << 1) | (1 << 8);
     eph.A = pow(R8(p + 8), 2);
     eph.M0 = R8(p + 16) * PI;
     eph.e = R8(p + 24);
@@ -1381,8 +1375,7 @@ static int decode_bdsnav(raw_t* raw) {
     trace(NULL, 4, "SBF decode_bdsnav: len=%d\n", raw->len);
 
     if (raw->len < 140) {
-        trace(NULL, 2, "SBF decode_bdsnav frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_bdsnav frame length error: len=%d\n", raw->len);
         return -1;
     }
     prn = U1(raw->buff + 14) - 140;
@@ -1446,8 +1439,7 @@ static int decode_qzssnav(raw_t* raw) {
     trace(NULL, 4, "SBF decode_qzssnav: len=%d\n", raw->len);
 
     if (raw->len < 140) {
-        trace(NULL, 2, "SBF decode_qzssnav frame length error: len=%d\n",
-              raw->len);
+        trace(NULL, 2, "SBF decode_qzssnav frame length error: len=%d\n", raw->len);
         return -1;
     }
     svid = U1(raw->buff + 14);
@@ -1524,8 +1516,7 @@ static int decode_pvtgeodetic(raw_t* raw) {
     pos[2] = hgt;
     pos2ecef(pos, raw->sta.pos);
 
-    trace(NULL, 3, "SBF PVTGeodetic: lat=%.8f lon=%.8f hgt=%.3f mode=%d\n",
-          lat / D2R, lon / D2R, hgt, mode & 0x0F);
+    trace(NULL, 3, "SBF PVTGeodetic: lat=%.8f lon=%.8f hgt=%.3f mode=%d\n", lat / D2R, lon / D2R, hgt, mode & 0x0F);
 
     return 5; /* receiver position */
 }

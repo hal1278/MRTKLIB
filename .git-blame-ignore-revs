@@ -1,0 +1,16 @@
+# Revisions ignored by `git blame` — bulk reformatting with no semantic change.
+#
+# GitHub honors this file automatically. Locally, enable it once with:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Each entry is a repo-wide formatter sweep from issue #166. Only add commits
+# that are pure formatter output (verified no functional change).
+
+# style: apply clang-format 21.1.6 to C/C++ sources (#166)
+5342d9b69924f0c39bea739c9785b67ef7dd4985
+
+# style: apply taplo fmt 0.10.0 to TOML configs (#166)
+571fb4d68c76f5cdac3b7dc03f1a78167c6e3d1a
+
+# style: apply ruff format 0.15.2 to Python scripts (#166)
+48c30ffac18aa54ba16334337719562f83ff1623

@@ -30,10 +30,7 @@ from cases import CASES, l6_sessions
 # URL templates
 # ---------------------------------------------------------------------------
 _L6D_URL = "https://sys.qzss.go.jp/archives/l6/{year}/{year}{doy:03d}{session}.l6"
-_L6E_URL = (
-    "https://l6msg.go.gnss.go.jp/archives/{year}/{doy:03d}/"
-    "{year}{doy:03d}{session}.{prn}.l6"
-)
+_L6E_URL = "https://l6msg.go.gnss.go.jp/archives/{year}/{doy:03d}/{year}{doy:03d}{session}.{prn}.l6"
 MADOCA_PRNS = [209, 193, 194, 195, 196, 199]
 
 
@@ -223,14 +220,19 @@ def main() -> int:
     p = argparse.ArgumentParser(
         description="Download CLAS L6D and MADOCA L6E files for PPC-Dataset benchmark"
     )
-    p.add_argument("--l6-dir", default="data/benchmark/l6",
-                   help="Directory to store L6 files (default: data/benchmark/l6)")
-    p.add_argument("--mode", choices=["clas", "madoca", "both"], default="both",
-                   help="Which L6 type to download (default: both)")
-    p.add_argument("--case", default="",
-                   help="Comma-separated case IDs (default: all)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="Print URLs without downloading")
+    p.add_argument(
+        "--l6-dir",
+        default="data/benchmark/l6",
+        help="Directory to store L6 files (default: data/benchmark/l6)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["clas", "madoca", "both"],
+        default="both",
+        help="Which L6 type to download (default: both)",
+    )
+    p.add_argument("--case", default="", help="Comma-separated case IDs (default: all)")
+    p.add_argument("--dry-run", action="store_true", help="Print URLs without downloading")
     args = p.parse_args()
 
     l6_dir = Path(args.l6_dir)

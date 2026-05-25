@@ -52,8 +52,14 @@ typedef struct {
 } subcmd_t;
 
 static const subcmd_t subcmds[] = {
-    {"run", mrtk_run},         {"post", mrtk_post},       {"relay", mrtk_relay}, {"convert", mrtk_convert},
-    {"ssr2obs", mrtk_ssr2obs}, {"ssr2osr", mrtk_ssr2osr}, {"bias", mrtk_bias},   {"dump", mrtk_dump},
+    {"run", mrtk_run},
+    {"post", mrtk_post},
+    {"relay", mrtk_relay},
+    {"convert", mrtk_convert},
+    {"ssr2obs", mrtk_ssr2obs},
+    {"ssr2osr", mrtk_ssr2osr},
+    {"bias", mrtk_bias},
+    {"dump", mrtk_dump},
     {"cssr2rtcm3", mrtk_cssr2rtcm3},
     {"l6extract", mrtk_l6extract},
 };
@@ -99,8 +105,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (!strcmp(argv[1], "--version") || !strcmp(argv[1], "-v")) {
-        fprintf(stderr, "mrtk (%s ver.%s git %s)\n", MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING,
-                mrtklib_git_hash_str);
+        fprintf(stderr, "mrtk (%s ver.%s git %s)\n", MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
         return 0;
     }
 

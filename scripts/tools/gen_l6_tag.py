@@ -87,9 +87,7 @@ def parse_l6_filename(path: str) -> datetime:
     session = m.group(3)
     hour = ord(session) - ord("A")
 
-    dt = datetime(year, 1, 1, hour, 0, 0, tzinfo=timezone.utc) + timedelta(
-        days=doy - 1
-    )
+    dt = datetime(year, 1, 1, hour, 0, 0, tzinfo=timezone.utc) + timedelta(days=doy - 1)
     return dt
 
 
@@ -191,10 +189,11 @@ def gen_tag(l6_path: str, sync_tag: str = None) -> str:
                 tick_f = int(master_tick_f + dt_sec * tick_scale)
                 if tick_f < 0:
                     tick_f = 0
-                print(f"  Master tick range: {master_tick_range} ms for "
-                      f"~{master_gnss_dur:.0f}s GNSS data")
-                print(f"  Tick scale: {tick_scale:.3f} ms/s "
-                      f"(vs 1000 ms/s real-time)")
+                print(
+                    f"  Master tick range: {master_tick_range} ms for "
+                    f"~{master_gnss_dur:.0f}s GNSS data"
+                )
+                print(f"  Tick scale: {tick_scale:.3f} ms/s (vs 1000 ms/s real-time)")
 
         master_dt = datetime.fromtimestamp(master_base, tz=timezone.utc)
         print(f"Sync with master tag: {sync_tag}")
@@ -210,7 +209,7 @@ def gen_tag(l6_path: str, sync_tag: str = None) -> str:
     print(f"L6 file: {l6_path}")
     print(f"  Size: {file_size} bytes, {n_frames} frames")
     print(f"  Base time: {base_utc.strftime('%Y-%m-%d %H:%M:%S')} UTC")
-    print(f"  Duration: {n_frames} seconds ({n_frames/60:.1f} min)")
+    print(f"  Duration: {n_frames} seconds ({n_frames / 60:.1f} min)")
 
     # Build tag file
     tag_path = l6_path + ".tag"
@@ -247,9 +246,7 @@ def gen_tag(l6_path: str, sync_tag: str = None) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Generate .tag file for L6 data replay"
-    )
+    parser = argparse.ArgumentParser(description="Generate .tag file for L6 data replay")
     parser.add_argument("l6_file", help="Path to L6 data file")
     parser.add_argument(
         "--sync-tag",

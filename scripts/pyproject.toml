@@ -3,9 +3,4 @@ name = "mrtklib-scripts"
 version = "0.1.0"
 description = "MRTKLIB plotting and code generation scripts"
 requires-python = ">=3.12"
-dependencies = [
-    "numpy",
-    "matplotlib",
-    "pandas>=3.0.1",
-]
-
+dependencies = ["numpy", "matplotlib", "pandas>=3.0.1"]

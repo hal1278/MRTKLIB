@@ -66,14 +66,8 @@
 /* Note: -h is reserved for the RINEX HNAV output file in this subcommand,
  * so we do not map --help to -h. --help is recognized explicitly below. */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--start", "-ts"},
-    {"--end", "-te"},
-    {"--interval", "-ti"},
-    {"--freq", "-f"},
-    {"--output", "-o"},
-    {"--nav", "-n"},
-    {"--trace", "-trace"},
-    {NULL, NULL},
+    {"--start", "-ts"}, {"--end", "-te"}, {"--interval", "-ti"}, {"--freq", "-f"},
+    {"--output", "-o"}, {"--nav", "-n"},  {"--trace", "-trace"}, {NULL, NULL},
 };
 
 /* help text -----------------------------------------------------------------*/

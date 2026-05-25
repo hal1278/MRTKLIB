@@ -471,14 +471,13 @@ static int decoderaw(rtksvr_t* svr, int index) {
 #endif
         /* update rtk server (skip update_ssr for UBX/SBF L6D: ret=10 means
          * "L6 payload ready for CLAS redirect", not "SSR message decoded") */
-        if (ret > 0 && !(ret == 10 && (svr->format[index] == STRFMT_UBX ||
-                                        svr->format[index] == STRFMT_SEPT))) {
+        if (ret > 0 && !(ret == 10 && (svr->format[index] == STRFMT_UBX || svr->format[index] == STRFMT_SEPT))) {
             update_svr(svr, ret, obs, nav, ephsat, ephset, sbsmsg, index, fobs);
         }
         /* redirect L6 payload to CLAS decoder (UBX/L6E/SBF → CLAS path) */
-        if (svr->clas && ret == 10 && (svr->format[index] == STRFMT_UBX ||
-                                        svr->format[index] == STRFMT_L6E ||
-                                        svr->format[index] == STRFMT_SEPT)) {
+        if (svr->clas && ret == 10 &&
+            (svr->format[index] == STRFMT_UBX || svr->format[index] == STRFMT_L6E ||
+             svr->format[index] == STRFMT_SEPT)) {
             int k, ch, cret, max_cret = 0;
 
             if (svr->format[index] == STRFMT_UBX) {
@@ -1179,8 +1178,8 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     /* initialize CLAS context if L6 source is available for PPP-RTK */
     for (i = 0; i < 3; i++) {
         if ((formats[i] == STRFMT_CLAS ||
-             ((formats[i] == STRFMT_UBX || formats[i] == STRFMT_L6E ||
-               formats[i] == STRFMT_SEPT) && prcopt->mode == PMODE_PPP_RTK)) &&
+             ((formats[i] == STRFMT_UBX || formats[i] == STRFMT_L6E || formats[i] == STRFMT_SEPT) &&
+              prcopt->mode == PMODE_PPP_RTK)) &&
             !svr->clas) {
             svr->clas = (clas_ctx_t*)calloc(1, sizeof(clas_ctx_t));
             if (svr->clas) {

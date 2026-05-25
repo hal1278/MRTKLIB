@@ -9,7 +9,7 @@
 
 #include <string.h>
 
-void mrtk_normalize_args(int argc, char **argv, const mrtk_optmap_t *map) {
+void mrtk_normalize_args(int argc, char** argv, const mrtk_optmap_t* map) {
     int i, j;
     if (!map || !argv) {
         return;
@@ -20,14 +20,14 @@ void mrtk_normalize_args(int argc, char **argv, const mrtk_optmap_t *map) {
         }
         for (j = 0; map[j].long_opt; j++) {
             if (strcmp(argv[i], map[j].long_opt) == 0) {
-                argv[i] = (char *)map[j].short_opt;
+                argv[i] = (char*)map[j].short_opt;
                 break;
             }
         }
     }
 }
 
-int mrtk_is_help_flag(const char *arg) {
+int mrtk_is_help_flag(const char* arg) {
     if (!arg) {
         return 0;
     }

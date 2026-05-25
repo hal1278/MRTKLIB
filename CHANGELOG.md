@@ -5,6 +5,47 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.11] - 2026-05-25
+
+**Tooling / developer experience** — no positioning change; all binaries and
+solution outputs are **bit-identical** to v0.6.10. Establishes an enforced
+formatter baseline, adds a smartphone SPP benchmark, and speeds up CI.
+
+### Added
+
+- **GSDC-2023 smartphone SPP benchmark** ([#165](https://github.com/h-shiono/MRTKLIB/issues/165))
+  — a harness to evaluate SPP on Google's GSDC-2023 smartphone dataset, where the
+  v0.6.10 SPP accuracy work (#116) is meant to pay off. `run_gsdc_benchmark.py`
+  runs `mrtk` SPP (`gsdc_to_rinex.py` converts `device_gnss.csv` → RINEX,
+  `download_brdc.py` fetches broadcast ephemeris); `compare_gsdc.py` scores NMEA
+  vs the GSDC `ground_truth.csv`, reporting the official GSDC score (mean of p50 &
+  p95) and a coverage (`Cov%`) column. Config `conf/benchmark/gsdc_p0.toml`; docs
+  [`docs/reference/benchmark-gsdc.md`](docs/reference/benchmark-gsdc.md).
+- **CI formatter gate** ([#166](https://github.com/h-shiono/MRTKLIB/issues/166),
+  PR #179) — a build-free `.github/workflows/format.yaml` runs
+  `clang-format --dry-run --Werror`, `taplo fmt --check`, and `ruff format --check`
+  on every push / PR. Check-only (no auto-apply push-back); pinned tool versions
+  (clang-format 21.1.6 + ruff 0.15.2 via pip, taplo 0.10.0 release binary verified
+  by SHA-256); reuses `.clang-format-ignore`. `ruff check` (lint) is not gated.
+
+### Changed
+
+- **Repo-wide format sweep** (#166, PR #177) — `clang-format` (48 files),
+  `taplo fmt` (3), and `ruff format` (23) applied across the tree with **no
+  functional change**. A new `.clang-format-ignore` excludes vendored
+  `src/core/tomlc99` and RTKLIB-derived `util/`; `.git-blame-ignore-revs` records
+  the three sweep commits so `git blame` skips them.
+- **Faster, network-free regression CI** (#175) — `ctest` runs in parallel
+  (`-j4`, BLAS pinned to one thread/process for deterministic PPP-AR), timeout
+  raised to 20 min; the IONEX TEC fixture is vendored
+  (`tests/cmake/download_tec.cmake`) with an integrity check, removing a per-run
+  network download.
+
+### Docs
+
+- `CONTRIBUTING.md` and `CLAUDE.md` document the three pinned formatters, their
+  config files, the vendored-code exclusions, and local fix commands.
+
 ## [v0.6.10] - 2026-05-24
 
 **Feature** — single-point positioning (SPP) accuracy enhancements: C/N0

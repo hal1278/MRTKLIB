@@ -159,11 +159,7 @@ static gtime_t rst = {0};          /* raw/rtcm data start time */
  * uses -o for the processing-options file (i.e. the configuration), -t for
  * debug trace, and -r for solution-status output level. */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--config", "-o"},
-    {"--device", "-d"},
-    {"--port", "-p"},
-    {"--trace", "-t"},
-    {NULL, NULL},
+    {"--config", "-o"}, {"--device", "-d"}, {"--port", "-p"}, {"--trace", "-t"}, {NULL, NULL},
 };
 
 static const char* usage[] = {
@@ -813,9 +809,8 @@ static void prstatus(vt_t* vt) {
     rtk_t rtk;
     const char* svrstate[] = {"stop", "run"};
     const char* sol[] = {"-", "fix", "float", "SBAS", "DGPS", "single", "PPP", ""};
-    const char* mode[] = {"single",    "DGPS",    "kinematic", "static",      "moving-base",
-                          "fixed",     "PPP-kinema", "PPP-static", "PPP-fixed", "PPP-RTK",
-                          "SSR2OSR",   "SSR2OSR-fixed", "VRS-RTK"};
+    const char* mode[] = {"single",     "DGPS",      "kinematic", "static",  "moving-base",   "fixed",  "PPP-kinema",
+                          "PPP-static", "PPP-fixed", "PPP-RTK",   "SSR2OSR", "SSR2OSR-fixed", "VRS-RTK"};
     const char* freq[] = {"-", "L1", "L1+L2", "L1+L2+L3", "L1+L2+L3+L4", "L1+L2+L3+L4+L5", ""};
     uint32_t nmsg2[3][100] = {{0}}, nmsg3[3][400] = {{0}};
     int i, j, n, thread, cycle, state, rtkstat, nsat0, nsat1, prcout, nave;
@@ -1765,8 +1760,8 @@ static void* con_thread(void* arg) {
 
     trace(NULL, 3, "console_thread:\n");
 
-    vt_printf(con->vt, "\n%s** %s(%s ver.%s git %s) console (h:help) **%s\n", ESC_BOLD, PRGNAME,
-              MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str, ESC_RESET);
+    vt_printf(con->vt, "\n%s** %s(%s ver.%s git %s) console (h:help) **%s\n", ESC_BOLD, PRGNAME, MRTKLIB_SOFTNAME,
+              MRTKLIB_VERSION_STRING, mrtklib_git_hash_str, ESC_RESET);
 
     if (!login(con->vt)) {
         vt_close(con->vt);

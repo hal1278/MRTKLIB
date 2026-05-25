@@ -87,10 +87,18 @@ def main() -> int:
     )
     p.add_argument("--ref", required=True, metavar="CSV", help="GSDC ground_truth.csv")
     p.add_argument("result", metavar="NMEA", help="mrtk NMEA output file")
-    p.add_argument("--skip-epochs", type=int, default=0,
-                   help="initial epochs to skip (convergence exclusion, default 0)")
-    p.add_argument("--threshold", type=float, default=2.0,
-                   help="2D horizontal error threshold in metres (default 2.0)")
+    p.add_argument(
+        "--skip-epochs",
+        type=int,
+        default=0,
+        help="initial epochs to skip (convergence exclusion, default 0)",
+    )
+    p.add_argument(
+        "--threshold",
+        type=float,
+        default=2.0,
+        help="2D horizontal error threshold in metres (default 2.0)",
+    )
     p.add_argument("--plot", action="store_true", help="generate ENU time-series PNG")
     p.add_argument("--plot-out", default="", help="output path for plot")
     args = p.parse_args()

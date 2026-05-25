@@ -21,26 +21,58 @@ SPEED_OF_LIGHT = 299792458.0
 
 # GPS MSM signal table (DF395) - index 1-based
 GPS_SIGNALS = {
-    2: "1C", 3: "1P", 4: "1W", 8: "2C", 9: "2P", 10: "2W",
-    15: "2S", 16: "2L", 17: "2X", 22: "5I", 23: "5Q", 24: "5X",
+    2: "1C",
+    3: "1P",
+    4: "1W",
+    8: "2C",
+    9: "2P",
+    10: "2W",
+    15: "2S",
+    16: "2L",
+    17: "2X",
+    22: "5I",
+    23: "5Q",
+    24: "5X",
 }
 
 # Galileo MSM signal table (RTCM 3.3 table 3.5-99, 1-indexed)
 GAL_SIGNALS = {
-    2: "1C", 3: "1A", 4: "1B", 5: "1X", 6: "1Z",
-    8: "6C", 9: "6A", 10: "6B", 11: "6X", 12: "6Z",
-    14: "7I", 15: "7Q", 16: "7X",
-    18: "8I", 19: "8Q", 20: "8X",
-    22: "5I", 23: "5Q", 24: "5X",
+    2: "1C",
+    3: "1A",
+    4: "1B",
+    5: "1X",
+    6: "1Z",
+    8: "6C",
+    9: "6A",
+    10: "6B",
+    11: "6X",
+    12: "6Z",
+    14: "7I",
+    15: "7Q",
+    16: "7X",
+    18: "8I",
+    19: "8Q",
+    20: "8X",
+    22: "5I",
+    23: "5Q",
+    24: "5X",
 }
 
 # QZSS MSM signal table (RTCM 3.3 table 3.5-105, 1-indexed)
 QZS_SIGNALS = {
     2: "1C",
-    9: "6S", 10: "6L", 11: "6X",
-    15: "2S", 16: "2L", 17: "2X",
-    22: "5I", 23: "5Q", 24: "5X",
-    30: "1S", 31: "1L", 32: "1X",
+    9: "6S",
+    10: "6L",
+    11: "6X",
+    15: "2S",
+    16: "2L",
+    17: "2X",
+    22: "5I",
+    23: "5Q",
+    24: "5X",
+    30: "1S",
+    31: "1L",
+    32: "1X",
 }
 
 SYS_SIGNAL_TABLES = {
@@ -84,13 +116,13 @@ class BitReader:
     def read_int(self, nbits: int) -> int:
         val = self.read_uint(nbits)
         if val >= (1 << (nbits - 1)):
-            val -= (1 << nbits)
+            val -= 1 << nbits
         return val
 
     def read_int64(self, nbits: int) -> int:
         val = self.read_uint(nbits)
         if val >= (1 << (nbits - 1)):
-            val -= (1 << nbits)
+            val -= 1 << nbits
         return val
 
 
@@ -117,11 +149,11 @@ class MSM7Obs:
     sat_id: str = ""
     signal: str = ""
     pseudorange: float = 0.0  # meters
-    phase: float = 0.0        # cycles
-    phase_m: float = 0.0      # meters (for comparison)
-    snr: float = 0.0          # dB-Hz
-    doppler: float = 0.0      # Hz
-    lock_time: float = 0.0    # seconds
+    phase: float = 0.0  # cycles
+    phase_m: float = 0.0  # meters (for comparison)
+    snr: float = 0.0  # dB-Hz
+    doppler: float = 0.0  # Hz
+    lock_time: float = 0.0  # seconds
     half_cycle: int = 0
 
 
@@ -142,7 +174,7 @@ def parse_1005_1006(payload: bytes) -> Optional[StationRef]:
     s = StationRef()
     s.msg_type = br.read_uint(12)
     s.station_id = br.read_uint(12)
-    br.read_uint(6)   # ITRF realization year
+    br.read_uint(6)  # ITRF realization year
     s.itrf_year = 0
     s.gps_ind = br.read_uint(1)
     s.glo_ind = br.read_uint(1)
@@ -172,13 +204,13 @@ def parse_msm7(payload: bytes, sys_name: str) -> Optional[MSM7Epoch]:
     elif sys_name == "GAL":
         ep.tow = br.read_uint(30) / 1000.0
 
-    br.read_uint(1)   # multiple message
-    br.read_uint(3)   # IODS
-    br.read_uint(7)   # reserved
-    br.read_uint(2)   # clock steering
-    br.read_uint(2)   # external clock
-    br.read_uint(1)   # smoothing indicator
-    br.read_uint(3)   # smoothing interval
+    br.read_uint(1)  # multiple message
+    br.read_uint(3)  # IODS
+    br.read_uint(7)  # reserved
+    br.read_uint(2)  # clock steering
+    br.read_uint(2)  # external clock
+    br.read_uint(1)  # smoothing indicator
+    br.read_uint(3)  # smoothing interval
 
     # Satellite mask (64 bits)
     sat_mask = br.read_uint(64)
@@ -239,15 +271,15 @@ def parse_msm7(payload: bytes, sys_name: str) -> Optional[MSM7Epoch]:
     fine_snr = []
     fine_phrate = []
     for _ in range(ncell):
-        fine_pr.append(br.read_int(20))     # fine pseudorange
+        fine_pr.append(br.read_int(20))  # fine pseudorange
     for _ in range(ncell):
-        fine_cp.append(br.read_int64(24))   # fine phase range
+        fine_cp.append(br.read_int64(24))  # fine phase range
     for _ in range(ncell):
         lock_time_ind.append(br.read_uint(10))  # lock time indicator
     for _ in range(ncell):
         half_cycle.append(br.read_uint(1))
     for _ in range(ncell):
-        fine_snr.append(br.read_uint(10))   # fine CNR
+        fine_snr.append(br.read_uint(10))  # fine CNR
     for _ in range(ncell):
         fine_phrate.append(br.read_int(15))  # fine phase range rate
 
@@ -297,7 +329,7 @@ def parse_msm7(payload: bytes, sys_name: str) -> Optional[MSM7Epoch]:
 # ---------------------------------------------------------------------------
 def extract_rtcm3_from_sbf(sbf_path: str) -> list:
     """Extract raw RTCM3 messages from SBF DiffCorrIn blocks."""
-    with open(sbf_path, 'rb') as f:
+    with open(sbf_path, "rb") as f:
         data = f.read()
 
     messages = []
@@ -306,18 +338,18 @@ def extract_rtcm3_from_sbf(sbf_path: str) -> list:
         if data[pos] != 0x24 or data[pos + 1] != 0x40:
             pos += 1
             continue
-        block_id = struct.unpack_from('<H', data, pos + 4)[0]
-        block_len = struct.unpack_from('<H', data, pos + 6)[0]
+        block_id = struct.unpack_from("<H", data, pos + 4)[0]
+        block_len = struct.unpack_from("<H", data, pos + 6)[0]
         block_num = block_id & 0x1FFF
 
         if block_num == 5919 and block_len >= 16:
-            payload = data[pos + 16:pos + block_len]
+            payload = data[pos + 16 : pos + block_len]
             # Find RTCM3 preamble
             for i in range(min(20, len(payload) - 5)):
                 if payload[i] == 0xD3:
                     msg_len = ((payload[i + 1] & 0x03) << 8) | payload[i + 2]
                     if msg_len >= 2 and i + 3 + msg_len + 3 <= len(payload):
-                        rtcm3_payload = payload[i + 3:i + 3 + msg_len]
+                        rtcm3_payload = payload[i + 3 : i + 3 + msg_len]
                         msg_type = (rtcm3_payload[0] << 4) | (rtcm3_payload[1] >> 4)
                         messages.append((msg_type, rtcm3_payload))
                     break
@@ -332,7 +364,7 @@ def extract_rtcm3_from_sbf(sbf_path: str) -> list:
 
 def extract_rtcm3_from_file(path: str) -> list:
     """Extract RTCM3 messages from a raw RTCM3 binary file."""
-    with open(path, 'rb') as f:
+    with open(path, "rb") as f:
         data = f.read()
 
     messages = []
@@ -346,7 +378,7 @@ def extract_rtcm3_from_file(path: str) -> list:
             pos += 1
             continue
         # CRC check could go here; skip for now
-        rtcm3_payload = data[pos + 3:pos + 3 + msg_len]
+        rtcm3_payload = data[pos + 3 : pos + 3 + msg_len]
         msg_type = (rtcm3_payload[0] << 4) | (rtcm3_payload[1] >> 4)
         messages.append((msg_type, rtcm3_payload))
         pos += 3 + msg_len + 3
@@ -400,7 +432,7 @@ def compare_station_ref(refs_a: list, refs_b: list, label_a: str, label_b: str):
     rb = refs_b[0]
 
     print(f"\n  {'Field':<20s} {label_a:>22s} {label_b:>22s} {'Diff':>12s}")
-    print(f"  {'-'*20} {'-'*22} {'-'*22} {'-'*12}")
+    print(f"  {'-' * 20} {'-' * 22} {'-' * 22} {'-' * 12}")
     print(f"  {'Msg type':<20s} {ra.msg_type:>22d} {rb.msg_type:>22d}")
     print(f"  {'Station ID':<20s} {ra.station_id:>22d} {rb.station_id:>22d}")
     print(f"  {'GPS indicator':<20s} {ra.gps_ind:>22d} {rb.gps_ind:>22d}")
@@ -428,11 +460,11 @@ def compare_station_ref(refs_a: list, refs_b: list, label_a: str, label_b: str):
     # Position stability check (first vs last)
     if len(refs_a) > 1:
         rl = refs_a[-1]
-        ddist = math.sqrt((ra.x - rl.x)**2 + (ra.y - rl.y)**2 + (ra.z - rl.z)**2)
+        ddist = math.sqrt((ra.x - rl.x) ** 2 + (ra.y - rl.y) ** 2 + (ra.z - rl.z) ** 2)
         print(f"\n  {label_a} position drift (first-last): {ddist:.4f} m ({len(refs_a)} msgs)")
     if len(refs_b) > 1:
         rl = refs_b[-1]
-        ddist = math.sqrt((rb.x - rl.x)**2 + (rb.y - rl.y)**2 + (rb.z - rl.z)**2)
+        ddist = math.sqrt((rb.x - rl.x) ** 2 + (rb.y - rl.y) ** 2 + (rb.z - rl.z) ** 2)
         print(f"  {label_b} position drift (first-last): {ddist:.4f} m ({len(refs_b)} msgs)")
 
 
@@ -447,7 +479,7 @@ def compare_message_stats(msgs_a: list, msgs_b: list, label_a: str, label_b: str
     all_types = sorted(set(ca.keys()) | set(cb.keys()))
 
     print(f"\n  {'Type':>6s} {label_a:>15s} {label_b:>15s}")
-    print(f"  {'-'*6} {'-'*15} {'-'*15}")
+    print(f"  {'-' * 6} {'-' * 15} {'-' * 15}")
     for t in all_types:
         print(f"  {t:>6d} {ca.get(t, 0):>15d} {cb.get(t, 0):>15d}")
 
@@ -477,7 +509,9 @@ def compare_observations(epochs_a: dict, epochs_b: dict, label_a: str, label_b: 
     print("=" * 70)
 
     common_tows = sorted(set(epochs_a.keys()) & set(epochs_b.keys()))
-    print(f"\n  Total epochs: {label_a}={len(epochs_a)}, {label_b}={len(epochs_b)}, common={len(common_tows)}")
+    print(
+        f"\n  Total epochs: {label_a}={len(epochs_a)}, {label_b}={len(epochs_b)}, common={len(common_tows)}"
+    )
 
     if not common_tows:
         # Try to find overlap with tolerance
@@ -500,7 +534,7 @@ def compare_observations(epochs_a: dict, epochs_b: dict, label_a: str, label_b: 
             return
 
     # Collect per-satellite-signal differences
-    pr_diffs = defaultdict(list)   # (sat, sig_a, sig_b) -> [diff_m]
+    pr_diffs = defaultdict(list)  # (sat, sig_a, sig_b) -> [diff_m]
     cp_diffs = defaultdict(list)
     snr_a_vals = defaultdict(list)
     snr_b_vals = defaultdict(list)
@@ -545,16 +579,20 @@ def compare_observations(epochs_a: dict, epochs_b: dict, label_a: str, label_b: 
         return
 
     # Print per-satellite summary
-    print(f"\n  {'Sat':>5s} {'Sig_A':>6s} {'Sig_B':>6s} {'N':>5s} "
-          f"{'PR_mean(m)':>12s} {'PR_std(m)':>10s} "
-          f"{'CP_mean(m)':>12s} {'CP_std(m)':>10s} "
-          f"{'SNR_A(dB)':>10s} {'SNR_B(dB)':>10s} "
-          f"{'Dop_mean':>10s}")
-    print(f"  {'-'*5} {'-'*6} {'-'*6} {'-'*5} "
-          f"{'-'*12} {'-'*10} "
-          f"{'-'*12} {'-'*10} "
-          f"{'-'*10} {'-'*10} "
-          f"{'-'*10}")
+    print(
+        f"\n  {'Sat':>5s} {'Sig_A':>6s} {'Sig_B':>6s} {'N':>5s} "
+        f"{'PR_mean(m)':>12s} {'PR_std(m)':>10s} "
+        f"{'CP_mean(m)':>12s} {'CP_std(m)':>10s} "
+        f"{'SNR_A(dB)':>10s} {'SNR_B(dB)':>10s} "
+        f"{'Dop_mean':>10s}"
+    )
+    print(
+        f"  {'-' * 5} {'-' * 6} {'-' * 6} {'-' * 5} "
+        f"{'-' * 12} {'-' * 10} "
+        f"{'-' * 12} {'-' * 10} "
+        f"{'-' * 10} {'-' * 10} "
+        f"{'-' * 10}"
+    )
 
     for key in sorted(pr_diffs.keys()):
         sat_id, sig_a, sig_b = key
@@ -565,29 +603,31 @@ def compare_observations(epochs_a: dict, epochs_b: dict, label_a: str, label_b: 
         dd = dop_diffs.get(key, [])
 
         pr_mean = sum(prd) / len(prd) if prd else 0
-        pr_std = (sum((x - pr_mean)**2 for x in prd) / len(prd))**0.5 if len(prd) > 1 else 0
+        pr_std = (sum((x - pr_mean) ** 2 for x in prd) / len(prd)) ** 0.5 if len(prd) > 1 else 0
         cp_mean = sum(cpd) / len(cpd) if cpd else 0
-        cp_std = (sum((x - cp_mean)**2 for x in cpd) / len(cpd))**0.5 if len(cpd) > 1 else 0
+        cp_std = (sum((x - cp_mean) ** 2 for x in cpd) / len(cpd)) ** 0.5 if len(cpd) > 1 else 0
         snr_a_mean = sum(sa) / len(sa) if sa else 0
         snr_b_mean = sum(sb) / len(sb) if sb else 0
         dop_mean = sum(dd) / len(dd) if dd else 0
 
-        print(f"  {sat_id:>5s} {sig_a:>6s} {sig_b:>6s} {len(prd):>5d} "
-              f"{pr_mean:>+12.3f} {pr_std:>10.3f} "
-              f"{cp_mean:>+12.3f} {cp_std:>10.3f} "
-              f"{snr_a_mean:>10.2f} {snr_b_mean:>10.2f} "
-              f"{dop_mean:>+10.3f}")
+        print(
+            f"  {sat_id:>5s} {sig_a:>6s} {sig_b:>6s} {len(prd):>5d} "
+            f"{pr_mean:>+12.3f} {pr_std:>10.3f} "
+            f"{cp_mean:>+12.3f} {cp_std:>10.3f} "
+            f"{snr_a_mean:>10.2f} {snr_b_mean:>10.2f} "
+            f"{dop_mean:>+10.3f}"
+        )
 
     # Overall statistics
     all_pr = [v for diffs in pr_diffs.values() for v in diffs]
     all_cp = [v for diffs in cp_diffs.values() for v in diffs]
     if all_pr:
         mean_pr = sum(all_pr) / len(all_pr)
-        std_pr = (sum((x - mean_pr)**2 for x in all_pr) / len(all_pr))**0.5
+        std_pr = (sum((x - mean_pr) ** 2 for x in all_pr) / len(all_pr)) ** 0.5
         print(f"\n  Overall PR diff: mean={mean_pr:+.3f}m, std={std_pr:.3f}m, N={len(all_pr)}")
     if all_cp:
         mean_cp = sum(all_cp) / len(all_cp)
-        std_cp = (sum((x - mean_cp)**2 for x in all_cp) / len(all_cp))**0.5
+        std_cp = (sum((x - mean_cp) ** 2 for x in all_cp) / len(all_cp)) ** 0.5
         print(f"  Overall CP diff: mean={mean_cp:+.3f}m, std={std_cp:.3f}m, N={len(all_cp)}")
 
 
@@ -619,15 +659,12 @@ def compare_satellite_coverage(epochs_a: dict, epochs_b: dict, label_a: str, lab
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Compare RTCM3: mosaic-CLAS (SBF DiffCorrIn) vs MRTKLIB cssr2rtcm3")
-    parser.add_argument("--sbf", required=True,
-                        help="SBF file with DiffCorrIn (mosaic-CLAS RTCM3)")
-    parser.add_argument("--mrtklib", required=True,
-                        help="MRTKLIB cssr2rtcm3 output (raw RTCM3)")
-    parser.add_argument("--label-a", default="mosaic-CLAS",
-                        help="Label for SBF source")
-    parser.add_argument("--label-b", default="MRTKLIB",
-                        help="Label for MRTKLIB source")
+        description="Compare RTCM3: mosaic-CLAS (SBF DiffCorrIn) vs MRTKLIB cssr2rtcm3"
+    )
+    parser.add_argument("--sbf", required=True, help="SBF file with DiffCorrIn (mosaic-CLAS RTCM3)")
+    parser.add_argument("--mrtklib", required=True, help="MRTKLIB cssr2rtcm3 output (raw RTCM3)")
+    parser.add_argument("--label-a", default="mosaic-CLAS", help="Label for SBF source")
+    parser.add_argument("--label-b", default="MRTKLIB", help="Label for MRTKLIB source")
     args = parser.parse_args()
 
     print(f"Loading {args.label_a} RTCM3 from SBF: {args.sbf}")

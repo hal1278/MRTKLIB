@@ -731,9 +731,12 @@ static int encode_type1005(rtcm_t* rtcm, int sync) {
     /* detect constellations from observation data */
     for (j = 0; j < rtcm->obs.n; j++) {
         int sys = satsys(rtcm->obs.data[j].sat, NULL);
-        if (sys == SYS_GPS || sys == SYS_QZS) has_gps = 1;
-        else if (sys == SYS_GLO) has_glo = 1;
-        else if (sys == SYS_GAL) has_gal = 1;
+        if (sys == SYS_GPS || sys == SYS_QZS)
+            has_gps = 1;
+        else if (sys == SYS_GLO)
+            has_glo = 1;
+        else if (sys == SYS_GAL)
+            has_gal = 1;
     }
     /* fallback: at least GPS if no obs loaded yet */
     if (!has_gps && !has_glo && !has_gal) has_gps = 1;
@@ -783,9 +786,12 @@ static int encode_type1006(rtcm_t* rtcm, int sync) {
     /* detect constellations from observation data */
     for (j = 0; j < rtcm->obs.n; j++) {
         int sys = satsys(rtcm->obs.data[j].sat, NULL);
-        if (sys == SYS_GPS || sys == SYS_QZS) has_gps = 1;
-        else if (sys == SYS_GLO) has_glo = 1;
-        else if (sys == SYS_GAL) has_gal = 1;
+        if (sys == SYS_GPS || sys == SYS_QZS)
+            has_gps = 1;
+        else if (sys == SYS_GLO)
+            has_glo = 1;
+        else if (sys == SYS_GAL)
+            has_gal = 1;
     }
     if (!has_gps && !has_glo && !has_gal) has_gps = 1;
 

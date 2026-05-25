@@ -539,7 +539,7 @@ eph_t* seleph(gtime_t time, int sat, int iode, const nav_t* nav) {
          * eph[]) before the CSSR SSR transitions to that IODE; without this
          * fallback, seleph() returns NULL for ~55 s on every Galileo IODnav
          * update, causing periodic DGPS dips. See lessons.md L-041. */
-        int slot_count = (sys == SYS_GAL) ? 2 : 1;  /* GAL has I/NAV + F/NAV */
+        int slot_count = (sys == SYS_GAL) ? 2 : 1; /* GAL has I/NAV + F/NAV */
         int k;
         for (k = 0; k < slot_count; k++) {
             int slot = (sat - 1) + MAXSAT * k;

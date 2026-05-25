@@ -38,8 +38,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_clas.h"
+#include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_foundation.h"
@@ -121,12 +121,7 @@ static FILE* open_l6(char** infile, int n) {
 
 /* long-option aliases */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--config", "-k"},
-    {"--output", "-o"},
-    {"--start", "-ts"},
-    {"--end", "-te"},
-    {"--trace", "-x"},
-    {NULL, NULL},
+    {"--config", "-k"}, {"--output", "-o"}, {"--start", "-ts"}, {"--end", "-te"}, {"--trace", "-x"}, {NULL, NULL},
 };
 
 /* print usage ---------------------------------------------------------------*/

@@ -502,7 +502,6 @@ double sat2freq(int sat, uint8_t code, const nav_t* nav);
  */
 int satsys_bd2(int sat, int* prn);
 
-
 /**
  * @brief Convert frequency index to frequency number using obsdef table.
  * @param[in] sys       Satellite system (SYS_???)

@@ -32,61 +32,66 @@
  *   4. clas_ssr2osr() → OSR (VRS pseudo-observations)
  *   5. gen_rtcm3(1005+MSM7) → RTCM3 binary → strwrite(stream_out)
  */
+#include <math.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <math.h>
-#include <signal.h>
 #include <unistd.h>
 
+#include "mrtklib/mrtk_clas.h"
 #include "mrtklib/mrtk_cli.h"
 #include "mrtklib/mrtk_const.h"
-#include "mrtklib/mrtk_opt.h"
-#include "mrtklib/mrtk_nav.h"
-#include "mrtklib/mrtk_obs.h"
-#include "mrtklib/mrtk_sol.h"
-#include "mrtklib/mrtk_time.h"
 #include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_mat.h"
-#include "mrtklib/mrtk_trace.h"
-#include "mrtklib/mrtk_sys.h"
+#include "mrtklib/mrtk_nav.h"
+#include "mrtklib/mrtk_obs.h"
+#include "mrtklib/mrtk_opt.h"
 #include "mrtklib/mrtk_options.h"
+#include "mrtklib/mrtk_rcvraw.h"
 #include "mrtklib/mrtk_rinex.h"
 #include "mrtklib/mrtk_rtcm.h"
 #include "mrtklib/mrtk_rtkpos.h"
-#include "mrtklib/mrtk_clas.h"
+#include "mrtklib/mrtk_sol.h"
 #include "mrtklib/mrtk_stream.h"
-#include "mrtklib/mrtk_rcvraw.h"
+#include "mrtklib/mrtk_sys.h"
+#include "mrtklib/mrtk_time.h"
 #include "mrtklib/mrtk_toml.h"
+#include "mrtklib/mrtk_trace.h"
 #include "mrtklib/mrtk_version.h"
 
 /* constants and macros ------------------------------------------------------*/
 
-#define PROGNAME    "cssr2rtcm3"
-#define PROG_VER    "1.0"
+#define PROGNAME "cssr2rtcm3"
+#define PROG_VER "1.0"
 
-#define OSR_SYS     (SYS_GPS|SYS_QZS|SYS_GAL)
-#define OSR_NFREQ   4
-#define OSR_ELMASK  0.0
+#define OSR_SYS (SYS_GPS | SYS_QZS | SYS_GAL)
+#define OSR_NFREQ 4
+#define OSR_ELMASK 0.0
 
-#define MAXNAVFILE  16
-#define STREAMBUF   4096
+#define MAXNAVFILE 16
+#define STREAMBUF 4096
 
 #ifndef CLIGHT
-#define CLIGHT      299792458.0
+#define CLIGHT 299792458.0
 #endif
 #ifndef D2R
-#define D2R         (3.1415926535897932384626433832795/180.0)
+#define D2R (3.1415926535897932384626433832795 / 180.0)
 #endif
 
 /* RTCM3 MSM base message type per constellation (MSM1 = base + 0, MSM7 = base + 6) */
 static int msm_base_type(int sys) {
     switch (sys) {
-    case SYS_GPS: return 1071;
-    case SYS_GLO: return 1081;
-    case SYS_GAL: return 1091;
-    case SYS_QZS: return 1111;
-    default:      return 0;
+        case SYS_GPS:
+            return 1071;
+        case SYS_GLO:
+            return 1081;
+        case SYS_GAL:
+            return 1091;
+        case SYS_QZS:
+            return 1111;
+        default:
+            return 0;
     }
 }
 static int rtcm3_msm_grade = 7; /* MSM grade: 4, 5, or 7 */
@@ -99,9 +104,9 @@ static int l6d_prn_fixed = 0;   /* 0 = auto-select; >0 = lock to QZS PRN (e.g. 1
 #define MAX_SIG_REMAP 32
 
 typedef struct {
-    int sys;            /* satellite system (SYS_GPS, etc.) */
-    uint8_t from;       /* source obs code (CODE_L??) */
-    uint8_t to;         /* target obs code (CODE_L??) */
+    int sys;      /* satellite system (SYS_GPS, etc.) */
+    uint8_t from; /* source obs code (CODE_L??) */
+    uint8_t to;   /* target obs code (CODE_L??) */
 } sig_remap_t;
 
 static sig_remap_t sig_remap[MAX_SIG_REMAP];
@@ -111,15 +116,26 @@ static int n_sig_remap = 0;
  * @brief Parse a signal remap key like "G2X" into system + obs code.
  * @return 1 on success, 0 on failure.
  */
-static int parse_sig_remap_key(const char *key, int *sys, uint8_t *code) {
+static int parse_sig_remap_key(const char* key, int* sys, uint8_t* code) {
     char obs[4];
     switch (key[0]) {
-        case 'G': *sys = SYS_GPS; break;
-        case 'R': *sys = SYS_GLO; break;
-        case 'E': *sys = SYS_GAL; break;
-        case 'J': *sys = SYS_QZS; break;
-        case 'C': *sys = SYS_CMP; break;
-        default: return 0;
+        case 'G':
+            *sys = SYS_GPS;
+            break;
+        case 'R':
+            *sys = SYS_GLO;
+            break;
+        case 'E':
+            *sys = SYS_GAL;
+            break;
+        case 'J':
+            *sys = SYS_QZS;
+            break;
+        case 'C':
+            *sys = SYS_CMP;
+            break;
+        default:
+            return 0;
     }
     if (strlen(key + 1) < 2 || strlen(key + 1) > 3) return 0;
     strncpy(obs, key + 1, 3);
@@ -135,7 +151,7 @@ static int parse_sig_remap_key(const char *key, int *sys, uint8_t *code) {
  * Only the MSM signal ID changes; observation values are unchanged
  * (same frequency band).
  */
-static void apply_sig_remap(obs_t *obs) {
+static void apply_sig_remap(obs_t* obs) {
     int i, j, k, sys;
     if (n_sig_remap <= 0) return;
     for (i = 0; i < obs->n; i++) {
@@ -143,8 +159,7 @@ static void apply_sig_remap(obs_t *obs) {
         for (j = 0; j < NFREQ + NEXOBS; j++) {
             if (obs->data[i].code[j] == 0) continue;
             for (k = 0; k < n_sig_remap; k++) {
-                if (sig_remap[k].sys == sys &&
-                    sig_remap[k].from == obs->data[i].code[j]) {
+                if (sig_remap[k].sys == sys && sig_remap[k].from == obs->data[i].code[j]) {
                     obs->data[i].code[j] = sig_remap[k].to;
                     break;
                 }
@@ -159,8 +174,8 @@ static void apply_sig_remap(obs_t *obs) {
  * Parses lines like: G2X = "2W"  (key = system + RINEX code, value = target code)
  * Populates the global sig_remap[] table.
  */
-static void load_sig_remap(const char *conffile) {
-    FILE *fp;
+static void load_sig_remap(const char* conffile) {
+    FILE* fp;
     char line[256], key[16], val[16];
     int in_section = 0, sys;
     uint8_t from_code, to_code;
@@ -170,7 +185,7 @@ static void load_sig_remap(const char *conffile) {
 
     n_sig_remap = 0;
     while (fgets(line, sizeof(line), fp)) {
-        char *p = line;
+        char* p = line;
         /* skip whitespace */
         while (*p == ' ' || *p == '\t') p++;
         /* skip comments and blank lines */
@@ -213,27 +228,30 @@ static void load_sig_remap(const char *conffile) {
  * @param[in] systems  Comma- or space-separated system names (e.g. "GPS,Galileo")
  *                     Recognised names (case-insensitive): GPS, GLO/GLONASS, GAL/Galileo, QZS/QZSS
  */
-static void set_msm_systems(const char *systems) {
+static void set_msm_systems(const char* systems) {
     int n = 0;
-    const char *p = systems;
+    const char* p = systems;
     char tok[32];
 
     while (*p) {
         int len = 0;
-        while (*p && (*p == ',' || *p == ' ' || *p == '\t' || *p == '"'
-                || *p == '[' || *p == ']')) p++;
-        while (*p && *p != ',' && *p != ' ' && *p != '\t' && *p != '"'
-                && *p != ']' && len < (int)sizeof(tok) - 1)
+        while (*p && (*p == ',' || *p == ' ' || *p == '\t' || *p == '"' || *p == '[' || *p == ']')) p++;
+        while (*p && *p != ',' && *p != ' ' && *p != '\t' && *p != '"' && *p != ']' && len < (int)sizeof(tok) - 1)
             tok[len++] = *p++;
         tok[len] = '\0';
         if (!len) continue;
 
         /* case-insensitive match */
-        if (!strcasecmp(tok, "GPS"))                         rtcm3_msm_sys[n++] = SYS_GPS;
-        else if (!strcasecmp(tok, "GLO") || !strcasecmp(tok, "GLONASS")) rtcm3_msm_sys[n++] = SYS_GLO;
-        else if (!strcasecmp(tok, "GAL") || !strcasecmp(tok, "Galileo")) rtcm3_msm_sys[n++] = SYS_GAL;
-        else if (!strcasecmp(tok, "QZS") || !strcasecmp(tok, "QZSS"))   rtcm3_msm_sys[n++] = SYS_QZS;
-        else fprintf(stderr, "cssr2rtcm3: unknown system '%s'\n", tok);
+        if (!strcasecmp(tok, "GPS"))
+            rtcm3_msm_sys[n++] = SYS_GPS;
+        else if (!strcasecmp(tok, "GLO") || !strcasecmp(tok, "GLONASS"))
+            rtcm3_msm_sys[n++] = SYS_GLO;
+        else if (!strcasecmp(tok, "GAL") || !strcasecmp(tok, "Galileo"))
+            rtcm3_msm_sys[n++] = SYS_GAL;
+        else if (!strcasecmp(tok, "QZS") || !strcasecmp(tok, "QZSS"))
+            rtcm3_msm_sys[n++] = SYS_QZS;
+        else
+            fprintf(stderr, "cssr2rtcm3: unknown system '%s'\n", tok);
     }
     rtcm3_msm_sys[n] = 0;
 
@@ -241,10 +259,11 @@ static void set_msm_systems(const char *systems) {
         int i;
         fprintf(stderr, "cssr2rtcm3: systems=");
         for (i = 0; rtcm3_msm_sys[i]; i++) {
-            const char *name = rtcm3_msm_sys[i] == SYS_GPS ? "GPS" :
-                               rtcm3_msm_sys[i] == SYS_GLO ? "GLO" :
-                               rtcm3_msm_sys[i] == SYS_GAL ? "GAL" :
-                               rtcm3_msm_sys[i] == SYS_QZS ? "QZS" : "?";
+            const char* name = rtcm3_msm_sys[i] == SYS_GPS   ? "GPS"
+                               : rtcm3_msm_sys[i] == SYS_GLO ? "GLO"
+                               : rtcm3_msm_sys[i] == SYS_GAL ? "GAL"
+                               : rtcm3_msm_sys[i] == SYS_QZS ? "QZS"
+                                                             : "?";
             fprintf(stderr, "%s%s", i ? "," : "", name);
         }
         fprintf(stderr, "\n");
@@ -258,8 +277,8 @@ static void set_msm_systems(const char *systems) {
  *   msm_type = 4 | 5 | 7   (default: 7)
  *   systems  = ["GPS", "Galileo"]  (default: GPS,GLO,GAL,QZS)
  */
-static void load_cssr2rtcm3_config(const char *conffile) {
-    FILE *fp;
+static void load_cssr2rtcm3_config(const char* conffile) {
+    FILE* fp;
     char line[256];
     int in_section = 0, val;
 
@@ -267,7 +286,7 @@ static void load_cssr2rtcm3_config(const char *conffile) {
     if (!(fp = fopen(conffile, "r"))) return;
 
     while (fgets(line, sizeof(line), fp)) {
-        char *p = line;
+        char* p = line;
         while (*p == ' ' || *p == '\t') p++;
         if (*p == '#' || *p == '\n' || *p == '\r' || *p == '\0') continue;
 
@@ -279,12 +298,14 @@ static void load_cssr2rtcm3_config(const char *conffile) {
 
         if (sscanf(p, "msm_type = %d", &val) == 1) {
             switch (val) {
-            case 4: case 5: case 7:
-                rtcm3_msm_grade = val;
-                break;
-            default:
-                fprintf(stderr, "cssr2rtcm3: invalid msm_type=%d (use 4,5,7)\n", val);
-                break;
+                case 4:
+                case 5:
+                case 7:
+                    rtcm3_msm_grade = val;
+                    break;
+                default:
+                    fprintf(stderr, "cssr2rtcm3: invalid msm_type=%d (use 4,5,7)\n", val);
+                    break;
             }
             fprintf(stderr, "cssr2rtcm3: msm_type=%d\n", val);
         }
@@ -309,13 +330,12 @@ static void load_cssr2rtcm3_config(const char *conffile) {
             int ival;
             if (sscanf(p, "l6d_prn_fixed = %d", &ival) == 1) {
                 l6d_prn_fixed = ival;
-                fprintf(stderr, "cssr2rtcm3: l6d_prn_fixed=J%d (auto-select disabled)\n",
-                        l6d_prn_fixed);
+                fprintf(stderr, "cssr2rtcm3: l6d_prn_fixed=J%d (auto-select disabled)\n", l6d_prn_fixed);
             }
         }
         /* systems = ["GPS", "Galileo"] or systems = GPS,Galileo */
         if (strncmp(p, "systems", 7) == 0) {
-            char *eq = strchr(p, '=');
+            char* eq = strchr(p, '=');
             if (eq) set_msm_systems(eq + 1);
         }
     }
@@ -334,19 +354,18 @@ static void load_cssr2rtcm3_config(const char *conffile) {
  * even after it dropped out, causing CLAS corrections to freeze.
  *===========================================================================*/
 
-#define L6D_TIMEOUT     30.0    /* seconds without reception → force reselect */
-#define L6D_FRESH_WIN   10.0    /* candidate must have been received within this window */
-#define L6D_SWITCH_HYST 5.0     /* require new sat's elevation to exceed current by this */
+#define L6D_TIMEOUT 30.0    /* seconds without reception → force reselect */
+#define L6D_FRESH_WIN 10.0  /* candidate must have been received within this window */
+#define L6D_SWITCH_HYST 5.0 /* require new sat's elevation to exceed current by this */
 
 static gtime_t l6d_last_time_per_sat[MAXSAT + 1];
-static double  l6d_last_el_per_sat[MAXSAT + 1];  /* deg; -999 = unknown */
+static double l6d_last_el_per_sat[MAXSAT + 1]; /* deg; -999 = unknown */
 
 /**
  * @brief Compute QZS satellite elevation at a given time and receiver position.
  * @return elevation in degrees, or -999.0 if position/ephemeris not available.
  */
-static double l6d_compute_el(int sat, gtime_t time, const double *user_pos, nav_t *nav)
-{
+static double l6d_compute_el(int sat, gtime_t time, const double* user_pos, nav_t* nav) {
     double rs[6] = {0}, dts[2] = {0}, var = 0.0;
     double e[3], azel[2], pos[3];
     int svh = 0;
@@ -374,8 +393,7 @@ static double l6d_compute_el(int sat, gtime_t time, const double *user_pos, nav_
 /**
  * @brief Record that an L6D frame was received from the given QZS satellite.
  */
-static void l6d_record_frame(int sat, gtime_t time, const double *user_pos, nav_t *nav)
-{
+static void l6d_record_frame(int sat, gtime_t time, const double* user_pos, nav_t* nav) {
     double el;
     if (sat <= 0 || sat > MAXSAT) {
         return;
@@ -401,23 +419,20 @@ static void l6d_record_frame(int sat, gtime_t time, const double *user_pos, nav_
  * @param now      Current time.
  * @return Selected satellite number, or `current` if no switch is warranted.
  */
-static int l6d_select_best(int current, gtime_t now)
-{
+static int l6d_select_best(int current, gtime_t now) {
     int i, best = current;
     double best_el = -999.0;
-    double current_el = (current > 0 && current <= MAXSAT)
-                            ? l6d_last_el_per_sat[current] : -999.0;
+    double current_el = (current > 0 && current <= MAXSAT) ? l6d_last_el_per_sat[current] : -999.0;
     int current_stale = 0;
 
     /* is current selection stale? */
     if (current > 0 && current <= MAXSAT) {
-        if (l6d_last_time_per_sat[current].time == 0 ||
-            timediff(now, l6d_last_time_per_sat[current]) > L6D_TIMEOUT ||
+        if (l6d_last_time_per_sat[current].time == 0 || timediff(now, l6d_last_time_per_sat[current]) > L6D_TIMEOUT ||
             (current_el > -999.0 && current_el < l6d_elmin)) {
             current_stale = 1;
         }
     } else {
-        current_stale = 1;  /* no current selection */
+        current_stale = 1; /* no current selection */
     }
 
     for (i = 1; i <= MAXSAT; i++) {
@@ -476,8 +491,7 @@ static int l6d_select_best(int current, gtime_t now)
  * @brief Extract satellite list from a 40-bit CSSR satellite mask.
  * @return Number of satellites extracted.
  */
-static int svmask_to_sats(uint64_t svmask, int gnss_id, int *sat, int maxsat)
-{
+static int svmask_to_sats(uint64_t svmask, int gnss_id, int* sat, int maxsat) {
     int j, n = 0, prn_min;
     int sys = cssr_gnss2sys(gnss_id, &prn_min);
     if (sys == SYS_NONE) return 0;
@@ -492,10 +506,12 @@ static int svmask_to_sats(uint64_t svmask, int gnss_id, int *sat, int maxsat)
 /**
  * @brief Count bits set in a 16-bit mask.
  */
-static int popcount16(uint16_t v)
-{
+static int popcount16(uint16_t v) {
     int n = 0;
-    while (v) { n += v & 1; v >>= 1; }
+    while (v) {
+        n += v & 1;
+        v >>= 1;
+    }
     return n;
 }
 
@@ -505,12 +521,10 @@ static int popcount16(uint16_t v)
  * Prints ST1 satellite/signal masks, bias smode, and STEC availability
  * per constellation. Called once after corrections stabilize.
  */
-static void dump_clas_state(const clas_ctx_t *clas, const clas_corr_t *corr)
-{
-    static const char *gnss_name[] = {"GPS","GLO","GAL","BDS","SBS","QZS"};
-    static const int gnss_ids[] = {CSSR_SYS_GPS, CSSR_SYS_GLO, CSSR_SYS_GAL,
-                                   CSSR_SYS_BDS, CSSR_SYS_SBS, CSSR_SYS_QZS};
-    const cssr_t *cssr = &clas->cssr[0];
+static void dump_clas_state(const clas_ctx_t* clas, const clas_corr_t* corr) {
+    static const char* gnss_name[] = {"GPS", "GLO", "GAL", "BDS", "SBS", "QZS"};
+    static const int gnss_ids[] = {CSSR_SYS_GPS, CSSR_SYS_GLO, CSSR_SYS_GAL, CSSR_SYS_BDS, CSSR_SYS_SBS, CSSR_SYS_QZS};
+    const cssr_t* cssr = &clas->cssr[0];
     int g, i, j, nsat_g, lsat[64];
     int all_sat[64], nsat_all = 0;
     char id[8];
@@ -524,8 +538,7 @@ static void dump_clas_state(const clas_ctx_t *clas, const clas_corr_t *corr)
         int gid = gnss_ids[g];
         if (cssr->svmask[gid] == 0) continue;
         nsat_g = svmask_to_sats(cssr->svmask[gid], gid, lsat, 64);
-        fprintf(stderr, "  %s: %d sats, sigmask=0x%04X (%d sigs)\n",
-                gnss_name[g], nsat_g, cssr->sigmask[gid],
+        fprintf(stderr, "  %s: %d sats, sigmask=0x%04X (%d sigs)\n", gnss_name[g], nsat_g, cssr->sigmask[gid],
                 popcount16(cssr->sigmask[gid]));
         fprintf(stderr, "    sats:");
         for (i = 0; i < nsat_g; i++) {
@@ -538,8 +551,7 @@ static void dump_clas_state(const clas_ctx_t *clas, const clas_corr_t *corr)
     for (g = 0; g < 6; g++) {
         int gid = gnss_ids[g];
         if (cssr->svmask[gid] == 0) continue;
-        nsat_all += svmask_to_sats(cssr->svmask[gid], gid,
-                                    all_sat + nsat_all, 64 - nsat_all);
+        nsat_all += svmask_to_sats(cssr->svmask[gid], gid, all_sat + nsat_all, 64 - nsat_all);
     }
 
     /* Bias: corr->smode (from bank after ST4/ST6 merge) */
@@ -547,18 +559,20 @@ static void dump_clas_state(const clas_ctx_t *clas, const clas_corr_t *corr)
     for (i = 0; i < MAXSAT; i++) {
         int sys = satsys(i + 1, NULL);
         int has = 0;
-        if (!(sys & (SYS_GPS|SYS_GAL|SYS_QZS))) continue;
+        if (!(sys & (SYS_GPS | SYS_GAL | SYS_QZS))) continue;
         for (j = 0; j < MAXCODE; j++) {
-            if (corr->smode[i][j] != 0) { has = 1; break; }
+            if (corr->smode[i][j] != 0) {
+                has = 1;
+                break;
+            }
         }
         if (!has) continue;
         satno2id(i + 1, id);
         fprintf(stderr, "  %s:", id);
         for (j = 0; j < MAXCODE; j++) {
             if (corr->smode[i][j] != 0) {
-                fprintf(stderr, " [%d]=%s(cb=%.3f pb=%.3f)", j,
-                        code2obs(corr->smode[i][j]),
-                        corr->cbias[i][j], corr->pbias[i][j]);
+                fprintf(stderr, " [%d]=%s(cb=%.3f pb=%.3f)", j, code2obs(corr->smode[i][j]), corr->cbias[i][j],
+                        corr->pbias[i][j]);
             }
         }
         fprintf(stderr, "\n");
@@ -612,74 +626,67 @@ static volatile sig_atomic_t g_shutdown = 0;
 
 /* long-option aliases */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--config", "-k"},
-    {"--input", "-in"},
-    {"--output", "-out"},
-    {"--nav", "-nav"},
-    {"--trace", "-d"},
-    {"--interval", "-t"},
-    {NULL, NULL},
+    {"--config", "-k"}, {"--input", "-in"},   {"--output", "-out"}, {"--nav", "-nav"},
+    {"--trace", "-d"},  {"--interval", "-t"}, {NULL, NULL},
 };
 
-static const char *usage_text[] = {
-    "mrtk cssr2rtcm3: real-time CSSR (CLAS L6D) to RTCM3 MSM (OSR) converter",
-    "",
-    "Usage: mrtk cssr2rtcm3 [OPTIONS] [-nav FILE ...]",
-    "",
-    "  Converts CLAS CSSR corrections to VRS pseudo-observations (RTCM3 MSM)",
-    "  in real-time, enabling CLAS-unsupported receivers to consume CLAS via",
-    "  NTRIP/TCP. The MSM message type is configurable in the TOML config",
-    "  (default: MSM7).",
-    "",
-    "Options:",
-    "  -k,  --config FILE       Configuration file (TOML or legacy .conf)",
-    "  -in, --input  URI        L6 CSSR input stream                  [stdin]",
-    "                             Use sbf://... for single SBF stream mode",
-    "                             (auto-extracts L6D, PVT position, and NAV)",
-    "  -2ch URI                 Second L6 input stream (channel 2)",
-    "  -out, --output URI       RTCM3 output stream                   [stdout]",
-    "  -pos URI                 Position input stream (NMEA GGA)",
-    "  -p   LAT,LON,HGT         Fixed user position (deg, m)",
-    "  -nav, --nav FILE...      Navigation files (RINEX NAV)",
-    "  -d,  --trace LEVEL       Trace level (0..5)                    [0]",
-    "  -t,  --interval SEC      Output interval (s)                   [1]",
-    "  -h,  --help              Show this help",
-    "",
-    "Stream URI formats:",
-    "  file://path                File",
-    "  serial://port:baud         Serial port",
-    "  tcpsvr://:port             TCP server (listen)",
-    "  tcpcli://host:port         TCP client",
-    "  ntripsvr://:pw@host:port/mnt  NTRIP server (push)",
-    "  ntripcli://[user:pw@]host:port/mnt  NTRIP client",
-    "  ntripcas://[user:pw@]:port/mnt  NTRIP caster",
-    "",
-    "Examples:",
-    "  # File replay (testing)",
-    "  mrtk cssr2rtcm3 --input file://data/2019239Q.l6 \\",
-    "    --output file://out.rtcm3 \\",
-    "    --nav data/nav.nav -p 36.104,140.087,70.0",
-    "",
-    "  # Serial L6 -> TCP server, position from receiver NMEA",
-    "  mrtk cssr2rtcm3 -in serial://ttyUSB0:115200 \\",
-    "    -out tcpsvr://:9001 \\",
-    "    -pos serial://ttyUSB1:9600 \\",
-    "    -nav /path/to/broadcast.nav",
-    "",
-    "  # NTRIP L6 -> NTRIP caster, fixed position",
-    "  mrtk cssr2rtcm3 -in ntripcli://user:pw@caster:2101/L6 \\",
-    "    -out ntripsvr://:pw@caster:2101/VRS \\",
-    "    -p 35.681,139.767,40.0 -nav /path/to/nav",
-    "",
-    "  # Single SBF stream from mosaic-G5 (serial)",
-    "  mrtk cssr2rtcm3 -in sbf://serial://ttyUSB0:115200 \\",
-    "    -out tcpsvr://:9001",
-    "",
-    "  # Single SBF stream from mosaic-G5 (TCP)",
-    "  mrtk cssr2rtcm3 -in sbf://tcpcli://192.168.1.100:28785 \\",
-    "    -out ntripsvr://:pw@caster:2101/VRS",
-    NULL
-};
+static const char* usage_text[] = {"mrtk cssr2rtcm3: real-time CSSR (CLAS L6D) to RTCM3 MSM (OSR) converter",
+                                   "",
+                                   "Usage: mrtk cssr2rtcm3 [OPTIONS] [-nav FILE ...]",
+                                   "",
+                                   "  Converts CLAS CSSR corrections to VRS pseudo-observations (RTCM3 MSM)",
+                                   "  in real-time, enabling CLAS-unsupported receivers to consume CLAS via",
+                                   "  NTRIP/TCP. The MSM message type is configurable in the TOML config",
+                                   "  (default: MSM7).",
+                                   "",
+                                   "Options:",
+                                   "  -k,  --config FILE       Configuration file (TOML or legacy .conf)",
+                                   "  -in, --input  URI        L6 CSSR input stream                  [stdin]",
+                                   "                             Use sbf://... for single SBF stream mode",
+                                   "                             (auto-extracts L6D, PVT position, and NAV)",
+                                   "  -2ch URI                 Second L6 input stream (channel 2)",
+                                   "  -out, --output URI       RTCM3 output stream                   [stdout]",
+                                   "  -pos URI                 Position input stream (NMEA GGA)",
+                                   "  -p   LAT,LON,HGT         Fixed user position (deg, m)",
+                                   "  -nav, --nav FILE...      Navigation files (RINEX NAV)",
+                                   "  -d,  --trace LEVEL       Trace level (0..5)                    [0]",
+                                   "  -t,  --interval SEC      Output interval (s)                   [1]",
+                                   "  -h,  --help              Show this help",
+                                   "",
+                                   "Stream URI formats:",
+                                   "  file://path                File",
+                                   "  serial://port:baud         Serial port",
+                                   "  tcpsvr://:port             TCP server (listen)",
+                                   "  tcpcli://host:port         TCP client",
+                                   "  ntripsvr://:pw@host:port/mnt  NTRIP server (push)",
+                                   "  ntripcli://[user:pw@]host:port/mnt  NTRIP client",
+                                   "  ntripcas://[user:pw@]:port/mnt  NTRIP caster",
+                                   "",
+                                   "Examples:",
+                                   "  # File replay (testing)",
+                                   "  mrtk cssr2rtcm3 --input file://data/2019239Q.l6 \\",
+                                   "    --output file://out.rtcm3 \\",
+                                   "    --nav data/nav.nav -p 36.104,140.087,70.0",
+                                   "",
+                                   "  # Serial L6 -> TCP server, position from receiver NMEA",
+                                   "  mrtk cssr2rtcm3 -in serial://ttyUSB0:115200 \\",
+                                   "    -out tcpsvr://:9001 \\",
+                                   "    -pos serial://ttyUSB1:9600 \\",
+                                   "    -nav /path/to/broadcast.nav",
+                                   "",
+                                   "  # NTRIP L6 -> NTRIP caster, fixed position",
+                                   "  mrtk cssr2rtcm3 -in ntripcli://user:pw@caster:2101/L6 \\",
+                                   "    -out ntripsvr://:pw@caster:2101/VRS \\",
+                                   "    -p 35.681,139.767,40.0 -nav /path/to/nav",
+                                   "",
+                                   "  # Single SBF stream from mosaic-G5 (serial)",
+                                   "  mrtk cssr2rtcm3 -in sbf://serial://ttyUSB0:115200 \\",
+                                   "    -out tcpsvr://:9001",
+                                   "",
+                                   "  # Single SBF stream from mosaic-G5 (TCP)",
+                                   "  mrtk cssr2rtcm3 -in sbf://tcpcli://192.168.1.100:28785 \\",
+                                   "    -out ntripsvr://:pw@caster:2101/VRS",
+                                   NULL};
 
 /*============================================================================
  * Stream URI Parser
@@ -694,23 +701,15 @@ static const char *usage_text[] = {
  * @param[out] path  Stream path (buffer, at least 1024 bytes)
  * @return 1 on success, 0 on error
  */
-static int parse_stream_uri(const char *uri, int *type, char *path)
-{
+static int parse_stream_uri(const char* uri, int* type, char* path) {
     static const struct {
-        const char *prefix;
+        const char* prefix;
         int type;
-    } uri_types[] = {
-        {"file://",     STR_FILE},
-        {"serial://",   STR_SERIAL},
-        {"tcpsvr://",   STR_TCPSVR},
-        {"tcpcli://",   STR_TCPCLI},
-        {"ntripsvr://", STR_NTRIPSVR},
-        {"ntripcli://", STR_NTRIPCLI},
-        {"ntripcas://", STR_NTRIPCAS},
-        {"udpsvr://",   STR_UDPSVR},
-        {"udpcli://",   STR_UDPCLI},
-        {NULL, 0}
-    };
+    } uri_types[] = {{"file://", STR_FILE},         {"serial://", STR_SERIAL},
+                     {"tcpsvr://", STR_TCPSVR},     {"tcpcli://", STR_TCPCLI},
+                     {"ntripsvr://", STR_NTRIPSVR}, {"ntripcli://", STR_NTRIPCLI},
+                     {"ntripcas://", STR_NTRIPCAS}, {"udpsvr://", STR_UDPSVR},
+                     {"udpcli://", STR_UDPCLI},     {NULL, 0}};
     int i;
 
     for (i = 0; uri_types[i].prefix; i++) {
@@ -733,8 +732,7 @@ static int parse_stream_uri(const char *uri, int *type, char *path)
  * Signal Handler
  *===========================================================================*/
 
-static void sig_shutdown(int sig)
-{
+static void sig_shutdown(int sig) {
     (void)sig;
     g_shutdown = 1;
 }
@@ -749,8 +747,7 @@ static void sig_shutdown(int sig)
 /**
  * @brief Convert NMEA ddmm.mmmm format to decimal degrees.
  */
-static double nmea_dmm2deg(double dmm)
-{
+static double nmea_dmm2deg(double dmm) {
     int deg = (int)(dmm / 100.0);
     return deg + (dmm - deg * 100.0) / 60.0;
 }
@@ -762,8 +759,7 @@ static double nmea_dmm2deg(double dmm)
  * @param[out] ecef   ECEF position [X,Y,Z] (m), unchanged if parse fails
  * @return 1 if position updated, 0 otherwise
  */
-static int parse_nmea_gga(const char *buf, int len, double *ecef)
-{
+static int parse_nmea_gga(const char* buf, int len, double* ecef) {
     char line[512], *fields[20];
     double lat, lon, alt, msl, pos[3];
     char ns, ew;
@@ -791,9 +787,9 @@ static int parse_nmea_gga(const char *buf, int len, double *ecef)
     if (atoi(fields[6]) == 0) return 0;
 
     lat = atof(fields[2]);
-    ns  = fields[3][0];
+    ns = fields[3][0];
     lon = atof(fields[4]);
-    ew  = fields[5][0];
+    ew = fields[5][0];
     alt = atof(fields[8]);
     msl = atof(fields[10]);
 
@@ -813,8 +809,7 @@ static int parse_nmea_gga(const char *buf, int len, double *ecef)
  * @param[out] user_pos  User position in ECEF [X,Y,Z] (m)
  * @return 1 if position updated, 0 otherwise
  */
-static int update_position_from_stream(stream_t *strm, double *user_pos)
-{
+static int update_position_from_stream(stream_t* strm, double* user_pos) {
     static char nmeabuf[2048];
     static int nmealen = 0;
     uint8_t buf[512];
@@ -855,13 +850,12 @@ static int update_position_from_stream(stream_t *strm, double *user_pos)
  * and create a pseudorange observation needed by clas_ssr2osr().
  * (Verbatim from ssr2obs.c actualdist())
  */
-static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
-{
+static int actualdist(gtime_t time, obs_t* obs, nav_t* nav, const double* x) {
     int i, n, sat, lsat[MAXSAT];
     double r, rr[3], dt, dt_p;
     double rs1[6], dts1[2], var1, e1[3];
     gtime_t tg;
-    obsd_t *obsd = obs->data;
+    obsd_t* obsd = obs->data;
     int svh1;
 
     obs->n = 0;
@@ -892,20 +886,25 @@ static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
         int j, k, sys, sys_ok = 0, found = 0;
         sys = satsys(i + 1, NULL);
         for (k = 0; rtcm3_msm_sys[k]; k++) {
-            if (rtcm3_msm_sys[k] == sys) { sys_ok = 1; break; }
+            if (rtcm3_msm_sys[k] == sys) {
+                sys_ok = 1;
+                break;
+            }
         }
         if (!sys_ok) continue;
         /* check broadcast ephemeris exists */
         for (j = 0; j < nav->n; j++) {
             if (nav->eph[j].sat == i + 1 && nav->eph[j].toe.time > 0) {
-                found = 1; break;
+                found = 1;
+                break;
             }
         }
         if (!found) {
             /* also check GLONASS ephemeris */
             for (j = 0; j < nav->ng; j++) {
                 if (nav->geph[j].sat == i + 1 && nav->geph[j].toe.time > 0) {
-                    found = 1; break;
+                    found = 1;
+                    break;
                 }
             }
         }
@@ -918,11 +917,11 @@ static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
     /* compute pseudorange via iterative light-time correction */
     for (i = 0; i < n; i++) {
         sat = lsat[i];
-        dt = 0.08; dt_p = 0.0;
+        dt = 0.08;
+        dt_p = 0.0;
         while (1) {
             tg = timeadd(time, -dt);
-            if (!satpos(tg, time, sat, EPHOPT_BRDC, nav,
-                        rs1, dts1, &var1, &svh1)) {
+            if (!satpos(tg, time, sat, EPHOPT_BRDC, nav, rs1, dts1, &var1, &svh1)) {
                 obsd[i].sat = 0;
                 break;
             }
@@ -956,8 +955,7 @@ static int actualdist(gtime_t time, obs_t *obs, nav_t *nav, const double *x)
  * assigns signal codes, this function scales D[0] by frequency ratio to fill
  * D[j] for each active signal.
  */
-static void fill_doppler(obs_t *obs)
-{
+static void fill_doppler(obs_t* obs) {
     int i, j;
     for (i = 0; i < obs->n; i++) {
         float d0 = obs->data[i].D[0];
@@ -970,8 +968,7 @@ static void fill_doppler(obs_t *obs)
                 obs->data[i].D[j] = 0.0f;
                 continue;
             }
-            freq = code2freq(satsys(obs->data[i].sat, NULL),
-                             obs->data[i].code[j], 0);
+            freq = code2freq(satsys(obs->data[i].sat, NULL), obs->data[i].code[j], 0);
             obs->data[i].D[j] = (freq > 0.0) ? (float)(d0 * freq / FREQ1) : 0.0f;
         }
     }
@@ -994,15 +991,13 @@ static void fill_doppler(obs_t *obs)
  * in the observation set whose ephemeris IODE has changed since the last
  * transmission. This keeps the rover's ephemeris in sync with the base.
  */
-static int send_ephemeris(stream_t *strm_out, rtcm_t *rtcm, const obs_t *obs,
-                          nav_t *nav)
-{
+static int send_ephemeris(stream_t* strm_out, rtcm_t* rtcm, const obs_t* obs, nav_t* nav) {
     static int last_iode[MAXSAT];
     static double last_send_time[MAXSAT];
     static int initialized = 0;
     int i, sat, sys, type, total = 0;
     double tow;
-    eph_t *eph;
+    eph_t* eph;
 
     if (!initialized) {
         memset(last_iode, -1, sizeof(last_iode));
@@ -1014,15 +1009,24 @@ static int send_ephemeris(stream_t *strm_out, rtcm_t *rtcm, const obs_t *obs,
 
     for (i = 0; i < obs->n; i++) {
         sat = obs->data[i].sat;
-        if (sat <= 0 || sat > MAXSAT) { continue; }
+        if (sat <= 0 || sat > MAXSAT) {
+            continue;
+        }
         sys = satsys(sat, NULL);
 
         /* select RTCM3 ephemeris message type */
         switch (sys) {
-        case SYS_GPS: type = 1019; break;
-        case SYS_GAL: type = 1045; break;
-        case SYS_QZS: type = 1044; break;
-        default: continue;
+            case SYS_GPS:
+                type = 1019;
+                break;
+            case SYS_GAL:
+                type = 1045;
+                break;
+            case SYS_QZS:
+                type = 1044;
+                break;
+            default:
+                continue;
         }
 
         /* find best ephemeris for this satellite.
@@ -1036,16 +1040,22 @@ static int send_ephemeris(stream_t *strm_out, rtcm_t *rtcm, const obs_t *obs,
             double tmin = 86400.0, dt;
             int k;
             for (k = 0; k < nav->n; k++) {
-                if (nav->eph[k].sat != sat) { continue; }
+                if (nav->eph[k].sat != sat) {
+                    continue;
+                }
                 dt = fabs(timediff(nav->eph[k].toe, obs->data[0].time));
-                if (dt < tmin) { tmin = dt; eph = &nav->eph[k]; }
+                if (dt < tmin) {
+                    tmin = dt;
+                    eph = &nav->eph[k];
+                }
             }
-            if (!eph) { continue; }
+            if (!eph) {
+                continue;
+            }
         }
 
         /* send on IODE change or every 30 seconds */
-        if (eph->iode == last_iode[sat - 1] &&
-            tow - last_send_time[sat - 1] < 30.0) {
+        if (eph->iode == last_iode[sat - 1] && tow - last_send_time[sat - 1] < 30.0) {
             continue;
         }
 
@@ -1068,16 +1078,13 @@ static int send_ephemeris(stream_t *strm_out, rtcm_t *rtcm, const obs_t *obs,
     return total;
 }
 
-static int encode_and_send_rtcm3(stream_t *strm_out, rtcm_t *rtcm,
-                                  const obs_t *obs, nav_t *nav,
-                                  const double *pos)
-{
+static int encode_and_send_rtcm3(stream_t* strm_out, rtcm_t* rtcm, const obs_t* obs, nav_t* nav, const double* pos) {
     int i, j, k, sys, sync, total = 0;
 
     if (obs->n <= 0) return 0;
 
     rtcm->time = obs->data[0].time;
-    rtcm->staid = 0;  /* match mosaic-CLAS default */
+    rtcm->staid = 0; /* match mosaic-CLAS default */
     matcpy(rtcm->sta.pos, pos, 3, 1);
 
     /* load all obs into rtcm->obs so encode_type1005 can detect constellations */
@@ -1110,8 +1117,7 @@ static int encode_and_send_rtcm3(stream_t *strm_out, rtcm_t *rtcm,
         sys = rtcm3_msm_sys[k];
         rtcm->obs.n = 0;
         for (i = 0; i < obs->n && rtcm->obs.n < MAXOBS; i++) {
-            if (satsys(obs->data[i].sat, NULL) & sys)
-                rtcm->obs.data[rtcm->obs.n++] = obs->data[i];
+            if (satsys(obs->data[i].sat, NULL) & sys) rtcm->obs.data[rtcm->obs.n++] = obs->data[i];
         }
         if (rtcm->obs.n <= 0) continue;
 
@@ -1120,7 +1126,8 @@ static int encode_and_send_rtcm3(stream_t *strm_out, rtcm_t *rtcm,
         for (j = k + 1; rtcm3_msm_sys[j] && !sync; j++) {
             for (i = 0; i < obs->n; i++) {
                 if (satsys(obs->data[i].sat, NULL) & rtcm3_msm_sys[j]) {
-                    sync = 1; break;
+                    sync = 1;
+                    break;
                 }
             }
         }
@@ -1139,14 +1146,12 @@ static int encode_and_send_rtcm3(stream_t *strm_out, rtcm_t *rtcm,
 /**
  * @brief Update CLAS corrections after epoch boundary (subtype 10).
  */
-static void update_corrections(clas_ctx_t *clas, nav_t *nav, int ch)
-{
+static void update_corrections(clas_ctx_t* clas, nav_t* nav, int ch) {
     int net = clas->grid[ch].network;
     int rc;
 
     if (net > 0) {
-        rc = clas_bank_get_close(clas, clas->l6buf[ch].time,
-                                 net, ch, &clas->current[ch]);
+        rc = clas_bank_get_close(clas, clas->l6buf[ch].time, net, ch, &clas->current[ch]);
         if (rc == 0) {
             clas_update_global(nav, &clas->current[ch], ch);
             clas_check_grid_status(clas, &clas->current[ch], ch);
@@ -1157,29 +1162,25 @@ static void update_corrections(clas_ctx_t *clas, nav_t *nav, int ch)
 
     /* bootstrap: scan all networks when network is unknown */
     if (clas->grid[ch].network <= 0 && clas->bank[ch] && clas->bank[ch]->use) {
-        clas_corr_t *tmp = (clas_corr_t *)calloc(1, sizeof(clas_corr_t));
+        clas_corr_t* tmp = (clas_corr_t*)calloc(1, sizeof(clas_corr_t));
         int found = 0;
         if (tmp) {
             for (net = 1; net < CLAS_MAX_NETWORK; net++) {
-                if (clas_bank_get_close(clas, clas->l6buf[ch].time,
-                                        net, ch, tmp) == 0) {
+                if (clas_bank_get_close(clas, clas->l6buf[ch].time, net, ch, tmp) == 0) {
                     clas_check_grid_status(clas, tmp, ch);
                     clas_update_global(nav, tmp, ch);
                     found++;
                 }
             }
             if (found == 0) {
-                fprintf(stderr, "  bootstrap: no network found (bank.use=%d)\n",
-                        clas->bank[ch]->use);
+                fprintf(stderr, "  bootstrap: no network found (bank.use=%d)\n", clas->bank[ch]->use);
             } else {
-                fprintf(stderr, "  bootstrap: found %d networks, grid.network=%d\n",
-                        found, clas->grid[ch].network);
+                fprintf(stderr, "  bootstrap: found %d networks, grid.network=%d\n", found, clas->grid[ch].network);
             }
             free(tmp);
         }
     } else if (clas->grid[ch].network <= 0) {
-        fprintf(stderr, "  no grid network: bank=%p use=%d\n",
-                (void*)clas->bank[ch],
+        fprintf(stderr, "  no grid network: bank=%p use=%d\n", (void*)clas->bank[ch],
                 clas->bank[ch] ? clas->bank[ch]->use : -1);
     }
 }
@@ -1188,41 +1189,40 @@ static void update_corrections(clas_ctx_t *clas, nav_t *nav, int ch)
  * Main Processing
  *===========================================================================*/
 
-int mrtk_cssr2rtcm3(int argc, char **argv)
-{
+int mrtk_cssr2rtcm3(int argc, char** argv) {
     prcopt_t prcopt = prcopt_default;
     solopt_t solopt = solopt_default;
     filopt_t filopt = {""};
 
     /* stream state */
-    stream_t strm_in  = {0};
+    stream_t strm_in = {0};
     stream_t strm_out = {0};
     stream_t strm_pos = {0};
     stream_t strm_2ch = {0};
-    int in_type  = STR_NONE, out_type = STR_NONE, pos_type = STR_NONE;
+    int in_type = STR_NONE, out_type = STR_NONE, pos_type = STR_NONE;
     int ch2_type = STR_NONE;
     char in_path[1024] = "", out_path[1024] = "", pos_path[1024] = "";
     char ch2_path[1024] = "";
 
     /* config */
-    char *conffile = "";
-    char *navfiles[MAXNAVFILE];
+    char* conffile = "";
+    char* navfiles[MAXNAVFILE];
     int nnav = 0;
-    double user_pos[3] = {0};     /* ECEF position */
-    double fixed_pos[3] = {0};    /* lat,lon,hgt from -p option */
+    double user_pos[3] = {0};  /* ECEF position */
+    double fixed_pos[3] = {0}; /* lat,lon,hgt from -p option */
     int has_fixed_pos = 0;
     double output_interval = 1.0; /* seconds */
     int trace_level = 0;
-    int sbf_mode = 0;             /* 1: single SBF stream input */
+    int sbf_mode = 0; /* 1: single SBF stream input */
 
     /* processing state */
-    clas_ctx_t *clas = NULL;
-    nav_t *nav = NULL;
+    clas_ctx_t* clas = NULL;
+    nav_t* nav = NULL;
     rtk_t rtk = {0};
-    rtcm_t *rtcm = NULL;
-    raw_t *raw_sbf = NULL;
-    obsd_t *obsdata = NULL;
-    clas_osrd_t *osr = NULL;
+    rtcm_t* rtcm = NULL;
+    raw_t* raw_sbf = NULL;
+    obsd_t* obsdata = NULL;
+    clas_osrd_t* osr = NULL;
     obs_t obs = {0};
     gtime_t last_output = {0};
     int i, ret;
@@ -1234,8 +1234,8 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     int dbg_nopos = 0, dbg_notime = 0, dbg_nogeom = 0, dbg_noosr = 0;
     int dbg_cssr_decode = 0;
     int dbg_subtype[16] = {0};
-    int l6d_prn_filter = 0;  /* auto-select first QZS satellite for L6D */
-    int l6d_prn_count[MAXSAT + 1];  /* L6D block count per satellite */
+    int l6d_prn_filter = 0;        /* auto-select first QZS satellite for L6D */
+    int l6d_prn_count[MAXSAT + 1]; /* L6D block count per satellite */
     memset(l6d_prn_count, 0, sizeof(l6d_prn_count));
 
     /* translate --long flags to their -short aliases before parsing */
@@ -1245,56 +1245,43 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "-k") && i + 1 < argc) {
             conffile = argv[++i];
-        }
-        else if (!strcmp(argv[i], "-in") && i + 1 < argc) {
-            const char *uri = argv[++i];
+        } else if (!strcmp(argv[i], "-in") && i + 1 < argc) {
+            const char* uri = argv[++i];
             if (!strncmp(uri, "sbf://", 6)) {
                 sbf_mode = 1;
                 uri += 6; /* strip sbf:// prefix → inner URI */
             }
             parse_stream_uri(uri, &in_type, in_path);
-        }
-        else if (!strcmp(argv[i], "-out") && i + 1 < argc) {
+        } else if (!strcmp(argv[i], "-out") && i + 1 < argc) {
             parse_stream_uri(argv[++i], &out_type, out_path);
-        }
-        else if (!strcmp(argv[i], "-pos") && i + 1 < argc) {
+        } else if (!strcmp(argv[i], "-pos") && i + 1 < argc) {
             parse_stream_uri(argv[++i], &pos_type, pos_path);
-        }
-        else if (!strcmp(argv[i], "-2ch") && i + 1 < argc) {
+        } else if (!strcmp(argv[i], "-2ch") && i + 1 < argc) {
             parse_stream_uri(argv[++i], &ch2_type, ch2_path);
-        }
-        else if (!strcmp(argv[i], "-p") && i + 1 < argc) {
-            sscanf(argv[++i], "%lf,%lf,%lf",
-                   &fixed_pos[0], &fixed_pos[1], &fixed_pos[2]);
+        } else if (!strcmp(argv[i], "-p") && i + 1 < argc) {
+            sscanf(argv[++i], "%lf,%lf,%lf", &fixed_pos[0], &fixed_pos[1], &fixed_pos[2]);
             has_fixed_pos = 1;
-        }
-        else if (!strcmp(argv[i], "-nav")) {
+        } else if (!strcmp(argv[i], "-nav")) {
             /* collect all following non-option arguments as NAV files */
-            while (i + 1 < argc && argv[i + 1][0] != '-' &&
-                   nnav < MAXNAVFILE) {
+            while (i + 1 < argc && argv[i + 1][0] != '-' && nnav < MAXNAVFILE) {
                 navfiles[nnav++] = argv[++i];
             }
-        }
-        else if (!strcmp(argv[i], "-prn") && i + 1 < argc) {
+        } else if (!strcmp(argv[i], "-prn") && i + 1 < argc) {
             /* -prn is deprecated; L6D satellite is auto-selected based on
              * elevation (see l6d_elmin in TOML config). Emit a warning but
              * do not error out so existing scripts keep running. */
             ++i;
-            fprintf(stderr, "cssr2rtcm3: warning: -prn is deprecated (ignored); "
-                            "L6D satellite is auto-selected by elevation\n");
-        }
-        else if (!strcmp(argv[i], "-d") && i + 1 < argc) {
+            fprintf(stderr,
+                    "cssr2rtcm3: warning: -prn is deprecated (ignored); "
+                    "L6D satellite is auto-selected by elevation\n");
+        } else if (!strcmp(argv[i], "-d") && i + 1 < argc) {
             trace_level = atoi(argv[++i]);
-        }
-        else if (!strcmp(argv[i], "-t") && i + 1 < argc) {
+        } else if (!strcmp(argv[i], "-t") && i + 1 < argc) {
             output_interval = atof(argv[++i]);
-        }
-        else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
-            for (i = 0; usage_text[i]; i++)
-                fprintf(stderr, "%s\n", usage_text[i]);
+        } else if (!strcmp(argv[i], "-h") || !strcmp(argv[i], "--help")) {
+            for (i = 0; usage_text[i]; i++) fprintf(stderr, "%s\n", usage_text[i]);
             return 0;
-        }
-        else {
+        } else {
             fprintf(stderr, "Unknown option: %s\n", argv[i]);
             return -1;
         }
@@ -1321,10 +1308,10 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     }
 
     /* load configuration */
-    prcopt.mode    = PMODE_SSR2OSR;
-    prcopt.nf      = OSR_NFREQ;
-    prcopt.navsys  = OSR_SYS;
-    prcopt.elmin   = OSR_ELMASK * D2R;
+    prcopt.mode = PMODE_SSR2OSR;
+    prcopt.nf = OSR_NFREQ;
+    prcopt.navsys = OSR_SYS;
+    prcopt.elmin = OSR_ELMASK * D2R;
     prcopt.tidecorr = 1;
     prcopt.posopt[2] = 1; /* phase windup correction */
 
@@ -1350,12 +1337,11 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     if (l6d_prn_fixed > 0) {
         l6d_prn_filter = satno(SYS_QZS, l6d_prn_fixed);
         if (l6d_prn_filter <= 0) {
-            fprintf(stderr, "cssr2rtcm3: invalid l6d_prn_fixed=J%d (satno failed)\n",
-                    l6d_prn_fixed);
+            fprintf(stderr, "cssr2rtcm3: invalid l6d_prn_fixed=J%d (satno failed)\n", l6d_prn_fixed);
             return -1;
         }
-        fprintf(stderr, "cssr2rtcm3: L6D locked to J%d (satno=%d, auto-select bypassed)\n",
-                l6d_prn_fixed, l6d_prn_filter);
+        fprintf(stderr, "cssr2rtcm3: L6D locked to J%d (satno=%d, auto-select bypassed)\n", l6d_prn_fixed,
+                l6d_prn_filter);
     }
 
     /* SNR model: pass fixed value to OSR engine via posopt[11] (reserved slot).
@@ -1384,33 +1370,33 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     fprintf(stderr, "%s v%s starting...\n", PROGNAME, PROG_VER);
 
     /* ── Allocate large structures ── */
-    clas = (clas_ctx_t *)calloc(1, sizeof(clas_ctx_t));
-    nav  = (nav_t *)calloc(1, sizeof(nav_t));
-    rtcm = (rtcm_t *)calloc(1, sizeof(rtcm_t)); /* ~103MB */
-    obsdata = (obsd_t *)calloc(MAXOBS, sizeof(obsd_t));
-    osr = (clas_osrd_t *)calloc(MAXOBS, sizeof(clas_osrd_t));
+    clas = (clas_ctx_t*)calloc(1, sizeof(clas_ctx_t));
+    nav = (nav_t*)calloc(1, sizeof(nav_t));
+    rtcm = (rtcm_t*)calloc(1, sizeof(rtcm_t)); /* ~103MB */
+    obsdata = (obsd_t*)calloc(MAXOBS, sizeof(obsd_t));
+    osr = (clas_osrd_t*)calloc(MAXOBS, sizeof(clas_osrd_t));
     if (!clas || !nav || !rtcm || !obsdata || !osr) {
         fprintf(stderr, "Memory allocation error.\n");
         goto cleanup;
     }
 
     /* initialize nav_t arrays (eph, geph, etc.) */
-    nav->eph  = NULL;
+    nav->eph = NULL;
     nav->eph_prev = NULL;
     nav->geph = NULL;
     nav->seph = NULL;
-    if (!(nav->eph      = (eph_t  *)calloc(MAXSAT * 2, sizeof(eph_t))) ||
-        !(nav->eph_prev = (eph_t  *)calloc(MAXSAT * 2, sizeof(eph_t))) ||
-        !(nav->geph     = (geph_t *)calloc(NSATGLO,    sizeof(geph_t))) ||
-        !(nav->seph     = (seph_t *)calloc(NSATSBS * 2, sizeof(seph_t)))) {
+    if (!(nav->eph = (eph_t*)calloc(MAXSAT * 2, sizeof(eph_t))) ||
+        !(nav->eph_prev = (eph_t*)calloc(MAXSAT * 2, sizeof(eph_t))) ||
+        !(nav->geph = (geph_t*)calloc(NSATGLO, sizeof(geph_t))) ||
+        !(nav->seph = (seph_t*)calloc(NSATSBS * 2, sizeof(seph_t)))) {
         fprintf(stderr, "Navigation data allocation error.\n");
         goto cleanup;
     }
-    nav->n    = 0;
+    nav->n = 0;
     nav->nmax = MAXSAT * 2;
-    nav->ng   = 0;
+    nav->ng = 0;
     nav->ngmax = NSATGLO;
-    nav->ns   = 0;
+    nav->ns = 0;
     nav->nsmax = NSATSBS * 2;
 
     /* initialize CLAS context */
@@ -1435,8 +1421,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     rtcm->sta.antsetup = 0;
     strncpy(rtcm->sta.rectype, "MRTKLIB cssr2rtcm3", sizeof(rtcm->sta.rectype) - 1);
     rtcm->sta.rectype[sizeof(rtcm->sta.rectype) - 1] = '\0';
-    snprintf(rtcm->sta.recver, sizeof(rtcm->sta.recver), "%s %s",
-             MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+    snprintf(rtcm->sta.recver, sizeof(rtcm->sta.recver), "%s %s", MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
     rtcm->sta.recsno[0] = '\0';
 
     /* read grid definition file */
@@ -1457,7 +1442,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
 
     /* allocate raw_t for SBF mode */
     if (sbf_mode) {
-        raw_sbf = (raw_t *)calloc(1, sizeof(raw_t));
+        raw_sbf = (raw_t*)calloc(1, sizeof(raw_t));
         if (!raw_sbf) {
             fprintf(stderr, "Memory allocation error (raw_t).\n");
             goto cleanup;
@@ -1504,8 +1489,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
             clas->week_ref[iw] = week;
             clas->tow_ref[iw] = -1;
         }
-        fprintf(stderr, "GPS week reference: %d%s\n", week,
-                week == 0 ? " (deferred to SBF)" : "");
+        fprintf(stderr, "GPS week reference: %d%s\n", week, week == 0 ? " (deferred to SBF)" : "");
     }
 
     /* initialize RTK structure */
@@ -1548,12 +1532,11 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
     fprintf(stderr, "Input:  %s\n", in_path);
     fprintf(stderr, "Output: %s\n", out_path);
     if (has_fixed_pos) {
-        fprintf(stderr, "Position: %.6f, %.6f, %.1f (fixed)\n",
-                fixed_pos[0], fixed_pos[1], fixed_pos[2]);
+        fprintf(stderr, "Position: %.6f, %.6f, %.1f (fixed)\n", fixed_pos[0], fixed_pos[1], fixed_pos[2]);
     }
 
     /* ── Install signal handlers ── */
-    signal(SIGINT,  sig_shutdown);
+    signal(SIGINT, sig_shutdown);
     signal(SIGTERM, sig_shutdown);
     signal(SIGPIPE, SIG_IGN);
 
@@ -1605,8 +1588,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                      * When l6d_prn_fixed is set, the filter is pre-loaded
                      * at startup and the selector is bypassed entirely.    */
                     l6d_record_frame(l6d_sat, raw_sbf->time, user_pos, nav);
-                    new_filter = l6d_prn_fixed > 0 ? l6d_prn_filter
-                                 : l6d_select_best(l6d_prn_filter, raw_sbf->time);
+                    new_filter = l6d_prn_fixed > 0 ? l6d_prn_filter : l6d_select_best(l6d_prn_filter, raw_sbf->time);
                     if (new_filter != l6d_prn_filter && new_filter > 0) {
                         int old_prn = 0, new_prn = 0;
                         if (l6d_prn_filter > 0) {
@@ -1614,14 +1596,11 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                         }
                         satsys(new_filter, &new_prn);
                         if (l6d_prn_filter == 0) {
-                            fprintf(stderr, "L6D: selected J%d (el=%.1f deg)\n",
-                                    new_prn, l6d_last_el_per_sat[new_filter]);
-                        } else {
-                            fprintf(stderr,
-                                    "L6D: switched J%d -> J%d (el: %.1f -> %.1f deg)\n",
-                                    old_prn, new_prn,
-                                    l6d_last_el_per_sat[l6d_prn_filter],
+                            fprintf(stderr, "L6D: selected J%d (el=%.1f deg)\n", new_prn,
                                     l6d_last_el_per_sat[new_filter]);
+                        } else {
+                            fprintf(stderr, "L6D: switched J%d -> J%d (el: %.1f -> %.1f deg)\n", old_prn, new_prn,
+                                    l6d_last_el_per_sat[l6d_prn_filter], l6d_last_el_per_sat[new_filter]);
                         }
                         l6d_prn_filter = new_filter;
                     }
@@ -1650,8 +1629,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                             }
                         }
                     }
-                }
-                else if (ret == 2) {
+                } else if (ret == 2) {
                     nav_count++;
                     /* ephemeris → copy to nav */
                     int esat = raw_sbf->ephsat;
@@ -1673,8 +1651,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                              * See lessons.md L-041. */
                             int new_iode = raw_sbf->nav.eph[esat - 1].iode;
                             int old_iode = nav->eph[esat - 1].iode;
-                            if (nav->eph[esat - 1].sat == esat &&
-                                old_iode != new_iode) {
+                            if (nav->eph[esat - 1].sat == esat && old_iode != new_iode) {
                                 nav->eph_prev[esat - 1] = nav->eph[esat - 1];
                             }
                             nav->eph[esat - 1] = raw_sbf->nav.eph[esat - 1];
@@ -1683,8 +1660,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                                 int slot = esat - 1 + MAXSAT;
                                 int new_iode_f = raw_sbf->nav.eph[slot].iode;
                                 int old_iode_f = nav->eph[slot].iode;
-                                if (nav->eph[slot].sat == esat &&
-                                    old_iode_f != new_iode_f) {
+                                if (nav->eph[slot].sat == esat && old_iode_f != new_iode_f) {
                                     nav->eph_prev[slot] = nav->eph[slot];
                                 }
                                 nav->eph[slot] = raw_sbf->nav.eph[slot];
@@ -1692,8 +1668,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                             if (nav->n < esat) nav->n = esat;
                         }
                     }
-                }
-                else if (ret == 5) {
+                } else if (ret == 5) {
                     pvt_count++;
                     pvt_trigger = 1; /* trigger RTCM3 output */
                     /* PVTGeodetic → latch user position on first valid fix.
@@ -1724,8 +1699,7 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                 }
                 fprintf(stderr, "GPS week from SBF: %d\n", week);
             }
-        }
-        else if (!sbf_mode && n > 0) {
+        } else if (!sbf_mode && n > 0) {
             /* Legacy mode: raw L6 CSSR bytes → ch1 */
             for (i = 0; i < n; i++) {
                 clas_input_cssr(clas, buf[i], 0);
@@ -1809,97 +1783,87 @@ int mrtk_cssr2rtcm3(int argc, char **argv)
                     unsigned int t_start = tickget();
                     unsigned int t_osr, t_end;
 
-                /* generate dummy observations from satellite geometry */
-                if (actualdist(t, &obs, nav, user_pos) < 0) {
-                    dbg_nogeom++;
-                    goto next;
-                }
-
-                /* convert SSR to OSR */
-                {
-                    int obs_in = obs.n;
-                    obs.n = clas_ssr2osr(&rtk, obs.data, obs.n, nav, osr,
-                                         0, clas);
-                    if (obs.n == 0 && dbg_noosr < 3) {
-                        int week;
-                        double tow = time2gpst(t, &week);
-                        fprintf(stderr,
-                                "  OSR fail: week=%d tow=%.1f obs_in=%d "
-                                "nav.n=%d pos=%.1f,%.1f,%.1f\n",
-                                week, tow, obs_in, nav->n, user_pos[0],
-                                user_pos[1], user_pos[2]);
-                    }
-                }
-                t_osr = tickget();
-
-                /* remap signal codes to match receiver tracking */
-                apply_sig_remap(&obs);
-
-                /* scale L1 Doppler to per-frequency for MSM7 rate fields */
-                fill_doppler(&obs);
-
-                if (obs.n > 0) {
-                    int bytes = encode_and_send_rtcm3(&strm_out, rtcm,
-                                                       &obs, nav,
-                                                       user_pos);
-                    epoch_count++;
-                    osr_count += obs.n;
-                    t_end = tickget();
-
-                    /* dump CLAS state after corrections stabilize */
-                    if (epoch_count == 1) {
-                        dump_clas_state(clas, &clas->current[0]);
+                    /* generate dummy observations from satellite geometry */
+                    if (actualdist(t, &obs, nav, user_pos) < 0) {
+                        dbg_nogeom++;
+                        goto next;
                     }
 
+                    /* convert SSR to OSR */
                     {
-                        int week;
-                        double tow = time2gpst(t, &week);
-                        fprintf(stderr,
-                                "\rEpoch %d: week=%d tow=%.0f sats=%d "
-                                "bytes=%d osr=%ums total=%ums pos=%.1f,%.1f,%.1f",
-                                epoch_count, week, tow, obs.n, bytes,
-                                t_osr - t_start, t_end - t_start,
-                                user_pos[0], user_pos[1], user_pos[2]);
-                        fflush(stderr);
+                        int obs_in = obs.n;
+                        obs.n = clas_ssr2osr(&rtk, obs.data, obs.n, nav, osr, 0, clas);
+                        if (obs.n == 0 && dbg_noosr < 3) {
+                            int week;
+                            double tow = time2gpst(t, &week);
+                            fprintf(stderr,
+                                    "  OSR fail: week=%d tow=%.1f obs_in=%d "
+                                    "nav.n=%d pos=%.1f,%.1f,%.1f\n",
+                                    week, tow, obs_in, nav->n, user_pos[0], user_pos[1], user_pos[2]);
+                        }
                     }
-                } else {
-                    dbg_noosr++;
-                }
+                    t_osr = tickget();
 
-                last_output = t;
-            }
-                } /* end timing block */
+                    /* remap signal codes to match receiver tracking */
+                    apply_sig_remap(&obs);
+
+                    /* scale L1 Doppler to per-frequency for MSM7 rate fields */
+                    fill_doppler(&obs);
+
+                    if (obs.n > 0) {
+                        int bytes = encode_and_send_rtcm3(&strm_out, rtcm, &obs, nav, user_pos);
+                        epoch_count++;
+                        osr_count += obs.n;
+                        t_end = tickget();
+
+                        /* dump CLAS state after corrections stabilize */
+                        if (epoch_count == 1) {
+                            dump_clas_state(clas, &clas->current[0]);
+                        }
+
+                        {
+                            int week;
+                            double tow = time2gpst(t, &week);
+                            fprintf(stderr,
+                                    "\rEpoch %d: week=%d tow=%.0f sats=%d "
+                                    "bytes=%d osr=%ums total=%ums pos=%.1f,%.1f,%.1f",
+                                    epoch_count, week, tow, obs.n, bytes, t_osr - t_start, t_end - t_start, user_pos[0],
+                                    user_pos[1], user_pos[2]);
+                            fflush(stderr);
+                        }
+                    } else {
+                        dbg_noosr++;
+                    }
+
+                    last_output = t;
+                }
+            } /* end timing block */
         }
-next:
-        ; /* PVT-triggered loop continues */
+    next:; /* PVT-triggered loop continues */
     }
 
     fprintf(stderr, "\nShutting down...\n");
     /* dump bank state for debugging */
     if (clas->bank[0] && clas->bank[0]->use) {
-        clas_bank_ctrl_t *bnk = clas->bank[0];
-        fprintf(stderr, "Bank: use=%d NextOrbit=%d NextClock=%d NextBias=%d NextTrop=%d\n",
-                bnk->use, bnk->NextOrbit, bnk->NextClock, bnk->NextBias, bnk->NextTrop);
+        clas_bank_ctrl_t* bnk = clas->bank[0];
+        fprintf(stderr, "Bank: use=%d NextOrbit=%d NextClock=%d NextBias=%d NextTrop=%d\n", bnk->use, bnk->NextOrbit,
+                bnk->NextClock, bnk->NextBias, bnk->NextTrop);
         for (i = 0; i < bnk->NextOrbit && i < 3; i++) {
             int week;
             double tow = time2gpst(bnk->OrbitBank[i].time, &week);
-            fprintf(stderr, "  orbit[%d]: net=%d week=%d tow=%.0f\n",
-                    i, bnk->OrbitBank[i].network, week, tow);
+            fprintf(stderr, "  orbit[%d]: net=%d week=%d tow=%.0f\n", i, bnk->OrbitBank[i].network, week, tow);
         }
         for (i = 0; i < bnk->NextClock && i < 3; i++) {
             int week;
             double tow = time2gpst(bnk->ClockBank[i].time, &week);
-            fprintf(stderr, "  clock[%d]: net=%d week=%d tow=%.0f\n",
-                    i, bnk->ClockBank[i].network, week, tow);
+            fprintf(stderr, "  clock[%d]: net=%d week=%d tow=%.0f\n", i, bnk->ClockBank[i].network, week, tow);
         }
     }
-    fprintf(stderr, "Grid: network=%d num=%d\n",
-            clas->grid[0].network, clas->grid[0].num);
-    fprintf(stderr, "Read: %ld bytes, NAV: %d, L6D: %d, PVT: %d\n",
-            total_bytes, nav_count, l6d_count, pvt_count);
-    fprintf(stderr, "CSSR decoded: %d (ST1=%d ST2=%d ST3=%d ST4=%d ST5=%d ST7=%d ST11=%d ST12=%d)\n",
-            dbg_cssr_decode, dbg_subtype[1], dbg_subtype[2], dbg_subtype[3],
-            dbg_subtype[4], dbg_subtype[5], dbg_subtype[7], dbg_subtype[11], dbg_subtype[12]);
+    fprintf(stderr, "Grid: network=%d num=%d\n", clas->grid[0].network, clas->grid[0].num);
+    fprintf(stderr, "Read: %ld bytes, NAV: %d, L6D: %d, PVT: %d\n", total_bytes, nav_count, l6d_count, pvt_count);
+    fprintf(stderr, "CSSR decoded: %d (ST1=%d ST2=%d ST3=%d ST4=%d ST5=%d ST7=%d ST11=%d ST12=%d)\n", dbg_cssr_decode,
+            dbg_subtype[1], dbg_subtype[2], dbg_subtype[3], dbg_subtype[4], dbg_subtype[5], dbg_subtype[7],
+            dbg_subtype[11], dbg_subtype[12]);
     /* L6D satellite breakdown */
     fprintf(stderr, "L6D by PRN: ");
     for (i = 0; i <= MAXSAT; i++) {
@@ -1916,11 +1880,9 @@ next:
         fprintf(stderr, "%d", sprn);
     }
     fprintf(stderr, ")\n");
-    fprintf(stderr, "Skipped: nopos=%d notime=%d nogeom=%d noosr=%d\n",
-            dbg_nopos, dbg_notime, dbg_nogeom, dbg_noosr);
+    fprintf(stderr, "Skipped: nopos=%d notime=%d nogeom=%d noosr=%d\n", dbg_nopos, dbg_notime, dbg_nogeom, dbg_noosr);
     fprintf(stderr, "Nav: n=%d ng=%d nmax=%d\n", nav->n, nav->ng, nav->nmax);
-    fprintf(stderr, "Total: %d epochs, %d satellite-observations\n",
-            epoch_count, osr_count);
+    fprintf(stderr, "Total: %d epochs, %d satellite-observations\n", epoch_count, osr_count);
 
 cleanup:
     /* close streams */
@@ -1931,9 +1893,18 @@ cleanup:
 
     /* free resources */
     rtkfree(&rtk);
-    if (rtcm) { free_rtcm(rtcm); free(rtcm); }
-    if (nav) { freenav(nav, 0xFF); free(nav); }
-    if (clas) { clas_ctx_free(clas); free(clas); }
+    if (rtcm) {
+        free_rtcm(rtcm);
+        free(rtcm);
+    }
+    if (nav) {
+        freenav(nav, 0xFF);
+        free(nav);
+    }
+    if (clas) {
+        clas_ctx_free(clas);
+        free(clas);
+    }
     if (raw_sbf) free_raw(raw_sbf);
     free(raw_sbf);
     free(obsdata);

@@ -139,5 +139,5 @@ if __name__ == "__main__":
         print(
             f"{c['id']:18s}  {t0.strftime('%Y-%m-%d %H:%M')}"
             f"–{t1.strftime('%H:%M')} UTC  {dur:.0f} min  "
-            f"sessions={[f'{y}-{d:03d}{s}' for y,d,s in sess]}"
+            f"sessions={[f'{y}-{d:03d}{s}' for y, d, s in sess]}"
         )

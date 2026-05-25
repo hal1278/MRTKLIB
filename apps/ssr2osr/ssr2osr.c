@@ -36,13 +36,8 @@
 
 /* long-option aliases */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--config", "-k"},
-    {"--output", "-o"},
-    {"--start", "-ts"},
-    {"--end", "-te"},
-    {"--interval", "-ti"},
-    {"--trace", "-x"},
-    {NULL, NULL},
+    {"--config", "-k"},    {"--output", "-o"}, {"--start", "-ts"}, {"--end", "-te"},
+    {"--interval", "-ti"}, {"--trace", "-x"},  {NULL, NULL},
 };
 
 /* help text -----------------------------------------------------------------*/

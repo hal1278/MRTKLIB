@@ -54,18 +54,12 @@
 /* Note: -h is reserved for "fix and hold AR" in this subcommand, so we do not
  * map --help to -h. Instead, --help / -? are recognized explicitly below. */
 static const mrtk_optmap_t opt_aliases[] = {
-    {"--config", "-k"},
-    {"--output", "-o"},
-    {"--start", "-ts"},
-    {"--end", "-te"},
-    {"--interval", "-ti"},
-    {"--freq", "-f"},
-    {"--trace", "-x"},
-    {NULL, NULL},
+    {"--config", "-k"},    {"--output", "-o"}, {"--start", "-ts"}, {"--end", "-te"},
+    {"--interval", "-ti"}, {"--freq", "-f"},   {"--trace", "-x"},  {NULL, NULL},
 };
 
 /* help text -----------------------------------------------------------------*/
-static const char *help_lines[] = {
+static const char* help_lines[] = {
     "mrtk post: post-processing positioning from RINEX OBS/NAV (rnx2rtkp)",
     "",
     "Usage: mrtk post [OPTIONS] FILE [FILE...]",
@@ -133,8 +127,7 @@ static void printhelp(void) {
 }
 /* print version -------------------------------------------------------------*/
 static void printver(void) {
-    fprintf(stderr, "%s(%s ver.%s git %s)\n", PROGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING,
-            mrtklib_git_hash_str);
+    fprintf(stderr, "%s(%s ver.%s git %s)\n", PROGNAME, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
     exit(0);
 }
 /* rnx2rtkp main -------------------------------------------------------------*/

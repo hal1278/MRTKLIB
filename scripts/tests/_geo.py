@@ -15,9 +15,9 @@ import numpy as np
 # ---------------------------------------------------------------------------
 # WGS84 / GRS80 constants (numerically identical for both datums)
 # ---------------------------------------------------------------------------
-_A = 6_378_137.0            # semi-major axis [m]
+_A = 6_378_137.0  # semi-major axis [m]
 _F = 1.0 / 298.257_223_563  # flattening
-_E2 = _F * (2.0 - _F)       # first eccentricity squared
+_E2 = _F * (2.0 - _F)  # first eccentricity squared
 
 
 def blh2xyz(lat_deg: float, lon_deg: float, h: float) -> np.ndarray:

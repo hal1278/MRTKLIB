@@ -105,23 +105,15 @@ def generate_c_source(
     with open(output_path, "w") as f:
         f.write(f"#define DLON   {dlon:.2f}                 /* longitude increment (deg) */ \n")
         f.write(f"#define DLAT   {dlat:.2f}                 /* latitude increment (deg) */ \n")
-        f.write(
-            "static const double range[4];       "
-            "/* geoid area range {W,E,S,N} (deg) */\n"
-        )
-        f.write(
-            f"static const float geoid[{nj}][{ni}]; "
-            f"/* geoid heights (m) (lon x lat) */\n"
-        )
+        f.write("static const double range[4];       /* geoid area range {W,E,S,N} (deg) */\n")
+        f.write(f"static const float geoid[{nj}][{ni}]; /* geoid heights (m) (lon x lat) */\n")
         f.write("\n\n")
         f.write(
-            "/*----------------------------------------------"
-            "--------------------------------\n"
+            "/*------------------------------------------------------------------------------\n"
         )
         f.write(f"* geoid heights (derived from {source_filename})\n")
         f.write(
-            "*----------------------------------------------"
-            "-------------------------------*/\n"
+            "*-----------------------------------------------------------------------------*/\n"
         )
         f.write(
             f"static const double range[]="

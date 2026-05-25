@@ -174,13 +174,13 @@ typedef struct {
 
 static obsdef_t obsdef_GPS[MAXFREQ] = {
     /* freq-index:freq */
-    {1, FREQ1},  /* 0:L1 (MRTK_BAND_GPS_L1) */
-    {2, FREQ2},  /* 1:L2 (MRTK_BAND_GPS_L2) */
-    {5, FREQ5},  /* 2:L5 (MRTK_BAND_GPS_L5) */
-    {0, 0.0},    /* 3 */
-    {0, 0.0},    /* 4 */
-    {0, 0.0},    /* 5 */
-    {0, 0.0},    /* 6 */
+    {1, FREQ1}, /* 0:L1 (MRTK_BAND_GPS_L1) */
+    {2, FREQ2}, /* 1:L2 (MRTK_BAND_GPS_L2) */
+    {5, FREQ5}, /* 2:L5 (MRTK_BAND_GPS_L5) */
+    {0, 0.0},   /* 3 */
+    {0, 0.0},   /* 4 */
+    {0, 0.0},   /* 5 */
+    {0, 0.0},   /* 6 */
 };
 static obsdef_t obsdef_GLO[MAXFREQ] = {
     /* freq-index:freq */

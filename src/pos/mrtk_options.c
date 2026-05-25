@@ -617,9 +617,7 @@ static void buff2sysopts(void) {
                 mrtk_sigcfg_to_obsdef(prcopt_.sigcfg);
                 trace(NULL, 3, "buff2sysopts: signals configured (%d signals, nf=%d)\n", nsig, nf);
             } else {
-                trace(NULL, 1,
-                      "buff2sysopts: nf=%d exceeds NFREQ=%d for signals '%s'\n", nf, NFREQ,
-                      signals_);
+                trace(NULL, 1, "buff2sysopts: nf=%d exceeds NFREQ=%d for signals '%s'\n", nf, NFREQ, signals_);
             }
         } else {
             trace(NULL, 1, "buff2sysopts: invalid signals string '%s'\n", signals_);

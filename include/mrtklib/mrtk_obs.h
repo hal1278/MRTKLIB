@@ -191,18 +191,18 @@ void freeobs(obs_t* obs);
  * @brief Signal specification: physical band + optional preferred code.
  */
 typedef struct {
-    mrtk_band_t band;          /* physical frequency band */
-    uint8_t preferred_code;    /* preferred obs code (CODE_???, 0=auto) */
+    mrtk_band_t band;       /* physical frequency band */
+    uint8_t preferred_code; /* preferred obs code (CODE_???, 0=auto) */
 } mrtk_signal_t;
 
 /**
  * @brief Per-constellation signal configuration.
  */
 #define MRTK_MAXSIG_PER_SYS 7 /* max signals per constellation */
-#define MRTK_NSYS 7            /* number of constellations */
+#define MRTK_NSYS 7           /* number of constellations */
 
 typedef struct {
-    int nsig;                                /* number of configured signals */
+    int nsig;                               /* number of configured signals */
     mrtk_signal_t sig[MRTK_MAXSIG_PER_SYS]; /* configured signals */
 } mrtk_sigcfg_t;
 
@@ -220,8 +220,8 @@ typedef struct {
  * Remaining slots are zero-terminated (0 = no more codes).
  */
 typedef struct {
-    mrtk_band_t band;                       /* physical frequency band */
-    uint8_t codes[MRTK_MAX_SIG_PRIORITY];   /* CODE_* in priority order, 0=end */
+    mrtk_band_t band;                     /* physical frequency band */
+    uint8_t codes[MRTK_MAX_SIG_PRIORITY]; /* CODE_* in priority order, 0=end */
 } mrtk_sig_priority_t;
 
 /**

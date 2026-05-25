@@ -360,11 +360,11 @@ def plot_results(m: dict, title: str = "", output_path: str = "ppc_compare.png")
     ax1.axhline(0, color="k", linewidth=0.4)
     ax1.set_ylabel("Position error [cm]")
     ax1.set_title(
-        f"{title}  2D RMS {m['rms_2d_all']*100:.2f} cm  |  "
+        f"{title}  2D RMS {m['rms_2d_all'] * 100:.2f} cm  |  "
         f"Fix {m['fix_rate']:.1f}%  |  "
-        f"2D RMS(fix) {m['rms_2d_fix']*100:.2f} cm"
+        f"2D RMS(fix) {m['rms_2d_fix'] * 100:.2f} cm"
         if not math.isnan(m["rms_2d_fix"])
-        else f"{title}  2D RMS {m['rms_2d_all']*100:.2f} cm  |  No fix"
+        else f"{title}  2D RMS {m['rms_2d_all'] * 100:.2f} cm  |  No fix"
     )
     ax1.legend(loc="upper right")
     ax1.grid(True, alpha=0.3)
@@ -395,16 +395,16 @@ def main() -> int:
     p = argparse.ArgumentParser(
         description="Compare rnx2rtkp NMEA output against PPC-Dataset reference.csv"
     )
-    p.add_argument("--ref", required=True, metavar="CSV",
-                   help="PPC-Dataset reference.csv")
-    p.add_argument("result", metavar="NMEA",
-                   help="rnx2rtkp NMEA output file")
-    p.add_argument("--skip-epochs", type=int, default=0,
-                   help="Initial epochs to skip (convergence exclusion, default: 0)")
-    p.add_argument("--plot", action="store_true",
-                   help="Generate ENU time-series PNG")
-    p.add_argument("--plot-out", default="",
-                   help="Output path for plot (default: <result>.png)")
+    p.add_argument("--ref", required=True, metavar="CSV", help="PPC-Dataset reference.csv")
+    p.add_argument("result", metavar="NMEA", help="rnx2rtkp NMEA output file")
+    p.add_argument(
+        "--skip-epochs",
+        type=int,
+        default=0,
+        help="Initial epochs to skip (convergence exclusion, default: 0)",
+    )
+    p.add_argument("--plot", action="store_true", help="Generate ENU time-series PNG")
+    p.add_argument("--plot-out", default="", help="Output path for plot (default: <result>.png)")
     args = p.parse_args()
 
     if not os.path.isfile(args.ref):
@@ -442,9 +442,9 @@ def main() -> int:
     print(f"Fix epochs     : {m['n_fix']}  ({m['fix_rate']:.1f}%)")
     print()
     print("  ENU RMS (all epochs):")
-    print(f"    East   : {m['rms_e']*100:8.3f} cm")
-    print(f"    North  : {m['rms_n']*100:8.3f} cm")
-    print(f"    Up     : {m['rms_u']*100:8.3f} cm")
+    print(f"    East   : {m['rms_e'] * 100:8.3f} cm")
+    print(f"    North  : {m['rms_n'] * 100:8.3f} cm")
+    print(f"    Up     : {m['rms_u'] * 100:8.3f} cm")
     print()
     print("  2D horizontal (all epochs):")
     print(f"    RMS    : {_fmt(m['rms_2d_all'], 'm')}")

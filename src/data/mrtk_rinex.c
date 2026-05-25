@@ -1320,13 +1320,11 @@ static int readrnxobs(FILE* fp, gtime_t ts, gtime_t te, double tint, const char*
     return stat;
 }
 /* decode GPS/QZSS CNAV/CNV2 ephemeris --------------------------------------*/
-static int decode_eph_cnav(int ver, int sat, gtime_t toc, const double* data, int ndata,
-                           int v4type, eph_t* eph) {
+static int decode_eph_cnav(int ver, int sat, gtime_t toc, const double* data, int ndata, int v4type, eph_t* eph) {
     eph_t eph0 = {0};
     int sys;
 
-    trace(NULL, 4, "decode_eph_cnav: ver=%.2f sat=%2d v4type=%d ndata=%d\n", ver / 100.0, sat,
-          v4type, ndata);
+    trace(NULL, 4, "decode_eph_cnav: ver=%.2f sat=%2d v4type=%d ndata=%d\n", ver / 100.0, sat, v4type, ndata);
 
     sys = satsys(sat, NULL);
 
@@ -1369,7 +1367,7 @@ static int decode_eph_cnav(int ver, int sat, gtime_t toc, const double* data, in
     /* orbit 6: URAI_ED, SV health, TGD, URAI_NED2 */
     eph->sva = (int)data[23]; /* URAI_ED (already an index) */
     eph->svh = (int)data[24]; /* SV health */
-    eph->tgd[0] = data[25];  /* TGD */
+    eph->tgd[0] = data[25];   /* TGD */
 
     /* orbit 7: ISC corrections */
     eph->tgd[1] = data[27]; /* ISC_L1CA */
@@ -1381,13 +1379,13 @@ static int decode_eph_cnav(int ver, int sat, gtime_t toc, const double* data, in
         /* CNAV: 8 orbits */
         eph->ttr = adjweek(gpst2time((int)data[32], data[31]), toc);
         eph->week = (int)data[32]; /* wn_op */
-        eph->type = 1;            /* CNAV */
+        eph->type = 1;             /* CNAV */
     } else {
         /* CNV2: 9 orbits */
         eph->tgd[5] = data[31]; /* ISC_L1Cd */
         eph->ttr = adjweek(gpst2time((int)data[36], data[35]), toc);
         eph->week = (int)data[36]; /* wn_op */
-        eph->type = 2;            /* CNV2 */
+        eph->type = 2;             /* CNV2 */
     }
     eph->toe = adjweek(gpst2time(eph->week, eph->toes), toc);
 
@@ -1400,13 +1398,11 @@ static int decode_eph_cnav(int ver, int sat, gtime_t toc, const double* data, in
     return 1;
 }
 /* decode BDS CNAV-1/2/3 ephemeris ------------------------------------------*/
-static int decode_eph_bds_cnav(int ver, int sat, gtime_t toc, const double* data, int ndata,
-                               int v4type, eph_t* eph) {
+static int decode_eph_bds_cnav(int ver, int sat, gtime_t toc, const double* data, int ndata, int v4type, eph_t* eph) {
     eph_t eph0 = {0};
     int sys, prn;
 
-    trace(NULL, 4, "decode_eph_bds_cnav: ver=%.2f sat=%2d v4type=%d ndata=%d\n", ver / 100.0, sat,
-          v4type, ndata);
+    trace(NULL, 4, "decode_eph_bds_cnav: ver=%.2f sat=%2d v4type=%d ndata=%d\n", ver / 100.0, sat, v4type, ndata);
 
     sys = satsys(sat, &prn);
 
@@ -1456,8 +1452,8 @@ static int decode_eph_bds_cnav(int ver, int sat, gtime_t toc, const double* data
              * orbit 6: SISAI_oe, SISAI_ocb, SISAI_oc1, SISAI_oc2
              * orbit 7: SISMAI, Health, IntFlags, TGD_B2bI
              * orbit 8: t_tm */
-            eph->sva = (int)data[27];  /* SISMAI (index) */
-            eph->svh = (int)data[28];  /* Health */
+            eph->sva = (int)data[27]; /* SISMAI (index) */
+            eph->svh = (int)data[28]; /* Health */
             eph->tgd[1] = data[30];   /* TGD_B2bI (B2 group delay) */
             eph->week = bdt_week;
             eph->ttr = bdt2gpst(bdt2time(bdt_week, data[31])); /* t_tm */
@@ -1472,8 +1468,8 @@ static int decode_eph_bds_cnav(int ver, int sat, gtime_t toc, const double* data
              * orbit 7: ISC_B1Cd/spare, spare/ISC_B2ad, TGD_B1Cp, TGD_B2ap
              * orbit 8: SISMAI, Health, IntFlags, IODC
              * orbit 9: t_tm, spare(x2), IODE */
-            eph->sva = (int)data[31];  /* SISMAI (index) */
-            eph->svh = (int)data[32];  /* Health */
+            eph->sva = (int)data[31]; /* SISMAI (index) */
+            eph->svh = (int)data[32]; /* Health */
             eph->tgd[2] = data[29];   /* TGD_B1Cp */
             eph->tgd[3] = data[30];   /* TGD_B2ap */
             if (v4type == 53) {
@@ -1484,8 +1480,8 @@ static int decode_eph_bds_cnav(int ver, int sat, gtime_t toc, const double* data
             eph->iodc = (int)data[34];
             eph->week = bdt_week;
             eph->ttr = bdt2gpst(bdt2time(bdt_week, data[35])); /* t_tm */
-            eph->iode = (int)data[38]; /* IODE */
-            eph->type = (v4type == 53) ? 2 : 3; /* CNAV-1 or CNAV-2 */
+            eph->iode = (int)data[38];                         /* IODE */
+            eph->type = (v4type == 53) ? 2 : 3;                /* CNAV-1 or CNAV-2 */
         }
     }
     eph->toe = bdt2gpst(bdt2time(eph->week, eph->toes));

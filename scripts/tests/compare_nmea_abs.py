@@ -143,7 +143,7 @@ def compute_abs_metrics(true_xyz, rows, skip_epochs=0):
     n = len(en)
 
     horiz = np.sqrt(en[:, 0] ** 2 + en[:, 1] ** 2)
-    e3d   = np.sqrt(en[:, 0] ** 2 + en[:, 1] ** 2 + en[:, 2] ** 2)
+    e3d = np.sqrt(en[:, 0] ** 2 + en[:, 1] ** 2 + en[:, 2] ** 2)
 
     return {
         "n": n,
@@ -152,20 +152,20 @@ def compute_abs_metrics(true_xyz, rows, skip_epochs=0):
         "true_lat": true_lat,
         "true_lon": true_lon,
         # Horizontal (2D)
-        "mean_2d":  float(np.mean(horiz)),
-        "rms_2d":   float(np.sqrt(np.mean(horiz ** 2))),
-        "p68_2d":   float(np.percentile(horiz, 68)),
-        "p95_2d":   float(np.percentile(horiz, 95)),
-        "max_2d":   float(np.max(horiz)),
-        "rms_e":    float(np.sqrt(np.mean(en[:, 0] ** 2))),
-        "rms_n":    float(np.sqrt(np.mean(en[:, 1] ** 2))),
+        "mean_2d": float(np.mean(horiz)),
+        "rms_2d": float(np.sqrt(np.mean(horiz**2))),
+        "p68_2d": float(np.percentile(horiz, 68)),
+        "p95_2d": float(np.percentile(horiz, 95)),
+        "max_2d": float(np.max(horiz)),
+        "rms_e": float(np.sqrt(np.mean(en[:, 0] ** 2))),
+        "rms_n": float(np.sqrt(np.mean(en[:, 1] ** 2))),
         # 3D (valid when geoid separation is present in GGA)
-        "mean_3d":  float(np.mean(e3d)),
-        "rms_3d":   float(np.sqrt(np.mean(e3d ** 2))),
-        "p68_3d":   float(np.percentile(e3d, 68)),
-        "p95_3d":   float(np.percentile(e3d, 95)),
-        "max_3d":   float(np.max(e3d)),
-        "rms_u":    float(np.sqrt(np.mean(en[:, 2] ** 2))),
+        "mean_3d": float(np.mean(e3d)),
+        "rms_3d": float(np.sqrt(np.mean(e3d**2))),
+        "p68_3d": float(np.percentile(e3d, 68)),
+        "p95_3d": float(np.percentile(e3d, 95)),
+        "max_3d": float(np.max(e3d)),
+        "rms_u": float(np.sqrt(np.mean(en[:, 2] ** 2))),
         "fix_rate": sum(1 for q in q_list if q in (1, 4)) / n * 100.0,
     }
 
@@ -176,24 +176,24 @@ def compute_abs_metrics(true_xyz, rows, skip_epochs=0):
 def plot_results(m, ref_label, output_path="abs_nmea_compare.png"):
     """Generate ENU error time-series and Q-flag plot."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    en = m["enu_errors"] * 100      # m → cm
+    en = m["enu_errors"] * 100  # m → cm
     idx = np.arange(m["n"])
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
-    ax1.plot(idx, en[:, 0], label="East",  alpha=0.8, linewidth=0.8)
+    ax1.plot(idx, en[:, 0], label="East", alpha=0.8, linewidth=0.8)
     ax1.plot(idx, en[:, 1], label="North", alpha=0.8, linewidth=0.8)
-    ax1.plot(idx, en[:, 2], label="Up",
-             alpha=0.5, linewidth=0.8, linestyle="--")
+    ax1.plot(idx, en[:, 2], label="Up", alpha=0.5, linewidth=0.8, linestyle="--")
     ax1.axhline(0, color="k", linewidth=0.5)
     ax1.set_ylabel("Position error [cm]")
     ax1.set_title(
         f"Absolute error vs {ref_label} — "
-        f"2D RMS {m['rms_2d']*100:.2f} cm  |  "
-        f"1σ(2D) {m['p68_2d']*100:.2f} cm  |  "
-        f"95%(2D) {m['p95_2d']*100:.2f} cm"
+        f"2D RMS {m['rms_2d'] * 100:.2f} cm  |  "
+        f"1σ(2D) {m['p68_2d'] * 100:.2f} cm  |  "
+        f"95%(2D) {m['p95_2d'] * 100:.2f} cm"
     )
     ax1.legend()
     ax1.grid(True, alpha=0.3)
@@ -219,24 +219,28 @@ def main():  # noqa: D103
         description="Absolute accuracy check of NMEA GGA output vs geodetic truth"
     )
     ref = p.add_mutually_exclusive_group(required=True)
-    ref.add_argument("--sinex", metavar="FILE",
-                     help="IGS SINEX file (.SNX or .SNX.gz)")
-    ref.add_argument("--f5", metavar="FILE",
-                     help="GSI F5 daily coordinate file")
-    p.add_argument("--station", metavar="CODE",
-                   help="4-char station code (required with --sinex)")
-    p.add_argument("--date", metavar="YYYY/MM/DD",
-                   help="Evaluation date for F5 15-day window (required with --f5)")
-    p.add_argument("--epoch", metavar="YYYY/MM/DD",
-                   help="Target epoch for SINEX propagation")
-    p.add_argument("--tolerance", type=float, default=0.100,
-                   help="Tolerance for criterion A in metres (default 0.100)")
-    p.add_argument("--skip-epochs", type=int, default=0,
-                   help="Initial epochs to discard")
-    p.add_argument("--use-3d", action="store_true",
-                   help="Evaluate pass/fail on 3D error (default: 2D horizontal)")
-    p.add_argument("--plot", action="store_true",
-                   help="Generate ENU error time-series plot")
+    ref.add_argument("--sinex", metavar="FILE", help="IGS SINEX file (.SNX or .SNX.gz)")
+    ref.add_argument("--f5", metavar="FILE", help="GSI F5 daily coordinate file")
+    p.add_argument("--station", metavar="CODE", help="4-char station code (required with --sinex)")
+    p.add_argument(
+        "--date",
+        metavar="YYYY/MM/DD",
+        help="Evaluation date for F5 15-day window (required with --f5)",
+    )
+    p.add_argument("--epoch", metavar="YYYY/MM/DD", help="Target epoch for SINEX propagation")
+    p.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.100,
+        help="Tolerance for criterion A in metres (default 0.100)",
+    )
+    p.add_argument("--skip-epochs", type=int, default=0, help="Initial epochs to discard")
+    p.add_argument(
+        "--use-3d",
+        action="store_true",
+        help="Evaluate pass/fail on 3D error (default: 2D horizontal)",
+    )
+    p.add_argument("--plot", action="store_true", help="Generate ENU error time-series plot")
     p.add_argument("test", help="NMEA GGA file to evaluate")
     args = p.parse_args()
 
@@ -262,7 +266,7 @@ def main():  # noqa: D103
         ref_label = f"SINEX/{args.station.upper()}"
         print(f"Reference : {args.sinex}")
         print(f"Station   : {args.station.upper()} ({epoch_note})")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm (SINEX formal 3D σ)")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm (SINEX formal 3D σ)")
     else:
         if not args.date:
             print("FAIL: --date is required with --f5", file=sys.stderr)
@@ -277,7 +281,7 @@ def main():  # noqa: D103
         print(f"Reference : {args.f5}")
         print(f"Eval date : {args.date}  (±7-day median, {f5['n_days']} days)")
         print(f"Ref coord : {f5['lat']:.8f}°N  {f5['lon']:.8f}°E  {f5['h']:.4f} m")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm (68th-pctile of F5 daily scatter)")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm (68th-pctile of F5 daily scatter)")
 
     # ── Parse test NMEA ──────────────────────────────────────────────────────
     if not os.path.isfile(args.test):
@@ -286,7 +290,7 @@ def main():  # noqa: D103
 
     metric_label = "3D" if args.use_3d else "2D horizontal"
     print(f"Test      : {args.test}")
-    print(f"Tolerance : {args.tolerance*100:.1f} cm  (evaluated on {metric_label} error)")
+    print(f"Tolerance : {args.tolerance * 100:.1f} cm  (evaluated on {metric_label} error)")
     if args.skip_epochs:
         print(f"Skip      : {args.skip_epochs} initial epochs")
     print()
@@ -297,12 +301,18 @@ def main():  # noqa: D103
         return 1
     if not geoid_ok:
         if args.use_3d:
-            print("FAIL: --use-3d requested but GGA field[11] (geoid separation) is absent",
-                  file=sys.stderr)
-            print("      or zero in all epochs. Ellipsoidal height cannot be recovered.",
-                  file=sys.stderr)
-            print("      Re-run without --use-3d to evaluate 2D horizontal accuracy only.",
-                  file=sys.stderr)
+            print(
+                "FAIL: --use-3d requested but GGA field[11] (geoid separation) is absent",
+                file=sys.stderr,
+            )
+            print(
+                "      or zero in all epochs. Ellipsoidal height cannot be recovered.",
+                file=sys.stderr,
+            )
+            print(
+                "      Re-run without --use-3d to evaluate 2D horizontal accuracy only.",
+                file=sys.stderr,
+            )
             return 1
         print("WARNING: GGA field[11] (geoid separation) absent or zero in all epochs.")
         print("         Up errors may be unreliable; 2D horizontal pass/fail is used.")
@@ -318,24 +328,24 @@ def main():  # noqa: D103
     print(f"Epochs    : {m['n']}")
     print()
     print("  ENU RMS:")
-    print(f"    East   : {m['rms_e']*100:8.3f} cm")
-    print(f"    North  : {m['rms_n']*100:8.3f} cm")
-    print(f"    Up     : {m['rms_u']*100:8.3f} cm")
+    print(f"    East   : {m['rms_e'] * 100:8.3f} cm")
+    print(f"    North  : {m['rms_n'] * 100:8.3f} cm")
+    print(f"    Up     : {m['rms_u'] * 100:8.3f} cm")
     print()
     print("  2D horizontal error distribution:")
-    print(f"    Bias   : {m['mean_2d']*100:8.3f} cm  (mean)")
-    print(f"    RMS    : {m['rms_2d']*100:8.3f} cm")
-    print(f"    1σ     : {m['p68_2d']*100:8.3f} cm  (68th percentile)")
-    print(f"    95%    : {m['p95_2d']*100:8.3f} cm  (95th percentile)")
-    print(f"    Max    : {m['max_2d']*100:8.3f} cm")
+    print(f"    Bias   : {m['mean_2d'] * 100:8.3f} cm  (mean)")
+    print(f"    RMS    : {m['rms_2d'] * 100:8.3f} cm")
+    print(f"    1σ     : {m['p68_2d'] * 100:8.3f} cm  (68th percentile)")
+    print(f"    95%    : {m['p95_2d'] * 100:8.3f} cm  (95th percentile)")
+    print(f"    Max    : {m['max_2d'] * 100:8.3f} cm")
     print()
     print("  3D error distribution:")
-    print(f"    RMS    : {m['rms_3d']*100:8.3f} cm")
-    print(f"    1σ     : {m['p68_3d']*100:8.3f} cm")
-    print(f"    95%    : {m['p95_3d']*100:8.3f} cm")
+    print(f"    RMS    : {m['rms_3d'] * 100:8.3f} cm")
+    print(f"    1σ     : {m['p68_3d'] * 100:8.3f} cm")
+    print(f"    95%    : {m['p95_3d'] * 100:8.3f} cm")
     print()
     print(f"  Fix rate : {m['fix_rate']:.2f}%  (GGA quality = 1 or 4)")
-    print(f"  Ref prec : {ref_precision*100:.3f} cm  ({ref_label})")
+    print(f"  Ref prec : {ref_precision * 100:.3f} cm  ({ref_label})")
     print()
 
     if args.plot:

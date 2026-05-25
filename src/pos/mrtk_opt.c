@@ -107,33 +107,56 @@ const solopt_t solopt_default = {
 /* human-readable names for resolve_correction() error messages -------------*/
 static const char* corr_name(int corr) {
     switch (corr) {
-        case CORR_AUTO:       return "auto";
-        case CORR_NONE:       return "none";
-        case CORR_IGS:        return "igs";
-        case CORR_IGS_RTS:    return "igs-rts";
-        case CORR_QZS_MADOCA: return "qzs-madoca";
-        case CORR_GAL_HAS:    return "gal-has";
-        case CORR_BDS_B2B:    return "bds-b2b";
-        case CORR_QZS_CLAS:   return "qzs-clas";
-        default:              return "?";
+        case CORR_AUTO:
+            return "auto";
+        case CORR_NONE:
+            return "none";
+        case CORR_IGS:
+            return "igs";
+        case CORR_IGS_RTS:
+            return "igs-rts";
+        case CORR_QZS_MADOCA:
+            return "qzs-madoca";
+        case CORR_GAL_HAS:
+            return "gal-has";
+        case CORR_BDS_B2B:
+            return "bds-b2b";
+        case CORR_QZS_CLAS:
+            return "qzs-clas";
+        default:
+            return "?";
     }
 }
 static const char* mode_name(int mode) {
     switch (mode) {
-        case PMODE_SINGLE:      return "single";
-        case PMODE_DGPS:        return "dgps";
-        case PMODE_KINEMA:      return "kinematic";
-        case PMODE_STATIC:      return "static";
-        case PMODE_MOVEB:       return "movingbase";
-        case PMODE_FIXED:       return "fixed";
-        case PMODE_PPP_KINEMA:  return "ppp-kine";
-        case PMODE_PPP_STATIC:  return "ppp-static";
-        case PMODE_PPP_FIXED:   return "ppp-fixed";
-        case PMODE_PPP_RTK:     return "ppp-rtk";
-        case PMODE_SSR2OSR:     return "ssr2osr";
-        case PMODE_SSR2OSR_FIXED:return "ssr2osr-fixed";
-        case PMODE_VRS_RTK:     return "vrs-rtk";
-        default:                return "?";
+        case PMODE_SINGLE:
+            return "single";
+        case PMODE_DGPS:
+            return "dgps";
+        case PMODE_KINEMA:
+            return "kinematic";
+        case PMODE_STATIC:
+            return "static";
+        case PMODE_MOVEB:
+            return "movingbase";
+        case PMODE_FIXED:
+            return "fixed";
+        case PMODE_PPP_KINEMA:
+            return "ppp-kine";
+        case PMODE_PPP_STATIC:
+            return "ppp-static";
+        case PMODE_PPP_FIXED:
+            return "ppp-fixed";
+        case PMODE_PPP_RTK:
+            return "ppp-rtk";
+        case PMODE_SSR2OSR:
+            return "ssr2osr";
+        case PMODE_SSR2OSR_FIXED:
+            return "ssr2osr-fixed";
+        case PMODE_VRS_RTK:
+            return "vrs-rtk";
+        default:
+            return "?";
     }
 }
 extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
@@ -169,8 +192,7 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
         case PMODE_PPP_KINEMA:
         case PMODE_PPP_STATIC:
         case PMODE_PPP_FIXED:
-            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA &&
-                opt->correction != CORR_IGS_RTS) {
+            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA && opt->correction != CORR_IGS_RTS) {
                 if (msg) {
                     snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use igs, igs-rts or qzs-madoca)",
                              corr_name(opt->correction), mode_name(m));
@@ -206,7 +228,7 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
             if (opt->correction != CORR_QZS_CLAS) {
                 if (msg) {
                     snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use qzs-clas)", corr_name(opt->correction),
-                         mode_name(m));
+                             mode_name(m));
                 }
                 return 0;
             }
@@ -216,7 +238,7 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
             if (opt->correction != CORR_NONE) {
                 if (msg) {
                     snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use none)", corr_name(opt->correction),
-                         mode_name(m));
+                             mode_name(m));
                 }
                 return 0;
             }

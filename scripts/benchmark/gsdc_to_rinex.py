@@ -230,7 +230,9 @@ def _approx_xyz(csv_path: str) -> tuple[float, float, float]:
                 zs.append(z)
     if not xs:
         return (0.0, 0.0, 0.0)
-    xs.sort(); ys.sort(); zs.sort()
+    xs.sort()
+    ys.sort()
+    zs.sort()
     m = len(xs) // 2
     return (xs[m], ys[m], zs[m])
 
@@ -286,8 +288,7 @@ def write_rinex(
     hdr(f"{interval:10.3f}", "INTERVAL")
     sec = t0.second + t0.microsecond / 1e6
     hdr(
-        f"{t0.year:6d}{t0.month:6d}{t0.day:6d}{t0.hour:6d}{t0.minute:6d}"
-        f"{sec:13.7f}{'':5}GPS",
+        f"{t0.year:6d}{t0.month:6d}{t0.day:6d}{t0.hour:6d}{t0.minute:6d}{sec:13.7f}{'':5}GPS",
         "TIME OF FIRST OBS",
     )
     hdr("", "END OF HEADER")
@@ -477,16 +478,17 @@ def _lsq(H: list[list[float]], r: list[float], w: list[float] | None = None) -> 
 # ---------------------------------------------------------------------------
 def main() -> int:
     """Entry point for the GSDC device_gnss.csv -> RINEX converter."""
-    p = argparse.ArgumentParser(
-        description="Convert a GSDC-2023 device_gnss.csv to RINEX 3.04 OBS"
-    )
+    p = argparse.ArgumentParser(description="Convert a GSDC-2023 device_gnss.csv to RINEX 3.04 OBS")
     p.add_argument("csv", help="path to device_gnss.csv")
     p.add_argument("-o", "--out", default="", help="output RINEX OBS path")
     p.add_argument("--marker", default="", help="MARKER NAME (default: derived from path)")
     p.add_argument("--leap", type=int, default=18, help="GPS-UTC leap seconds (default 18)")
-    p.add_argument("--self-check", action="store_true",
-                   help="validate CSV reading via an independent WLS vs the "
-                        "WlsPosition columns (writes no output)")
+    p.add_argument(
+        "--self-check",
+        action="store_true",
+        help="validate CSV reading via an independent WLS vs the "
+        "WlsPosition columns (writes no output)",
+    )
     args = p.parse_args()
 
     if not Path(args.csv).is_file():

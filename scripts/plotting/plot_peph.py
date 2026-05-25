@@ -29,9 +29,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def load_peph_data(
-    filepath: str, mode: str
-) -> tuple[str, np.ndarray, np.ndarray, str]:
+def load_peph_data(filepath: str, mode: str) -> tuple[str, np.ndarray, np.ndarray, str]:
     """Load precise ephemeris error data from a test output file.
 
     Args:
@@ -74,9 +72,7 @@ def load_peph_data(
         dpos = data[:, 2:6]
         title_desc = "interpolation error" if mode == "interp" else "brdc-prec ephemeris"
     else:
-        raise ValueError(
-            f"Expected at least 6 columns in {filepath}, got {ncols}"
-        )
+        raise ValueError(f"Expected at least 6 columns in {filepath}, got {ncols}")
 
     return sat_label, time_h, dpos, title_desc
 

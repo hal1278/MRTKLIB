@@ -141,7 +141,7 @@ def gen_tag(bnx_path):
     tick_f = 0
 
     print(f"  Base time_time: {time_time}")
-    print(f"  Duration: {duration:.1f}s ({duration/60:.1f} min)")
+    print(f"  Duration: {duration:.1f}s ({duration / 60:.1f} min)")
 
     # Build tag file
     tag_path = bnx_path + ".tag"

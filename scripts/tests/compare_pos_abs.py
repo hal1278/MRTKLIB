@@ -132,8 +132,8 @@ def parse_sinex(filepath, station_code):
             raise ValueError(f"Station '{code}' not found in SINEX (missing {req})")
 
     x, sx, epoch = estimates["STAX"]
-    y, sy, _     = estimates["STAY"]
-    z, sz, _     = estimates["STAZ"]
+    y, sy, _ = estimates["STAY"]
+    z, sz, _ = estimates["STAZ"]
     sigma_3d = math.sqrt(sx * sx + sy * sy + sz * sz)
     return {
         "xyz": np.array([x, y, z]),
@@ -217,8 +217,7 @@ def parse_f5(filepath, eval_date_str):
 
     if len(xs) < 7:
         raise ValueError(
-            f"GSI F5: only {len(xs)} day(s) in ±7-day window around "
-            f"{eval_date_str} — need ≥7"
+            f"GSI F5: only {len(xs)} day(s) in ±7-day window around {eval_date_str} — need ≥7"
         )
 
     xs, ys, zs = np.array(xs), np.array(ys), np.array(zs)
@@ -235,7 +234,9 @@ def parse_f5(filepath, eval_date_str):
 
     return {
         "xyz": median_xyz,
-        "lat": lat, "lon": lon, "h": h,
+        "lat": lat,
+        "lon": lon,
+        "h": h,
         "sigma_3d": sigma_3d,
         "n_days": len(xs),
     }
@@ -260,8 +261,7 @@ def parse_pos(filepath):
             if len(parts) < 6:
                 continue
             key = parts[0] + " " + parts[1]
-            data[key] = (float(parts[2]), float(parts[3]),
-                         float(parts[4]), int(parts[5]))
+            data[key] = (float(parts[2]), float(parts[3]), float(parts[4]), int(parts[5]))
     return data
 
 
@@ -307,21 +307,21 @@ def compute_abs_metrics(true_xyz, test_data, skip_epochs=0):
         "true_lat": true_lat,
         "true_lon": true_lon,
         # ENU components
-        "rms_e":    float(np.sqrt(np.mean(en[:, 0] ** 2))),
-        "rms_n":    float(np.sqrt(np.mean(en[:, 1] ** 2))),
-        "rms_u":    float(np.sqrt(np.mean(en[:, 2] ** 2))),
+        "rms_e": float(np.sqrt(np.mean(en[:, 0] ** 2))),
+        "rms_n": float(np.sqrt(np.mean(en[:, 1] ** 2))),
+        "rms_u": float(np.sqrt(np.mean(en[:, 2] ** 2))),
         # 2D horizontal
-        "mean_2d":  float(np.mean(horiz)),
-        "rms_2d":   float(np.sqrt(np.mean(horiz ** 2))),
-        "p68_2d":   float(np.percentile(horiz, 68)),
-        "p95_2d":   float(np.percentile(horiz, 95)),
-        "max_2d":   float(np.max(horiz)),
+        "mean_2d": float(np.mean(horiz)),
+        "rms_2d": float(np.sqrt(np.mean(horiz**2))),
+        "p68_2d": float(np.percentile(horiz, 68)),
+        "p95_2d": float(np.percentile(horiz, 95)),
+        "max_2d": float(np.max(horiz)),
         # 3D
-        "mean_3d":  float(np.mean(e3)),
-        "rms_3d":   float(np.sqrt(np.mean(e3 ** 2))),
-        "p68_3d":   float(np.percentile(e3, 68)),
-        "p95_3d":   float(np.percentile(e3, 95)),
-        "max_3d":   float(np.max(e3)),
+        "mean_3d": float(np.mean(e3)),
+        "rms_3d": float(np.sqrt(np.mean(e3**2))),
+        "p68_3d": float(np.percentile(e3, 68)),
+        "p95_3d": float(np.percentile(e3, 95)),
+        "max_3d": float(np.max(e3)),
         "fix_rate": sum(1 for q in q_list if q in (1, 6)) / n * 100.0,
         # integer-fixed only (Q=1 = narrow-lane/RTK fix); excludes Q=6 PPP float.
         # Used by --min-fix-rate to assert PPP-AR actually resolves ambiguities.
@@ -335,10 +335,11 @@ def compute_abs_metrics(true_xyz, test_data, skip_epochs=0):
 def plot_results(m, ref_label, output_path="abs_compare.png"):
     """Generate ENU error time-series and Q-flag plot."""
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    en = m["enu_errors"] * 100      # m → cm
+    en = m["enu_errors"] * 100  # m → cm
     idx = np.arange(m["n"])
 
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True)
@@ -348,9 +349,9 @@ def plot_results(m, ref_label, output_path="abs_compare.png"):
     ax1.set_ylabel("Position error [cm]")
     ax1.set_title(
         f"Absolute error vs {ref_label} — "
-        f"RMS {m['rms_3d']*100:.2f} cm  |  "
-        f"1σ {m['p68_3d']*100:.2f} cm  |  "
-        f"95% {m['p95_3d']*100:.2f} cm"
+        f"RMS {m['rms_3d'] * 100:.2f} cm  |  "
+        f"1σ {m['p68_3d'] * 100:.2f} cm  |  "
+        f"95% {m['p95_3d'] * 100:.2f} cm"
     )
     ax1.legend()
     ax1.grid(True, alpha=0.3)
@@ -395,15 +396,15 @@ def _criterion(label, value_m, tolerance_m, ref_precision_m):
     tag = "PASS" if ok else "FAIL"
     reasons = []
     if a:
-        reasons.append(f"< tol {tolerance_m*100:.1f} cm")
+        reasons.append(f"< tol {tolerance_m * 100:.1f} cm")
     if b:
-        reasons.append(f"< ref prec {ref_precision_m*100:.2f} cm")
+        reasons.append(f"< ref prec {ref_precision_m * 100:.2f} cm")
     if not reasons:
         reasons = [
-            f">= tol {tolerance_m*100:.1f} cm",
-            f">= ref prec {ref_precision_m*100:.2f} cm",
+            f">= tol {tolerance_m * 100:.1f} cm",
+            f">= ref prec {ref_precision_m * 100:.2f} cm",
         ]
-    print(f"{tag} [{label}]: {value_m*100:.3f} cm  ({', '.join(reasons)})")
+    print(f"{tag} [{label}]: {value_m * 100:.3f} cm  ({', '.join(reasons)})")
     return ok
 
 
@@ -412,32 +413,46 @@ def main():  # noqa: D103
         description="Absolute accuracy check of RTKLIB .pos vs geodetic truth"
     )
     ref = p.add_mutually_exclusive_group(required=True)
-    ref.add_argument("--sinex", metavar="FILE",
-                     help="IGS SINEX file (.SNX or .SNX.gz)")
-    ref.add_argument("--f5", metavar="FILE",
-                     help="GSI F5 daily coordinate file")
-    ref.add_argument("--llh", metavar="LAT,LON,H",
-                     help="Fixed reference lat/lon/h (deg, deg, m)")
-    ref.add_argument("--ecef", metavar="X,Y,Z",
-                     help="Fixed reference ECEF coordinate (m)")
-    p.add_argument("--station", metavar="CODE",
-                   help="4-char station code (required with --sinex)")
-    p.add_argument("--date", metavar="YYYY/MM/DD",
-                   help="Evaluation date for F5 15-day window (required with --f5)")
-    p.add_argument("--epoch", metavar="YYYY/MM/DD",
-                   help="Target epoch for SINEX propagation (default: SINEX ref epoch)")
-    p.add_argument("--ref-precision", type=float, default=0.0,
-                   help="Reference precision in metres for --llh/--ecef (default 0)")
-    p.add_argument("--tolerance", type=float, default=0.030,
-                   help="Tolerance for criterion A in metres (default 0.030)")
-    p.add_argument("--skip-epochs", type=int, default=0,
-                   help="Initial epochs to discard")
-    p.add_argument("--min-fix-rate", type=float, default=None,
-                   help="Require integer-fix rate (Q=1) >= this percent (PPP-AR test)")
-    p.add_argument("--use-2d", action="store_true",
-                   help="Evaluate pass/fail on 2D horizontal error (default: 3D)")
-    p.add_argument("--plot", action="store_true",
-                   help="Generate ENU error time-series plot")
+    ref.add_argument("--sinex", metavar="FILE", help="IGS SINEX file (.SNX or .SNX.gz)")
+    ref.add_argument("--f5", metavar="FILE", help="GSI F5 daily coordinate file")
+    ref.add_argument("--llh", metavar="LAT,LON,H", help="Fixed reference lat/lon/h (deg, deg, m)")
+    ref.add_argument("--ecef", metavar="X,Y,Z", help="Fixed reference ECEF coordinate (m)")
+    p.add_argument("--station", metavar="CODE", help="4-char station code (required with --sinex)")
+    p.add_argument(
+        "--date",
+        metavar="YYYY/MM/DD",
+        help="Evaluation date for F5 15-day window (required with --f5)",
+    )
+    p.add_argument(
+        "--epoch",
+        metavar="YYYY/MM/DD",
+        help="Target epoch for SINEX propagation (default: SINEX ref epoch)",
+    )
+    p.add_argument(
+        "--ref-precision",
+        type=float,
+        default=0.0,
+        help="Reference precision in metres for --llh/--ecef (default 0)",
+    )
+    p.add_argument(
+        "--tolerance",
+        type=float,
+        default=0.030,
+        help="Tolerance for criterion A in metres (default 0.030)",
+    )
+    p.add_argument("--skip-epochs", type=int, default=0, help="Initial epochs to discard")
+    p.add_argument(
+        "--min-fix-rate",
+        type=float,
+        default=None,
+        help="Require integer-fix rate (Q=1) >= this percent (PPP-AR test)",
+    )
+    p.add_argument(
+        "--use-2d",
+        action="store_true",
+        help="Evaluate pass/fail on 2D horizontal error (default: 3D)",
+    )
+    p.add_argument("--plot", action="store_true", help="Generate ENU error time-series plot")
     p.add_argument("test", help="RTKLIB .pos file to evaluate")
     args = p.parse_args()
 
@@ -466,7 +481,7 @@ def main():  # noqa: D103
 
         print(f"Reference : {args.sinex}")
         print(f"Station   : {args.station.upper()} ({epoch_note})")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm (SINEX formal 3D σ)")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm (SINEX formal 3D σ)")
     elif args.f5:
         if not args.date:
             print("FAIL: --date is required with --f5", file=sys.stderr)
@@ -483,7 +498,7 @@ def main():  # noqa: D103
         print(f"Reference : {args.f5}")
         print(f"Eval date : {args.date}  (±7-day median, {f5['n_days']} days)")
         print(f"Ref coord : {f5['lat']:.8f}°N  {f5['lon']:.8f}°E  {f5['h']:.4f} m")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm (68th-pctile of F5 daily scatter)")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm (68th-pctile of F5 daily scatter)")
     elif args.llh:
         try:
             lat, lon, h = _parse_triplet(args.llh, "--llh")
@@ -496,7 +511,7 @@ def main():  # noqa: D103
 
         print(f"Reference : fixed LLH")
         print(f"Ref coord : {lat:.8f}°N  {lon:.8f}°E  {h:.4f} m")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm")
     else:
         try:
             x, y, z = _parse_triplet(args.ecef, "--ecef")
@@ -510,7 +525,7 @@ def main():  # noqa: D103
         lat, lon, h = xyz2blh(x, y, z)
         print(f"Reference : fixed ECEF")
         print(f"Ref coord : {lat:.8f}°N  {lon:.8f}°E  {h:.4f} m")
-        print(f"Ref prec  : {ref_precision*1000:.2f} mm")
+        print(f"Ref prec  : {ref_precision * 1000:.2f} mm")
 
     # ── Parse test .pos ──────────────────────────────────────────────────────
     if not os.path.isfile(args.test):
@@ -519,7 +534,7 @@ def main():  # noqa: D103
 
     metric_label = "2D horizontal" if args.use_2d else "3D"
     print(f"Test      : {args.test}")
-    print(f"Tolerance : {args.tolerance*100:.1f} cm  (evaluated on {metric_label} error)")
+    print(f"Tolerance : {args.tolerance * 100:.1f} cm  (evaluated on {metric_label} error)")
     if args.skip_epochs:
         print(f"Skip      : {args.skip_epochs} initial epochs")
     print()
@@ -540,27 +555,27 @@ def main():  # noqa: D103
     print(f"Epochs    : {m['n']}")
     print()
     print("  ENU RMS (absolute):")
-    print(f"    East  : {m['rms_e']*100:8.3f} cm")
-    print(f"    North : {m['rms_n']*100:8.3f} cm")
-    print(f"    Up    : {m['rms_u']*100:8.3f} cm")
+    print(f"    East  : {m['rms_e'] * 100:8.3f} cm")
+    print(f"    North : {m['rms_n'] * 100:8.3f} cm")
+    print(f"    Up    : {m['rms_u'] * 100:8.3f} cm")
     print()
     print("  2D horizontal error distribution:")
-    print(f"    Bias  : {m['mean_2d']*100:8.3f} cm  (mean)")
-    print(f"    RMS   : {m['rms_2d']*100:8.3f} cm")
-    print(f"    1σ    : {m['p68_2d']*100:8.3f} cm  (68th percentile)")
-    print(f"    95%   : {m['p95_2d']*100:8.3f} cm  (95th percentile)")
-    print(f"    Max   : {m['max_2d']*100:8.3f} cm")
+    print(f"    Bias  : {m['mean_2d'] * 100:8.3f} cm  (mean)")
+    print(f"    RMS   : {m['rms_2d'] * 100:8.3f} cm")
+    print(f"    1σ    : {m['p68_2d'] * 100:8.3f} cm  (68th percentile)")
+    print(f"    95%   : {m['p95_2d'] * 100:8.3f} cm  (95th percentile)")
+    print(f"    Max   : {m['max_2d'] * 100:8.3f} cm")
     print()
     print("  3D error distribution (vs geodetic truth):")
-    print(f"    Bias  : {m['mean_3d']*100:8.3f} cm  (mean)")
-    print(f"    RMS   : {m['rms_3d']*100:8.3f} cm")
-    print(f"    1σ    : {m['p68_3d']*100:8.3f} cm  (68th percentile)")
-    print(f"    95%   : {m['p95_3d']*100:8.3f} cm  (95th percentile)")
-    print(f"    Max   : {m['max_3d']*100:8.3f} cm")
+    print(f"    Bias  : {m['mean_3d'] * 100:8.3f} cm  (mean)")
+    print(f"    RMS   : {m['rms_3d'] * 100:8.3f} cm")
+    print(f"    1σ    : {m['p68_3d'] * 100:8.3f} cm  (68th percentile)")
+    print(f"    95%   : {m['p95_3d'] * 100:8.3f} cm  (95th percentile)")
+    print(f"    Max   : {m['max_3d'] * 100:8.3f} cm")
     print()
     print(f"  Sol rate : {m['fix_rate']:.2f}%  (Q=1/6: fixed or PPP-float)")
     print(f"  Fix rate : {m['fix_rate_int']:.2f}%  (Q=1: integer-fixed)")
-    print(f"  Ref prec : {ref_precision*100:.3f} cm  ({ref_label})")
+    print(f"  Ref prec : {ref_precision * 100:.3f} cm  ({ref_label})")
     print()
 
     if args.plot:

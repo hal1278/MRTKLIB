@@ -533,13 +533,27 @@ static void ppp_note_autosig(int sys, uint8_t code) {
     reported |= sys;
 
     switch (sys) {
-        case SYS_GPS: name = "GPS"; break;
-        case SYS_GLO: name = "GLO"; break;
-        case SYS_GAL: name = "GAL"; break;
-        case SYS_QZS: name = "QZS"; break;
-        case SYS_CMP: name = "BDS"; break;
-        case SYS_IRN: name = "IRN"; break;
-        default:      name = "???"; break;
+        case SYS_GPS:
+            name = "GPS";
+            break;
+        case SYS_GLO:
+            name = "GLO";
+            break;
+        case SYS_GAL:
+            name = "GAL";
+            break;
+        case SYS_QZS:
+            name = "QZS";
+            break;
+        case SYS_CMP:
+            name = "BDS";
+            break;
+        case SYS_IRN:
+            name = "IRN";
+            break;
+        default:
+            name = "???";
+            break;
     }
     fprintf(stderr, "note: auto signal: %s iono-free 2nd freq = L%s (nominal band absent in data)\n", name,
             code2obs(code));
@@ -667,8 +681,8 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
             }
             if (cb <= (SSR_INVALID_CBIAS + 0.005)) {
                 P[i] = 0.0;
-                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n", tstr,
-                      satid, code2obs(obs->code[i]), code2obs(ssrcode), cb);
+                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid cbias %s obscode=C%s ssrcode=C%s cbias=%7.3f\n",
+                      tstr, satid, code2obs(obs->code[i]), code2obs(ssrcode), cb);
             }
 
             if (pb != 0.0) {
@@ -685,8 +699,8 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
             }
             if (pb <= (SSR_INVALID_PBIAS + 0.00005)) {
                 L[i] = 0.0;
-                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr,
-                      satid, code2obs(obs->code[i]), code2obs(ssrcode), pb);
+                trace(NULL, tl > 0 ? 2 : 4, "corr_meas: %s invalid pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n",
+                      tstr, satid, code2obs(obs->code[i]), code2obs(ssrcode), pb);
             }
         }
     }

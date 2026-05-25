@@ -104,9 +104,7 @@ def plot_gloeph(sat_label: str, time_h: np.ndarray, dpos: np.ndarray, output: st
 
 def main() -> None:
     """Parse arguments and generate the GLONASS ephemeris error plot."""
-    parser = argparse.ArgumentParser(
-        description="Plot GLONASS ephemeris errors from test output."
-    )
+    parser = argparse.ArgumentParser(description="Plot GLONASS ephemeris errors from test output.")
     parser.add_argument(
         "input",
         nargs="?",

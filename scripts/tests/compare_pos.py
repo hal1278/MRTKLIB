@@ -9,6 +9,7 @@ Usage:
     python compare_pos.py ref.pos test.pos --tolerance 0.01
     python compare_pos.py ref.pos test.pos --tolerance 0.005 --plot
 """
+
 import argparse
 import sys
 
@@ -115,7 +116,7 @@ def compute_metrics(ref_data, test_data, skip_epochs=0):
     errors_3d = np.array(errors_3d)
 
     n = len(common_keys)
-    rms_3d = np.sqrt(np.mean(errors_3d ** 2))
+    rms_3d = np.sqrt(np.mean(errors_3d**2))
     max_3d = np.max(errors_3d)
 
     rms_e = np.sqrt(np.mean(enu_errors[:, 0] ** 2))
@@ -157,6 +158,7 @@ def plot_results(metrics, output_path="compare_result.png"):
         Output PNG file path.
     """
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -172,18 +174,16 @@ def plot_results(metrics, output_path="compare_result.png"):
     ax1.plot(epochs, enu[:, 2] * 100, label="Up", alpha=0.8, linewidth=0.8)
     ax1.set_ylabel("ENU Error [cm]")
     ax1.set_title(
-        f"ENU Error (3D RMS: {metrics['rms_3d']*100:.2f} cm, "
-        f"Max: {metrics['max_3d']*100:.2f} cm)"
+        f"ENU Error (3D RMS: {metrics['rms_3d'] * 100:.2f} cm, "
+        f"Max: {metrics['max_3d'] * 100:.2f} cm)"
     )
     ax1.legend(loc="upper right")
     ax1.grid(True, alpha=0.3)
     ax1.axhline(y=0, color="k", linewidth=0.5)
 
     # Q-flag comparison
-    ax2.scatter(epochs, metrics["ref_q"], s=8, label="Reference", alpha=0.6,
-                marker="o")
-    ax2.scatter(epochs, metrics["test_q"], s=8, label="Test", alpha=0.6,
-                marker="x")
+    ax2.scatter(epochs, metrics["ref_q"], s=8, label="Reference", alpha=0.6, marker="o")
+    ax2.scatter(epochs, metrics["test_q"], s=8, label="Test", alpha=0.6, marker="x")
     ax2.set_ylabel("Q flag")
     ax2.set_xlabel("Epoch")
     ax2.set_title(
@@ -193,8 +193,7 @@ def plot_results(metrics, output_path="compare_result.png"):
     ax2.legend(loc="upper right")
     ax2.grid(True, alpha=0.3)
     ax2.set_yticks([1, 2, 3, 4, 5, 6])
-    ax2.set_yticklabels(["1:Fix", "2:Float", "3:SBAS", "4:DGPS", "5:Single",
-                         "6:PPP"])
+    ax2.set_yticklabels(["1:Fix", "2:Float", "3:SBAS", "4:DGPS", "5:Single", "6:PPP"])
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150)
@@ -202,22 +201,23 @@ def plot_results(metrics, output_path="compare_result.png"):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Statistical comparison of RTKLIB .pos files"
-    )
+    parser = argparse.ArgumentParser(description="Statistical comparison of RTKLIB .pos files")
     parser.add_argument("ref", help="Reference .pos file path")
     parser.add_argument("test", help="Test .pos file path")
     parser.add_argument(
-        "--tolerance", type=float, default=0.005,
-        help="Maximum allowed 3D RMS error in metres (default: 0.005)"
+        "--tolerance",
+        type=float,
+        default=0.005,
+        help="Maximum allowed 3D RMS error in metres (default: 0.005)",
     )
     parser.add_argument(
-        "--skip-epochs", type=int, default=0,
-        help="Number of initial epochs to skip for convergence transient"
+        "--skip-epochs",
+        type=int,
+        default=0,
+        help="Number of initial epochs to skip for convergence transient",
     )
     parser.add_argument(
-        "--plot", action="store_true",
-        help="Generate comparison plot (compare_result.png)"
+        "--plot", action="store_true", help="Generate comparison plot (compare_result.png)"
     )
     args = parser.parse_args()
 
@@ -230,6 +230,7 @@ def main():
     print()
 
     import os
+
     if not os.path.isfile(args.ref):
         print(f"FAIL: Reference file not found: {args.ref}", file=sys.stderr)
         return 1
@@ -250,20 +251,21 @@ def main():
     # Compute metrics
     metrics = compute_metrics(ref_data, test_data, skip_epochs=args.skip_epochs)
     if metrics is None:
-        print("FAIL: No common epochs between reference and test",
-              file=sys.stderr)
+        print("FAIL: No common epochs between reference and test", file=sys.stderr)
         return 1
 
     # Report
-    print(f"Epochs    : {metrics['n_common']} common "
-          f"(ref={metrics['n_ref_total']}, test={metrics['n_test_total']})")
+    print(
+        f"Epochs    : {metrics['n_common']} common "
+        f"(ref={metrics['n_ref_total']}, test={metrics['n_test_total']})"
+    )
     print()
     print("  ENU RMS Error:")
-    print(f"    East  : {metrics['rms_e']*100:8.3f} cm")
-    print(f"    North : {metrics['rms_n']*100:8.3f} cm")
-    print(f"    Up    : {metrics['rms_u']*100:8.3f} cm")
-    print(f"    3D    : {metrics['rms_3d']*100:8.3f} cm")
-    print(f"    3D Max: {metrics['max_3d']*100:8.3f} cm")
+    print(f"    East  : {metrics['rms_e'] * 100:8.3f} cm")
+    print(f"    North : {metrics['rms_n'] * 100:8.3f} cm")
+    print(f"    Up    : {metrics['rms_u'] * 100:8.3f} cm")
+    print(f"    3D    : {metrics['rms_3d'] * 100:8.3f} cm")
+    print(f"    3D Max: {metrics['max_3d'] * 100:8.3f} cm")
     print()
     print("  Fix Rate (Q=1 or Q=6):")
     print(f"    Reference : {metrics['ref_fix_rate']:6.2f}%")
@@ -281,17 +283,14 @@ def main():
 
     # Criterion 1: 3D RMS under tolerance
     if metrics["rms_3d"] >= args.tolerance:
-        print(f"FAIL: 3D RMS ({metrics['rms_3d']:.6f} m) >= "
-              f"tolerance ({args.tolerance:.6f} m)")
+        print(f"FAIL: 3D RMS ({metrics['rms_3d']:.6f} m) >= tolerance ({args.tolerance:.6f} m)")
         passed = False
     else:
-        print(f"PASS: 3D RMS ({metrics['rms_3d']:.6f} m) < "
-              f"tolerance ({args.tolerance:.6f} m)")
+        print(f"PASS: 3D RMS ({metrics['rms_3d']:.6f} m) < tolerance ({args.tolerance:.6f} m)")
 
     # Criterion 2: Fix rate not degraded by more than 1.0%
     if fix_delta < -1.0:
-        print(f"FAIL: Fix rate degraded by {fix_delta:.2f}% "
-              f"(threshold: -1.0%)")
+        print(f"FAIL: Fix rate degraded by {fix_delta:.2f}% (threshold: -1.0%)")
         passed = False
     else:
         print(f"PASS: Fix rate delta ({fix_delta:+.2f}%) within threshold")

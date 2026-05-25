@@ -468,13 +468,11 @@ static int navsys_str2mask(const char* name) {
         const char* str;
         int mask;
     } tbl[] = {
-        {"GPS", SYS_GPS},     {"G", SYS_GPS},
-        {"SBAS", SYS_SBS},    {"S", SYS_SBS},
-        {"GLONASS", SYS_GLO}, {"GLO", SYS_GLO}, {"R", SYS_GLO},
-        {"Galileo", SYS_GAL}, {"GAL", SYS_GAL}, {"E", SYS_GAL},
-        {"QZSS", SYS_QZS},   {"QZS", SYS_QZS}, {"J", SYS_QZS},
-        {"BeiDou", SYS_CMP},  {"BDS", SYS_CMP}, {"CMP", SYS_CMP}, {"C", SYS_CMP},
-        {"NavIC", SYS_IRN},   {"IRNSS", SYS_IRN}, {"IRN", SYS_IRN}, {"I", SYS_IRN},
+        {"GPS", SYS_GPS},  {"G", SYS_GPS},   {"SBAS", SYS_SBS},    {"S", SYS_SBS},      {"GLONASS", SYS_GLO},
+        {"GLO", SYS_GLO},  {"R", SYS_GLO},   {"Galileo", SYS_GAL}, {"GAL", SYS_GAL},    {"E", SYS_GAL},
+        {"QZSS", SYS_QZS}, {"QZS", SYS_QZS}, {"J", SYS_QZS},       {"BeiDou", SYS_CMP}, {"BDS", SYS_CMP},
+        {"CMP", SYS_CMP},  {"C", SYS_CMP},   {"NavIC", SYS_IRN},   {"IRNSS", SYS_IRN},  {"IRN", SYS_IRN},
+        {"I", SYS_IRN},
     };
     int i;
     for (i = 0; i < (int)(sizeof(tbl) / sizeof(tbl[0])); i++) {

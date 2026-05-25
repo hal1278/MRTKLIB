@@ -236,15 +236,15 @@ static int writetcpsvr(tcpsvr_t* tcpsvr, uint8_t* buff, int n, char* msg);
 
 /* global options ------------------------------------------------------------*/
 
-static int toinact = 10000;      /* inactive timeout (ms) */
-static int ticonnect = 10000;    /* interval to re-connect (ms) */
-static int tirate = 1000;        /* averaging time for data rate (ms) */
-static int buffsize = 32768;     /* receive/send buffer size (bytes) */
-static char localdir[1024] = ""; /* local directory for ftp/http */
-static char proxyaddr[256] = "";           /* http/ntrip/ftp proxy address */
+static int toinact = 10000;                    /* inactive timeout (ms) */
+static int ticonnect = 10000;                  /* interval to re-connect (ms) */
+static int tirate = 1000;                      /* averaging time for data rate (ms) */
+static int buffsize = 32768;                   /* receive/send buffer size (bytes) */
+static char localdir[1024] = "";               /* local directory for ftp/http */
+static char proxyaddr[256] = "";               /* http/ntrip/ftp proxy address */
 static int ntrip_ver_default = NTRIP_VER_AUTO; /* default ntrip version */
-static uint32_t tick_master = 0; /* time tick master for replay */
-static int fswapmargin = 30;     /* file swap margin (s) */
+static uint32_t tick_master = 0;               /* time tick master for replay */
+static int fswapmargin = 30;                   /* file swap margin (s) */
 
 /* open serial ---------------------------------------------------------------*/
 static serial_t* openserial(const char* path, int mode, char* msg) {
@@ -840,8 +840,14 @@ static void urldecode(char* str) {
     while (*src) {
         if (*src == '%' && src[1] && src[2]) {
             int hi = src[1], lo = src[2];
-            hi = (hi >= '0' && hi <= '9') ? hi - '0' : (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10 : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10 : -1;
-            lo = (lo >= '0' && lo <= '9') ? lo - '0' : (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10 : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10 : -1;
+            hi = (hi >= '0' && hi <= '9')   ? hi - '0'
+                 : (hi >= 'A' && hi <= 'F') ? hi - 'A' + 10
+                 : (hi >= 'a' && hi <= 'f') ? hi - 'a' + 10
+                                            : -1;
+            lo = (lo >= '0' && lo <= '9')   ? lo - '0'
+                 : (lo >= 'A' && lo <= 'F') ? lo - 'A' + 10
+                 : (lo >= 'a' && lo <= 'f') ? lo - 'a' + 10
+                                            : -1;
             if (hi >= 0 && lo >= 0) {
                 char ch = (char)((hi << 4) | lo);
                 if (ch == '\0' || ch == '\r' || ch == '\n' || ch == ' ') {
@@ -1475,18 +1481,22 @@ static int encbase64(char* str, const uint8_t* byte, int n) {
     return j;
 }
 /* safe append to buffer with overflow tracking */
-#define BUFADD(p, rem, ...) do { \
-    int _n = snprintf(p, rem, __VA_ARGS__); \
-    if (_n > 0 && _n < (rem)) { (p) += _n; (rem) -= _n; } \
-    else { (rem) = 0; } \
-} while (0)
+#define BUFADD(p, rem, ...)                     \
+    do {                                        \
+        int _n = snprintf(p, rem, __VA_ARGS__); \
+        if (_n > 0 && _n < (rem)) {             \
+            (p) += _n;                          \
+            (rem) -= _n;                        \
+        } else {                                \
+            (rem) = 0;                          \
+        }                                       \
+    } while (0)
 /* send ntrip server request -------------------------------------------------*/
 static int reqntrip_s(ntrip_t* ntrip, char* msg) {
     char buff[2048], user[514], *p = buff;
     int rem = (int)sizeof(buff);
     int use_v2 = (ntrip->ver == NTRIP_VER_2 ||
-                  (ntrip->ver == NTRIP_VER_AUTO &&
-                   (!ntrip->v2_tried || ntrip->ver_neg == NTRIP_VER_2)));
+                  (ntrip->ver == NTRIP_VER_AUTO && (!ntrip->v2_tried || ntrip->ver_neg == NTRIP_VER_2)));
 
     tracet(NULL, 3, "reqntrip_s: state=%d ver=%d\n", ntrip->state, ntrip->ver);
 
@@ -1505,7 +1515,10 @@ static int reqntrip_s(ntrip_t* ntrip, char* msg) {
             BUFADD(p, rem, "Authorization: Basic ");
             if (rem > 0) {
                 int b64_need = (int)(((strlen(user) + 2) / 3) * 4 + 1);
-                if (b64_need > rem) { sprintf(msg, "request buffer overflow"); return 0; }
+                if (b64_need > rem) {
+                    sprintf(msg, "request buffer overflow");
+                    return 0;
+                }
                 int n = encbase64(p, (uint8_t*)user, strlen(user));
                 p += n;
                 rem -= n;
@@ -1540,8 +1553,7 @@ static int reqntrip_c(ntrip_t* ntrip, char* msg) {
     char buff[2048], user[514], *p = buff;
     int rem = (int)sizeof(buff);
     int use_v2 = (ntrip->ver == NTRIP_VER_2 ||
-                  (ntrip->ver == NTRIP_VER_AUTO &&
-                   (!ntrip->v2_tried || ntrip->ver_neg == NTRIP_VER_2)));
+                  (ntrip->ver == NTRIP_VER_AUTO && (!ntrip->v2_tried || ntrip->ver_neg == NTRIP_VER_2)));
 
     tracet(NULL, 3, "reqntrip_c: state=%d ver=%d\n", ntrip->state, ntrip->ver);
 
@@ -1557,7 +1569,10 @@ static int reqntrip_c(ntrip_t* ntrip, char* msg) {
             BUFADD(p, rem, "Authorization: Basic ");
             if (rem > 0) {
                 int b64_need = (int)(((strlen(user) + 2) / 3) * 4 + 1);
-                if (b64_need > rem) { sprintf(msg, "request buffer overflow"); return 0; }
+                if (b64_need > rem) {
+                    sprintf(msg, "request buffer overflow");
+                    return 0;
+                }
                 int n = encbase64(p, (uint8_t*)user, strlen(user));
                 p += n;
                 rem -= n;
@@ -1579,7 +1594,10 @@ static int reqntrip_c(ntrip_t* ntrip, char* msg) {
             BUFADD(p, rem, "Authorization: Basic ");
             if (rem > 0) {
                 int b64_need = (int)(((strlen(user) + 2) / 3) * 4 + 1);
-                if (b64_need > rem) { sprintf(msg, "request buffer overflow"); return 0; }
+                if (b64_need > rem) {
+                    sprintf(msg, "request buffer overflow");
+                    return 0;
+                }
                 int n = encbase64(p, (uint8_t*)user, strlen(user));
                 p += n;
                 rem -= n;
@@ -1805,8 +1823,7 @@ static int waitntrip(ntrip_t* ntrip, char* msg) {
         /* AUTO fallback: only switch to v1 if connection dropped before any
          * response was received. If an HTTP response was seen (nb>0), the
          * caster supports v2 and the error is auth/mountpoint, not protocol */
-        if (ntrip->ver == NTRIP_VER_AUTO && ntrip->v2_tried && ntrip->ver_neg == 0 &&
-            ntrip->nb == 0) {
+        if (ntrip->ver == NTRIP_VER_AUTO && ntrip->v2_tried && ntrip->ver_neg == 0 && ntrip->nb == 0) {
             tracet(NULL, 3, "waitntrip: v2 failed before response, falling back to v1\n");
             ntrip->v2_tried = 2; /* mark as fallen back */
         }
@@ -1852,7 +1869,7 @@ static int waitntrip(ntrip_t* ntrip, char* msg) {
  * query string is copied to a local buffer to avoid modifying mntpnt beyond '?' */
 static int parse_ntrip_query(char* mntpnt, char* host_override, int host_size) {
     char params[256], *p, *next;
-    char *q;
+    char* q;
     int ver = ntrip_ver_default;
 
     host_override[0] = '\0';
@@ -1885,7 +1902,7 @@ static int parse_ntrip_query(char* mntpnt, char* host_override, int host_size) {
                 ver = NTRIP_VER_2;
             }
         } else if (strncmp(p, "host=", 5) == 0) {
-            const char *h = p + 5;
+            const char* h = p + 5;
             int valid = 1, hlen = 0;
             /* reject control characters and whitespace to prevent header injection */
             while (h[hlen]) {

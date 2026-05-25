@@ -1,0 +1,67 @@
+name: Formatter Check
+
+# Lightweight, build-free gate that fails when code is not formatted with the
+# project's pinned formatters. Kept separate from build.yaml (the ~10-min
+# regression job) so style feedback is fast. Check-only: it never pushes
+# formatting commits back (signing policy + fork-PR token constraints; see #166).
+#
+# Pinned versions MUST match CONTRIBUTING.md / CLAUDE.md and the versions used
+# for the one-time sweep (PR #177, issue #166). Bumping a version here is a
+# deliberate change that reformats the codebase — do it in its own PR, and
+# update the taplo checksum below.
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # clang-format (C/C++) and ruff (Python) ship exact-versioned wheels.
+      - name: Install pinned clang-format + ruff
+        run: |
+          pip install "clang-format==21.1.6" "ruff==0.15.2"
+          clang-format --version
+          ruff --version
+
+      # taplo has no pip wheel; pin the release asset and verify its SHA-256
+      # (immutable once published) before executing it.
+      - name: Install pinned taplo
+        env:
+          TAPLO_SHA256: 8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL -o taplo.gz \
+            https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz
+          echo "${TAPLO_SHA256}  taplo.gz" | sha256sum -c -
+          gunzip -c taplo.gz > "$HOME/.local/bin/taplo"
+          chmod +x "$HOME/.local/bin/taplo"
+          rm -f taplo.gz
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/taplo" --version
+
+      # Vendored / upstream-derived code (src/core/tomlc99, util/) is skipped by
+      # clang-format itself via .clang-format-ignore — the single exclude source,
+      # honored even for files passed explicitly (clang-format >= 18). NUL-delimited
+      # paths + xargs -r keep this robust for odd names / empty input.
+      - name: clang-format (C/C++)
+        run: git ls-files -z '*.c' '*.cpp' '*.h' '*.hpp' | xargs -0 -r clang-format --dry-run --Werror
+
+      # Run the remaining checks even if an earlier one failed, so a PR sees all
+      # formatting problems at once instead of one formatter at a time.
+      - name: taplo (TOML)
+        if: ${{ !cancelled() }}
+        run: taplo fmt --check
+
+      - name: ruff format (Python)
+        if: ${{ !cancelled() }}
+        run: ruff format --check .

@@ -146,15 +146,26 @@ def _run_rnx2rtkp(
     nav = nav.resolve()
     l6_files = [f.resolve() for f in l6_files]
     output.parent.mkdir(parents=True, exist_ok=True)
-    cmd = _post_argv(rnx2rtkp) + [
-        "-k", conf,
-        "-k", city_conf,
-        "-ts", str(week), f"{tow_start:.3f}",
-        "-te", str(week), f"{tow_end:.3f}",
-        "-o", str(output),
-        str(obs),
-        str(nav),
-    ] + [str(f) for f in l6_files]
+    cmd = (
+        _post_argv(rnx2rtkp)
+        + [
+            "-k",
+            conf,
+            "-k",
+            city_conf,
+            "-ts",
+            str(week),
+            f"{tow_start:.3f}",
+            "-te",
+            str(week),
+            f"{tow_end:.3f}",
+            "-o",
+            str(output),
+            str(obs),
+            str(nav),
+        ]
+        + [str(f) for f in l6_files]
+    )
 
     if verbose:
         print("  $", " ".join(cmd))
@@ -195,18 +206,25 @@ def _fmt_sv(v: float) -> str:
     return "—" if math.isnan(v) else f"{v:.1f}"
 
 
-def _row(case_id: str, mode: str, tier: str, n: int, n_sv: str, rate: str,
-         rms2: str, p68: str, p95: str, ttff: str,
-         first: bool = True) -> str:
+def _row(
+    case_id: str,
+    mode: str,
+    tier: str,
+    n: int,
+    n_sv: str,
+    rate: str,
+    rms2: str,
+    p68: str,
+    p95: str,
+    ttff: str,
+    first: bool = True,
+) -> str:
     """Format one tier row."""
     if first:
         prefix = f"{case_id:<20} {mode:<7}"
     else:
         prefix = _BLANK_CASE_MODE
-    return (
-        f"{prefix} {tier:<5} {n:>6} {n_sv:>5} {rate:>7} "
-        f"{rms2:>10} {p68:>10} {p95:>10} {ttff:>8}"
-    )
+    return f"{prefix} {tier:<5} {n:>6} {n_sv:>5} {rate:>7} {rms2:>10} {p68:>10} {p95:>10} {ttff:>8}"
 
 
 def print_summary(rows: list[dict]) -> None:
@@ -256,31 +274,71 @@ def print_summary(rows: list[dict]) -> None:
             tier_label = "SPP" if r["mode"] == "single" else "PPP"
             ppp_rate = f"{m['thr_rate']:.1f}%"
             ppp_ttff = _fmt_s(m["conv_thr_s"])
-            print(_row(r["case_id"], r["mode"], tier_label,
-                       m["n_matched"], _fmt_sv(m["mean_sv_all"]), ppp_rate,
-                       _fmt_m(m["rms_2d_all"]), _fmt_m(m["p68_2d_all"]),
-                       _fmt_m(m["p95_2d_all"]), ppp_ttff,
-                       first=True))
+            print(
+                _row(
+                    r["case_id"],
+                    r["mode"],
+                    tier_label,
+                    m["n_matched"],
+                    _fmt_sv(m["mean_sv_all"]),
+                    ppp_rate,
+                    _fmt_m(m["rms_2d_all"]),
+                    _fmt_m(m["p68_2d_all"]),
+                    _fmt_m(m["p95_2d_all"]),
+                    ppp_ttff,
+                    first=True,
+                )
+            )
         else:
             # AR modes (CLAS / RTK): three rows
             # FIX row (Q=4)
-            print(_row(r["case_id"], r["mode"], "FIX",
-                       m["n_fix"], _fmt_sv(m["mean_sv_fix"]), f"{m['fix_rate']:.1f}%",
-                       _fmt_m(m["rms_2d_fix"]), _fmt_m(m["p68_2d_fix"]),
-                       _fmt_m(m["p95_2d_fix"]), _fmt_s(m["conv_time_s"]),
-                       first=True))
+            print(
+                _row(
+                    r["case_id"],
+                    r["mode"],
+                    "FIX",
+                    m["n_fix"],
+                    _fmt_sv(m["mean_sv_fix"]),
+                    f"{m['fix_rate']:.1f}%",
+                    _fmt_m(m["rms_2d_fix"]),
+                    _fmt_m(m["p68_2d_fix"]),
+                    _fmt_m(m["p95_2d_fix"]),
+                    _fmt_s(m["conv_time_s"]),
+                    first=True,
+                )
+            )
             # FF row (Q=3,4,5 — fix + float, excludes SPP)
-            print(_row(r["case_id"], r["mode"], "FF",
-                       m["n_ff"], _fmt_sv(m["mean_sv_ff"]), f"{m['ff_rate']:.1f}%",
-                       _fmt_m(m["rms_2d_ff"]), _fmt_m(m["p68_2d_ff"]),
-                       _fmt_m(m["p95_2d_ff"]), "—",
-                       first=False))
+            print(
+                _row(
+                    r["case_id"],
+                    r["mode"],
+                    "FF",
+                    m["n_ff"],
+                    _fmt_sv(m["mean_sv_ff"]),
+                    f"{m['ff_rate']:.1f}%",
+                    _fmt_m(m["rms_2d_ff"]),
+                    _fmt_m(m["p68_2d_ff"]),
+                    _fmt_m(m["p95_2d_ff"]),
+                    "—",
+                    first=False,
+                )
+            )
             # ALL row (every epoch including SPP)
-            print(_row(r["case_id"], r["mode"], "ALL",
-                       m["n_matched"], _fmt_sv(m["mean_sv_all"]), "—",
-                       _fmt_m(m["rms_2d_all"]), _fmt_m(m["p68_2d_all"]),
-                       _fmt_m(m["p95_2d_all"]), "—",
-                       first=False))
+            print(
+                _row(
+                    r["case_id"],
+                    r["mode"],
+                    "ALL",
+                    m["n_matched"],
+                    _fmt_sv(m["mean_sv_all"]),
+                    "—",
+                    _fmt_m(m["rms_2d_all"]),
+                    _fmt_m(m["p68_2d_all"]),
+                    _fmt_m(m["p95_2d_all"]),
+                    "—",
+                    first=False,
+                )
+            )
 
     print(_SEP)
     print("  CLAS/RTK tiers: FIX=Q=4 | FF=Q=4+5 (excl SPP) | ALL=every epoch")
@@ -411,8 +469,9 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
             if not extra_files and mode != "single":
                 print(f"  WARNING: no input files found for {mode}; skipping.")
-                results.append({"case_id": case["id"], "mode": mode,
-                                 "metrics": None, "status": "skip"})
+                results.append(
+                    {"case_id": case["id"], "mode": mode, "metrics": None, "status": "skip"}
+                )
                 continue
 
             # Skip if output is newer than all inputs
@@ -432,25 +491,33 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 t0 = time.monotonic()
                 city_conf = str(conf_dir / f"{case['city']}.toml")
                 ok = _run_rnx2rtkp(
-                    rnx2rtkp, conf, city_conf,
+                    rnx2rtkp,
+                    conf,
+                    city_conf,
                     case["gps_week"],
-                    case["tow_start"] - 60, case["tow_end"] + 60,
-                    out, obs, nav, extra_files,
+                    case["tow_start"] - 60,
+                    case["tow_end"] + 60,
+                    out,
+                    obs,
+                    nav,
+                    extra_files,
                     cwd=str(root),
                     verbose=args.verbose,
                 )
                 elapsed = time.monotonic() - t0
                 if not ok:
                     print(f"  FAIL: rnx2rtkp returned non-zero (elapsed {elapsed:.1f}s)")
-                    results.append({"case_id": case["id"], "mode": mode,
-                                     "metrics": None, "status": "fail"})
+                    results.append(
+                        {"case_id": case["id"], "mode": mode, "metrics": None, "status": "fail"}
+                    )
                     continue
                 print(f"  rnx2rtkp completed in {elapsed:.1f}s → {out.name}")
 
             if not out.exists():
                 print("  FAIL: output file not produced")
-                results.append({"case_id": case["id"], "mode": mode,
-                                 "metrics": None, "status": "fail"})
+                results.append(
+                    {"case_id": case["id"], "mode": mode, "metrics": None, "status": "fail"}
+                )
                 continue
 
             # Compare against reference
@@ -461,13 +528,16 @@ def run_benchmark(args: argparse.Namespace) -> int:
 
             if m is None:
                 print("  FAIL: no matching epochs")
-                results.append({"case_id": case["id"], "mode": mode,
-                                 "metrics": None, "status": "fail"})
+                results.append(
+                    {"case_id": case["id"], "mode": mode, "metrics": None, "status": "fail"}
+                )
                 continue
 
             # Progress line
             if not math.isnan(threshold):
-                thr_label = f"<{threshold:.1f}m" if threshold >= 1.0 else f"<{threshold*100:.0f}cm"
+                thr_label = (
+                    f"<{threshold:.1f}m" if threshold >= 1.0 else f"<{threshold * 100:.0f}cm"
+                )
                 rate_str = f"{thr_label}={m['thr_rate']:.1f}%"
                 conv_str = _fmt_s(m["conv_thr_s"])
             else:
@@ -480,8 +550,7 @@ def run_benchmark(args: argparse.Namespace) -> int:
                 f"RMS(all)={m['rms_2d_all']:.3f}m  "
                 f"TTFF={conv_str}s"
             )
-            results.append({"case_id": case["id"], "mode": mode,
-                             "metrics": m, "status": "ok"})
+            results.append({"case_id": case["id"], "mode": mode, "metrics": m, "status": "ok"})
 
             if args.plot:
                 png = out_dir / f"{case['id']}_{mode}.png"
@@ -496,33 +565,47 @@ def run_benchmark(args: argparse.Namespace) -> int:
 # ---------------------------------------------------------------------------
 def main() -> int:
     """Entry point for the PPC-Dataset benchmark runner."""
-    p = argparse.ArgumentParser(
-        description="Run MRTKLIB kinematic benchmark on PPC-Dataset"
+    p = argparse.ArgumentParser(description="Run MRTKLIB kinematic benchmark on PPC-Dataset")
+    p.add_argument(
+        "--dataset-dir",
+        default="data/benchmark",
+        help="PPC-Dataset root directory (default: data/benchmark)",
     )
-    p.add_argument("--dataset-dir", default="data/benchmark",
-                   help="PPC-Dataset root directory (default: data/benchmark)")
-    p.add_argument("--l6-dir", default="data/benchmark/l6",
-                   help="L6 file cache directory (default: data/benchmark/l6)")
-    p.add_argument("--out-dir", default="data/benchmark/results",
-                   help="Output directory for NMEA results (default: data/benchmark/results)")
-    p.add_argument("--mode", choices=["single", "clas", "madoca", "rtk", "both", "all"],
-                   default="all",
-                   help="Positioning mode (default: all = clas+madoca+rtk; "
-                        "single = SPP baseline, rover.obs + base.nav only)")
-    p.add_argument("--case", default="",
-                   help="Comma-separated case IDs (default: all)")
-    p.add_argument("--rnx2rtkp", default="",
-                   help="Path to rnx2rtkp binary (default: auto-detect under build/)")
-    p.add_argument("--skip-download", action="store_true",
-                   help="Skip L6 download step (use existing files)")
-    p.add_argument("--force", action="store_true",
-                   help="Re-run rnx2rtkp even if cached output exists")
-    p.add_argument("--skip-epochs", type=int, default=60,
-                   help="Epochs to exclude from metrics for convergence (default: 60)")
-    p.add_argument("--plot", action="store_true",
-                   help="Generate ENU time-series PNG per case")
-    p.add_argument("-v", "--verbose", action="store_true",
-                   help="Show rnx2rtkp stdout/stderr")
+    p.add_argument(
+        "--l6-dir",
+        default="data/benchmark/l6",
+        help="L6 file cache directory (default: data/benchmark/l6)",
+    )
+    p.add_argument(
+        "--out-dir",
+        default="data/benchmark/results",
+        help="Output directory for NMEA results (default: data/benchmark/results)",
+    )
+    p.add_argument(
+        "--mode",
+        choices=["single", "clas", "madoca", "rtk", "both", "all"],
+        default="all",
+        help="Positioning mode (default: all = clas+madoca+rtk; "
+        "single = SPP baseline, rover.obs + base.nav only)",
+    )
+    p.add_argument("--case", default="", help="Comma-separated case IDs (default: all)")
+    p.add_argument(
+        "--rnx2rtkp", default="", help="Path to rnx2rtkp binary (default: auto-detect under build/)"
+    )
+    p.add_argument(
+        "--skip-download", action="store_true", help="Skip L6 download step (use existing files)"
+    )
+    p.add_argument(
+        "--force", action="store_true", help="Re-run rnx2rtkp even if cached output exists"
+    )
+    p.add_argument(
+        "--skip-epochs",
+        type=int,
+        default=60,
+        help="Epochs to exclude from metrics for convergence (default: 60)",
+    )
+    p.add_argument("--plot", action="store_true", help="Generate ENU time-series PNG per case")
+    p.add_argument("-v", "--verbose", action="store_true", help="Show rnx2rtkp stdout/stderr")
     args = p.parse_args()
     return run_benchmark(args)
 

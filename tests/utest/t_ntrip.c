@@ -15,29 +15,28 @@ static int n_pass = 0;
 static int n_fail = 0;
 static int test_failed = 0; /* per-test failure flag */
 
-#define TEST(name)                                      \
-    static void name(void);                             \
-    static void name##_run(void) {                      \
-        printf("  %-50s ", #name);                      \
-        test_failed = 0;                                \
-        name();                                         \
-        if (test_failed) {                              \
-            n_fail++;                                   \
-        } else {                                        \
-            printf("PASS\n");                           \
-            n_pass++;                                   \
-        }                                               \
-    }                                                   \
+#define TEST(name)                 \
+    static void name(void);        \
+    static void name##_run(void) { \
+        printf("  %-50s ", #name); \
+        test_failed = 0;           \
+        name();                    \
+        if (test_failed) {         \
+            n_fail++;              \
+        } else {                   \
+            printf("PASS\n");      \
+            n_pass++;              \
+        }                          \
+    }                              \
     static void name(void)
 
-#define ASSERT(cond)                                    \
-    do {                                                \
-        if (!(cond)) {                                  \
-            printf("FAIL\n    %s:%d: %s\n",             \
-                   __FILE__, __LINE__, #cond);           \
-            test_failed = 1;                            \
-            return;                                     \
-        }                                               \
+#define ASSERT(cond)                                                    \
+    do {                                                                \
+        if (!(cond)) {                                                  \
+            printf("FAIL\n    %s:%d: %s\n", __FILE__, __LINE__, #cond); \
+            test_failed = 1;                                            \
+            return;                                                     \
+        }                                                               \
     } while (0)
 
 /* ========================================================================== */
@@ -50,7 +49,7 @@ TEST(test_chunk_decode_single) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "5\r\nHello\r\n0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[64];
 
@@ -66,7 +65,7 @@ TEST(test_chunk_decode_multi) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "5\r\nHello\r\n6\r\n World\r\n0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[64];
 
@@ -87,10 +86,9 @@ TEST(test_chunk_decode_partial) {
     int total_out = 0;
 
     for (int i = 0; i < total_len; i++) {
-        const uint8_t *pin = &input[i];
+        const uint8_t* pin = &input[i];
         int nin = 1;
-        int nd = chunk_decode(&dec, &pin, &nin, out + total_out,
-                              (int)sizeof(out) - total_out);
+        int nd = chunk_decode(&dec, &pin, &nin, out + total_out, (int)sizeof(out) - total_out);
         ASSERT(nd >= 0);
         total_out += nd;
     }
@@ -105,7 +103,7 @@ TEST(test_chunk_decode_zero) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[64];
 
@@ -120,7 +118,7 @@ TEST(test_chunk_decode_hex_upper) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "1A\r\nabcdefghijklmnopqrstuvwxyz\r\n0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[64];
 
@@ -136,7 +134,7 @@ TEST(test_chunk_decode_extension) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "5;ext=val\r\nHello\r\n0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[64];
 
@@ -151,7 +149,7 @@ TEST(test_chunk_decode_output_limited) {
     chunk_dec_init(&dec);
 
     const uint8_t input[] = "a\r\n0123456789\r\n0\r\n\r\n";
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input) - 1;
     uint8_t out[5];
 
@@ -218,7 +216,7 @@ TEST(test_chunk_roundtrip) {
     /* decode */
     chunk_dec_t dec;
     chunk_dec_init(&dec);
-    const uint8_t *pin = encoded;
+    const uint8_t* pin = encoded;
     int nin = elen;
     uint8_t decoded[128];
 
@@ -235,7 +233,7 @@ TEST(test_chunk_decode_final_trailer_split) {
 
     const uint8_t input1[] = "0\r\n\r";
     const uint8_t input2[] = "\n";
-    const uint8_t *pin;
+    const uint8_t* pin;
     int nin;
     uint8_t out[64];
 
@@ -256,7 +254,7 @@ TEST(test_chunk_decode_header_too_long) {
     chunk_dec_init(&dec);
 
     uint8_t input[CHUNK_HDR_MAX + 3];
-    const uint8_t *pin = input;
+    const uint8_t* pin = input;
     int nin = (int)sizeof(input);
     uint8_t out[64];
 

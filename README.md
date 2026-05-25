@@ -43,11 +43,11 @@ is in the [CHANGELOG](CHANGELOG.md) and [release notes](docs/releases/):
 |-----|-------|
 | **v0.4.x** | demo5 RTK / PPP-RTK algorithm port (PAR, `detslp_dop` / `detslp_code`, full-constellation `varerr`, false-fix fixes); real-time CLAS PPP-RTK (1ch / 2ch) |
 | **v0.5.x** | TOML configuration; code-quality sweeps (`clang-format`, mandatory braces); signals restructuring; RINEX 4.00 CNAV; `convbin` / `str2str` ports |
-| **v0.6.x** | Unified `mrtk` CLI; NTRIP v2; `mrtk cssr2rtcm3` (CSSR→RTCM3); IGS-products float / RTS / integer PPP-AR (the `correction` axis); SPP accuracy |
+| **v0.6.x** | Unified `mrtk` CLI; NTRIP v2; `mrtk cssr2rtcm3` (CSSR→RTCM3); IGS-products float / RTS / integer PPP-AR (the `correction` axis); SPP accuracy; formatter CI gate; GSDC smartphone benchmark |
 
-**Latest — v0.6.10:** single-point positioning accuracy (opt-in / default-off) — C/N0 weighting, IGG-III robust estimation + pre-robust gate, TDCP velocity + jump rejection ([#116](https://github.com/h-shiono/MRTKLIB/issues/116))
+**Latest — v0.6.11:** developer experience / tooling (no positioning change — outputs bit-identical to v0.6.10) — enforced formatter CI gate + repo-wide format baseline ([#166](https://github.com/h-shiono/MRTKLIB/issues/166)), GSDC-2023 smartphone SPP benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)), and faster network-free regression CI
 
-**Next:** SPP P5/P6 (clock-jump + position EKF) on a smartphone (GSDC) benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)); Doxygen docstring coverage
+**Next:** tuned SPP P5/P6 (clock-jump + position EKF) on the GSDC smartphone benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)); Doxygen docstring coverage
 
 > [!NOTE]
 > demo5 algorithm improvements are adapted from **[demo5 RTKLIB](https://github.com/rtklibexplorer/RTKLIB)**
