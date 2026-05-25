@@ -1,6 +1,11 @@
 # taplo configuration — https://taplo.tamasfe.dev/configuration/
 # Applies to all TOML files in the repository.
 
+# Skip vendored / local-only TOML so `taplo fmt --check` (CI and local) only
+# sees repo-tracked files. Python virtualenvs drop third-party pyproject.toml
+# under site-packages; ruff excludes these by default, taplo does not.
+exclude = ["**/.venv/**", "**/site-packages/**", "**/node_modules/**"]
+
 [formatting]
 align_entries = false       # Don't pad keys with spaces for alignment
 align_comments = true       # Align trailing comments within a section

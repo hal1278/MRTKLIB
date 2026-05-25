@@ -1,0 +1,10 @@
+# Paths excluded from clang-format (used by both the CLI and clangd/IDEs).
+# Keep this list in sync with the CI format gate (.github/workflows/format.yaml).
+#
+# Vendored / upstream-derived code is excluded so that reformatting does not
+# pollute future upstream-sync diffs:
+#   - src/core/tomlc99: byte-for-byte cktan/tomlc99 (MIT).
+#   - util: RTKLIB-derived utilities (BUILD_UTILS=OFF by default, never in the
+#     v0.5.3 clang-format scope). See issue #166.
+src/core/tomlc99/**
+util/**
