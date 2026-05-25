@@ -78,3 +78,8 @@ upstream/RTKLIB/
 
 # PPC benchmark dataset, L6 data, and positioning results (large; download on demand)
 data/benchmark/
+
+# GSDC (Google Smartphone Decimeter Challenge 2023) benchmark dataset and results
+# (3.5 GB zip -> 16 GB extracted; manual download, see docs/reference/benchmark-gsdc.md)
+tests/data/sdc2023.zip
+data/gsdc/

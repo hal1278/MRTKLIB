@@ -316,6 +316,7 @@ def compute_metrics(
         "mean_sv_all": mean_sv_all,
         "rms_2d_all": float(np.sqrt(np.mean(horiz**2))),
         "rms_3d_all": float(np.sqrt(np.mean(e3d**2))),
+        "p50_2d_all": float(np.percentile(horiz, 50)),
         "p68_2d_all": float(np.percentile(horiz, 68)),
         "p95_2d_all": float(np.percentile(horiz, 95)),
         "max_2d_all": float(np.max(horiz)),

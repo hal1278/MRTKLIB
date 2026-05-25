@@ -1,0 +1,21 @@
+# GSDC smartphone SPP P0 baseline overlay (issue #165).
+#
+# Layered on top of single.toml to recover the classic-SPP "P0" reference
+# (analogous to the #116 P0 baseline in docs/design/spp-accuracy.md 4.1):
+# elevation-only weighting, Klobuchar iono, Saastamoinen tropo, broadcast
+# ephemeris, RAIM-FDE -- i.e. the #116 P1-P4 additions (C/N0 weighting, IGG-III
+# robust + gate, TDCP jump rejection) are turned OFF so the table shows the raw
+# smartphone SPP that P5 (clock-jump) and P6 (position EKF) are measured against.
+#
+#   python run_gsdc_benchmark.py --conf conf/benchmark/single.toml \
+#                                --conf conf/benchmark/gsdc_p0.toml
+
+[positioning]
+robust = "off" # #116 P2/P3 off
+tdcp = false   # #116 P4 off
+
+[positioning.corrections]
+raim_fde = true # classic SPP fault exclusion stays on (part of the P0 baseline)
+
+[kalman_filter.measurement_error]
+snr_error = 0.0 # #116 P1 C/N0 weighting off
