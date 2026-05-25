@@ -1,9 +1,11 @@
 # download_tec.cmake
 # Ensures the IONEX TEC file is present for the recvbias regression test.
 #
-# The compressed file is vendored in the repo (tests/data/malib/*.INX.gz) so CI
-# is deterministic and works offline; the network download from CODE (Univ. of
-# Bern) is only a fallback for when the vendored copy is absent.
+# The compressed file is vendored in the repo and looked up as
+# ${TESTDATA_DIR}/<basename>.gz (the regression fixture passes tests/data/malib),
+# so CI is deterministic and works offline. The network download from CODE
+# (Univ. of Bern) is only a fallback for when that vendored copy is absent, and
+# it is integrity-checked against the vendored file's known hash.
 #
 # Usage:
 #   cmake -DTESTDATA_DIR=<path/to/data> -P download_tec.cmake
@@ -27,8 +29,12 @@ if(EXISTS "${TEC_GZ}")
     message(STATUS "download_tec: using vendored ${TEC_GZ}")
     set(_vendored TRUE)
 else()
+    # ftp.aiub.unibe.ch is HTTP-only; verify integrity against the known hash of
+    # the vendored archive so a corrupted or tampered fallback download fails
+    # loudly instead of silently perturbing test results.
     message(STATUS "download_tec: downloading ${TEC_URL}")
     file(DOWNLOAD "${TEC_URL}" "${TEC_GZ}"
+        EXPECTED_HASH SHA256=49d8fd7f0aa7082186fa6937bd50ff25edb3ba6b937d19fba3701d35a4e226cb
         STATUS dl_status
         SHOW_PROGRESS
     )
