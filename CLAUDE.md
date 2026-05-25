@@ -42,10 +42,11 @@ See [`docs/releases/changelog.md`](docs/releases/changelog.md) for the full hist
 | v0.6.8 | Real-time IGS-RTS float PPP via `correction = "igs-rts"` |
 | v0.6.9 | IGS-products integer PPP-AR (Bias-SINEX OSB phase biases) |
 | v0.6.10 | SPP accuracy (opt-in): C/N0 weighting, IGG-III robust, TDCP |
+| v0.6.11 | Developer experience: formatter CI gate + repo-wide format baseline, GSDC smartphone SPP benchmark, faster CI (no positioning change) |
 
 ### Test Status
 
-Run `cd build && ctest --output-on-failure` to get current counts. Last known: 62 tests passing.
+Run `cd build && ctest --output-on-failure` to get current counts. Last known: 79 tests, 77 passing — 2 perennial env failures (`rtkrcv_rt` headless RT replay; `madocalib_pppar_ion_check` LAPACK-vs-reference ~1.6 cm vs 0.5 cm tol), both reproduce on a clean `develop` build and are unrelated to code changes.
 
 ---
 
