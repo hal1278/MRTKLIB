@@ -59,9 +59,16 @@ jobs:
     # CTest fixture regression_setup extracts data/MALIB_OSS_data.tar.gz.
     # The rtkrcv_rt test is excluded here (-LE realtime) because it requires
     # ~90s of file-stream replay; run it locally or in a dedicated slow-test job.
+    #
+    # -j4 matches the 4-vCPU runner. BLAS is pinned to one thread per process so
+    # the four parallel test processes fill the cores without oversubscription,
+    # and PPP-AR results stay deterministic (no reduction-order tolerance flake).
     - name: Run PPP / SPP regression tests
-      run: ctest --test-dir build --output-on-failure -LE realtime
-      timeout-minutes: 10
+      env:
+        OPENBLAS_NUM_THREADS: 1
+        OMP_NUM_THREADS: 1
+      run: ctest --test-dir build --output-on-failure -j4 -LE realtime
+      timeout-minutes: 20
 
     - name: Accuracy analysis (MADOCA PPP)
       run: |
