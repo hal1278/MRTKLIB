@@ -3,6 +3,7 @@
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-CMake-success.svg)]()
 [![C11](https://img.shields.io/badge/standard-C11-blue.svg)]()
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20373746.svg)](https://doi.org/10.5281/zenodo.20373746)
 
 **MRTKLIB** is a completely modernized, thread-safe, and modularized C11 library for standard and precise GNSS positioning.
 
@@ -142,6 +143,25 @@ The codebase is fully documented using Doxygen. To generate the API reference an
 cmake --build build --target doc
 ```
 Documentation will be generated in `build/doc/html/index.html`.
+
+## 📚 How to Cite
+
+If you use MRTKLIB in your research or product, please cite it via its archived
+release on [Zenodo](https://zenodo.org/). You can cite **all versions** by using
+the concept DOI `10.5281/zenodo.20373746`; Zenodo also mints a version-specific
+DOI for each individual release.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20373746.svg)](https://doi.org/10.5281/zenodo.20373746)
+
+```bibtex
+@software{mrtklib,
+  author    = {Shiono, Hayato},
+  title     = {{MRTKLIB: Modernized RTKLIB for Next-Generation GNSS}},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.20373746},
+  url       = {https://doi.org/10.5281/zenodo.20373746}
+}
+```
 
 ## 📄 License & Attributions
 MRTKLIB is distributed under the BSD 2-Clause License.

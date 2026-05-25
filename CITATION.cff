@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using these metadata."
+title: "MRTKLIB: Modernized RTKLIB for Next-Generation GNSS"
+type: software
+authors:
+  - family-names: Shiono
+    given-names: Hayato
+    orcid: "https://orcid.org/0009-0005-3547-4198"
+license: BSD-2-Clause
+repository-code: "https://github.com/h-shiono/MRTKLIB"
+url: "https://github.com/h-shiono/MRTKLIB"
+identifiers:
+  - type: doi
+    value: 10.5281/zenodo.20373746
+    description: "Concept DOI (all versions)"
