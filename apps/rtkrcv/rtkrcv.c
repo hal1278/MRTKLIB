@@ -531,6 +531,16 @@ static int startsvr(vt_t* vt) {
         }
     }
 
+    /* #184: apply PPP signal selection in the real-time path, mirroring the
+     * post-processing path (rnx2rtkp.c). Without this, the obsdef tables keep
+     * their defaults and the madocalib PPP engine only forms iono-free pairs
+     * for GPS, silently dropping Galileo/QZSS/GLONASS/BeiDou. As in post, IGS
+     * precise-product PPP skips it (#135) so the receiver's actual 2nd band
+     * survives. */
+    if (prcopt.correction != CORR_IGS) {
+        apply_pppsig(prcopt.pppsig);
+    }
+
     /* read start commads from command files */
     for (i = 0; i < 3; i++) {
         if (!*rcvcmds[i]) {
