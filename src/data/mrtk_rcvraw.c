@@ -1700,6 +1700,8 @@ extern int init_raw(raw_t* raw, int format) {
         raw->buff[i] = 0;
     }
     raw->opt[0] = '\0';
+    memset(raw->sigcfg, 0, sizeof(raw->sigcfg)); /* #189: default = no sigcfg (legacy -R/-G path) */
+    raw->sigcfg_set = 0;
     raw->format = -1;
 
     raw->obs.data = NULL;
