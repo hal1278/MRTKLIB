@@ -3,6 +3,7 @@
 [![License](https://img.shields.io/badge/License-BSD_2--Clause-blue.svg)](LICENSE)
 [![Build](https://img.shields.io/badge/build-CMake-success.svg)]()
 [![C11](https://img.shields.io/badge/standard-C11-blue.svg)]()
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20373746.svg)](https://doi.org/10.5281/zenodo.20373746)
 
 **MRTKLIB** is a completely modernized, thread-safe, and modularized C11 library for standard and precise GNSS positioning.
 
@@ -43,11 +44,11 @@ is in the [CHANGELOG](CHANGELOG.md) and [release notes](docs/releases/):
 |-----|-------|
 | **v0.4.x** | demo5 RTK / PPP-RTK algorithm port (PAR, `detslp_dop` / `detslp_code`, full-constellation `varerr`, false-fix fixes); real-time CLAS PPP-RTK (1ch / 2ch) |
 | **v0.5.x** | TOML configuration; code-quality sweeps (`clang-format`, mandatory braces); signals restructuring; RINEX 4.00 CNAV; `convbin` / `str2str` ports |
-| **v0.6.x** | Unified `mrtk` CLI; NTRIP v2; `mrtk cssr2rtcm3` (CSSR→RTCM3); IGS-products float / RTS / integer PPP-AR (the `correction` axis); SPP accuracy; formatter CI gate; GSDC smartphone benchmark |
+| **v0.6.x** | Unified `mrtk` CLI; NTRIP v2; `mrtk cssr2rtcm3` (CSSR→RTCM3); IGS-products float / RTS / integer PPP-AR (the `correction` axis); SPP accuracy; formatter CI gate; GSDC smartphone benchmark; real-time MADOCA-PPP multi-GNSS signal selection |
 
-**Latest — v0.6.11:** developer experience / tooling (no positioning change — outputs bit-identical to v0.6.10) — enforced formatter CI gate + repo-wide format baseline ([#166](https://github.com/h-shiono/MRTKLIB/issues/166)), GSDC-2023 smartphone SPP benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)), and faster network-free regression CI
+**Latest — v0.6.12:** real-time MADOCA-PPP multi-GNSS signal selection — Galileo / QZSS now used in `mrtk run` ([#184](https://github.com/h-shiono/MRTKLIB/issues/184)), GLONASS L2C/A selectable via `[positioning].signals` on Septentrio/SBF ([#187](https://github.com/h-shiono/MRTKLIB/issues/187)), and obsdef signal tables made idempotent across `rtkrcv` restarts ([#186](https://github.com/h-shiono/MRTKLIB/issues/186)). Real-time positioning change; post-processing outputs unchanged.
 
-**Next:** tuned SPP P5/P6 (clock-jump + position EKF) on the GSDC smartphone benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165)); Doxygen docstring coverage
+**Next:** extend `signals`-driven decoder code selection to the remaining decoders / RTCM3 / `convbin` ([#189](https://github.com/h-shiono/MRTKLIB/issues/189)); tuned SPP P5/P6 (clock-jump + position EKF) on the GSDC smartphone benchmark ([#165](https://github.com/h-shiono/MRTKLIB/issues/165))
 
 > [!NOTE]
 > demo5 algorithm improvements are adapted from **[demo5 RTKLIB](https://github.com/rtklibexplorer/RTKLIB)**
@@ -142,6 +143,25 @@ The codebase is fully documented using Doxygen. To generate the API reference an
 cmake --build build --target doc
 ```
 Documentation will be generated in `build/doc/html/index.html`.
+
+## 📚 How to Cite
+
+If you use MRTKLIB in your research or product, please cite it via its archived
+release on [Zenodo](https://zenodo.org/). You can cite **all versions** by using
+the concept DOI `10.5281/zenodo.20373746`; Zenodo also mints a version-specific
+DOI for each individual release.
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.20373746.svg)](https://doi.org/10.5281/zenodo.20373746)
+
+```bibtex
+@software{mrtklib,
+  author    = {Shiono, Hayato},
+  title     = {{MRTKLIB: Modernized RTKLIB for Next-Generation GNSS}},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.20373746},
+  url       = {https://doi.org/10.5281/zenodo.20373746}
+}
+```
 
 ## 📄 License & Attributions
 MRTKLIB is distributed under the BSD 2-Clause License.

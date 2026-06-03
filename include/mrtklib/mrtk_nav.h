@@ -551,6 +551,14 @@ int freq_idx2ant_idx(int sys, int freq_idx);
 void set_obsdef(int sys, const int* freq_nums);
 
 /**
+ * @brief Reset all obsdef tables to their pristine default frequency layout.
+ * @note #186: restores the full multi-band tables so a repeated/changed signal
+ *       selection (e.g. an rtkrcv restart, or switching to correction=igs which
+ *       skips apply_pppsig()) does not inherit a previously trimmed layout.
+ */
+void reset_obsdef(void);
+
+/**
  * @brief Apply PPP signal selection options to obsdef tables.
  * @param[in] pppsig  Signal selection array [5]: GPS,QZS,GAL,BDS2,BDS3
  */

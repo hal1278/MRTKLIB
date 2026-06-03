@@ -37,7 +37,9 @@ TOML section: `[positioning]`
 | `satellite_ephemeris` | enum | All | Satellite ephemeris source. SSR modes (`brdc+ssrapc`, `brdc+ssrcom`) are used for PPP and PPP-RTK. `brdc` · `precise` · `brdc+sbas` · `brdc+ssrapc` · `brdc+ssrcom` |
 | `systems` | string[] | All | GNSS constellations to use. Accepts a human-readable string list like `["GPS", "Galileo"]`. |
 | `excluded_sats` | string | All | Satellites to exclude. Space-separated PRN list (e.g., `G01 G02`). Prefix `+` to include only. |
-| `signals` | string[] | All | Explicit signal code list. Overrides default observation definition when set. e.g. `["G1C", "G2W", "E1C"]` |
+| `signals` | string[] | All | Explicit RINEX3-style signal code list (`{sys}{freq}{attr}`, e.g. `["G1C", "G2W", "R1C", "R2C", "E1C", "E7Q", "J1C", "J2L"]`). When set it is the **authoritative** signal selection: it overrides `frequency` / the `[signals]` presets, derives the number of frequencies, **and** selects which observation code occupies each band's slot during real-time raw decoding (so e.g. GLONASS L2C/A can be used as the iono-free 2nd frequency without the legacy `-RL2C` receiver option — see [#189](https://github.com/h-shiono/MRTKLIB/issues/189)). List **every** band you want, for every constellation you want to constrain — `signals = ["R2C"]` alone derives nf=1 (single-frequency). A constellation you omit entirely keeps its default signal selection. |
+
+> **Recommended surface.** `[positioning].signals` is the preferred way to select signals. The `[signals]` section (`gps`/`qzs`/`galileo`/`bds2`/`bds3` presets) and `frequency` are the older, coarser mechanism (no per-code control, and **no GLONASS entry**, which is why GLONASS L2 code selection requires `signals`). When `signals` is set it takes precedence.
 
 ### Frequency Index Mapping
 
@@ -270,6 +272,8 @@ TOML section: `[adaptive_filter]`
 ## Signal Selection
 
 TOML section: `[signals]`
+
+> **Legacy preset form.** These per-constellation presets are the older, coarser signal-selection surface (no per-code control, no GLONASS entry). Prefer [`[positioning].signals`](#positioning) for new configurations; when `signals` is set it overrides this section. GLONASS L2 code selection (e.g. L2C/A vs L2P) can only be expressed via `[positioning].signals`.
 
 | TOML Key | Type | Modes | Description |
 |:---------|:-----|:------|:------------|

@@ -284,6 +284,29 @@ int mrtk_sigcfg_from_signals(const char** sigs, int nsig, mrtk_sigcfg_t* cfg, in
  */
 int mrtk_sigcfg_to_obsdef(const mrtk_sigcfg_t* cfg);
 
+/** @brief mrtk_sigcfg_freq_idx() sentinel: this constellation has no sigcfg
+ *         entry, so the caller should fall back to its default (-R/-G/...)
+ *         option logic. Distinct from -1 (drop) and from valid slot indices. */
+#define MRTK_SIGCFG_NOOPINION (-2)
+
+/**
+ * @brief Resolve the observation slot for a decoded (sys, code) from sigcfg.
+ *
+ * #189: lets `[positioning].signals` (sigcfg) drive raw-decoder code selection,
+ * so e.g. GLONASS L2C/A can be placed in the iono-free 2nd frequency without the
+ * legacy `-RL2C` receiver option. obsdef is band-level (cannot distinguish L2C
+ * from L2P); sigcfg carries the per-band preferred code, which this consults.
+ *
+ * @param[in] sys   Satellite system (SYS_???)
+ * @param[in] code  Observation code (CODE_???) just decoded
+ * @param[in] cfg   Per-constellation signal config array [MRTK_NSYS]
+ * @param[in] nex   Number of extra observation slots available (NEXOBS)
+ * @return main slot 0..NFREQ-1 (code selected for its band); -1 to drop (code
+ *         not selected, or its band not configured for this system);
+ *         MRTK_SIGCFG_NOOPINION if this system has no sigcfg entry.
+ */
+int mrtk_sigcfg_freq_idx(int sys, uint8_t code, const mrtk_sigcfg_t* cfg, int nex);
+
 #ifdef __cplusplus
 }
 #endif

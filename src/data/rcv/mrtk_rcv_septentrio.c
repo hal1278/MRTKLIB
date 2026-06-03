@@ -281,13 +281,26 @@ static uint8_t sig_tbl[SBF_MAXSIG + 1][2] = {
     {SYS_QZS, CODE_L5Z}  /* 39: QZS L5S */
 };
 /* signal number to freq-index and code --------------------------------------*/
-static int sig2idx(int sat, int sig, const char* opt, uint8_t* code) {
+static int sig2idx(int sat, int sig, const raw_t* raw, uint8_t* code) {
+    const char* opt = raw->opt;
     int idx, sys = satsys(sat, NULL), nex = NEXOBS;
 
     if (sig < 0 || sig > SBF_MAXSIG || sig_tbl[sig][0] != sys) {
         return -1;
     }
     *code = sig_tbl[sig][1];
+
+    /* #189: when [positioning].signals (sigcfg) is configured, it is authoritative
+     * for per-band code selection (e.g. GLONASS L2C/A as the 2nd frequency). Fall
+     * through to the legacy -R/-G option logic only when this system has no sigcfg
+     * entry (NOOPINION). */
+    if (raw->sigcfg_set) {
+        int r = mrtk_sigcfg_freq_idx(sys, *code, raw->sigcfg, nex);
+        if (r != MRTK_SIGCFG_NOOPINION) {
+            return r;
+        }
+    }
+
     idx = code2freq_idx(sys, *code);
 
     /* resolve code priority in a freq-index */
@@ -431,7 +444,7 @@ static int decode_measepoch(raw_t* raw) {
         }
 
         /* Store Type-1 observation only if the signal is in obsdef */
-        if ((idx = sig2idx(sat, sig, raw->opt, &code)) >= 0) {
+        if ((idx = sig2idx(sat, sig, raw, &code)) >= 0) {
             if (P1 != 0.0) {
                 raw->obs.data[n].P[idx] = P1;
             }
@@ -471,7 +484,7 @@ static int decode_measepoch(raw_t* raw) {
                 trace(NULL, 3, "sbf measepoch ant error: sat=%d ant=%d\n", sat, ant);
                 continue;
             }
-            if ((idx = sig2idx(sat, sig, raw->opt, &code)) < 0) {
+            if ((idx = sig2idx(sat, sig, raw, &code)) < 0) {
                 trace(NULL, 3, "sbf measepoch sig error: sat=%d sig=%d\n", sat, sig);
                 continue;
             }

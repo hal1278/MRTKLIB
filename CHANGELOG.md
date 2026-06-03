@@ -5,6 +5,70 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.12] - 2026-06-03
+
+**Real-time MADOCA-PPP multi-GNSS signal selection.** Brings the real-time
+(`mrtk run`) path up to parity with post-processing for non-GPS constellations:
+Galileo and QZSS are now used, GLONASS L2C/A can be selected, and the obsdef
+signal tables survive in-process restarts. **This is a positioning change** for
+real-time MADOCA-PPP (more constellations enter the solution); post-processing
+outputs are unchanged.
+
+### Added
+
+- **Non-GPS signals in real-time MADOCA-PPP** ([#184](https://github.com/h-shiono/MRTKLIB/issues/184),
+  PR #185) — `rtkrcv` now applies the configured PPP signal selection
+  (`apply_pppsig()`) at server start, mirroring the post-processing path. Without
+  it the obsdef tables kept their defaults and the engine could only form the
+  iono-free pair for GPS, silently dropping Galileo/QZSS/BeiDou. IGS-product PPP
+  still skips it (#135) so the receiver's actual 2nd band survives.
+- **`[positioning].signals` drives raw-decoder code selection**
+  ([#187](https://github.com/h-shiono/MRTKLIB/issues/187), PR #190) — the
+  signal list is now authoritative for which observation code occupies each
+  band's slot during decoding, so e.g. **GLONASS L2C/A** can be used as the
+  iono-free 2nd frequency on an L2C/A-only receiver (Septentrio mosaic-CLAS)
+  without the legacy `-RL2C` option. New `mrtk_sigcfg_freq_idx()` helper;
+  `raw_t` carries the resolved `sigcfg`. **Phase 1 covers the Septentrio (SBF)
+  decoder**; other decoders, the RTCM3 obs path and `convbin` follow in
+  [#189](https://github.com/h-shiono/MRTKLIB/issues/189). The `-R/-G` receiver
+  options are retained as the fallback when `signals` is unset.
+- **Unit tests** — `utest_t_obsdef` (obsdef idempotency/reset) and
+  `utest_t_sigcfg_decode` (sigcfg-driven per-code slotting), both env-independent.
+
+### Changed
+
+- **obsdef signal selection is idempotent across `rtkrcv` restarts**
+  ([#186](https://github.com/h-shiono/MRTKLIB/issues/186), PR #188) —
+  `set_obsdef()` now rebuilds from a pristine default snapshot instead of mutating
+  in place, and a new `reset_obsdef()` is applied before re-selecting signals at
+  server start. A `load`+`restart` that changes the correction source or signal
+  selection (including switching to `correction = "igs"`, which skips
+  `apply_pppsig()`) can no longer inherit a trimmed obsdef. Bit-identical on the
+  first/single configuration.
+- **Docs** — `[positioning].signals` is documented as the recommended,
+  authoritative signal-selection surface (overrides `frequency` / the `[signals]`
+  presets, derives the frequency count, and drives decoder code selection). The
+  `[signals]` preset section is marked **legacy** (coarse, no per-code control,
+  no GLONASS entry). List every band you want — `signals = ["R2C"]` alone derives
+  a single frequency.
+
+### Fixed
+
+- **`init_raw()` initializes the new `raw_t.sigcfg`/`sigcfg_set` fields**
+  (PR #190 review) — `init_raw()` sets members individually, so the
+  `malloc()`+`init_raw()` paths (stream converter, `convbin`) could otherwise
+  evaluate the sigcfg-driven branch on uninitialized state. Defaults to the
+  legacy path.
+
+### Known limitations
+
+- Decoder code-selection from `[positioning].signals` is **Septentrio/SBF only**
+  in this release; the remaining decoders, RTCM3 observations and `convbin` are
+  tracked in [#189](https://github.com/h-shiono/MRTKLIB/issues/189) (Phase 2).
+- GLONASS in MADOCA-PPP requires dual-frequency observations (G1 + G2). On a
+  GLONASS-L2C/A receiver, list `"R2C"` in `[positioning].signals`; an L2P-capable
+  receiver works out-of-the-box.
+
 ## [v0.6.11] - 2026-05-25
 
 **Tooling / developer experience** — no positioning change; all binaries and

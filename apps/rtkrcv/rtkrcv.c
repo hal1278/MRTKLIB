@@ -531,6 +531,28 @@ static int startsvr(vt_t* vt) {
         }
     }
 
+    /* #184: apply PPP signal selection in the real-time path, mirroring the
+     * post-processing path (rnx2rtkp.c). apply_pppsig() reshapes the obsdef
+     * tables (GPS/QZS/GAL/BDS) that every receiver decoder consults via
+     * code2freq_idx(); without it a non-GPS 2nd band that differs from the
+     * default slot (e.g. GAL E5b, BDS B2I) is never mapped, so the madocalib
+     * PPP engine can only form the iono-free pair for GPS. As in post, IGS
+     * precise-product PPP skips it (#135) so the receiver's actual 2nd band
+     * survives. (GLONASS is unaffected: apply_pppsig() does not touch it and
+     * its default G1/G2 obsdef already maps correctly.)
+     *
+     * #186: reset to the pristine defaults first so a restart (the rtkrcv shell
+     * can `load` a new config and `restart` in the same process) that changes
+     * the correction or signal selection — including switching to correction=igs,
+     * which skips apply_pppsig — cannot inherit a previously trimmed obsdef.
+     * sigcfg-configured obsdef (pos1-signals) is left untouched. */
+    if (!prcopt.sigcfg_set) {
+        reset_obsdef();
+        if (prcopt.correction != CORR_IGS) {
+            apply_pppsig(prcopt.pppsig);
+        }
+    }
+
     /* read start commads from command files */
     for (i = 0; i < 3; i++) {
         if (!*rcvcmds[i]) {

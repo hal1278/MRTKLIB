@@ -275,6 +275,78 @@ static obsdef_t* get_obsdef(int sys) {
             return NULL;
     }
 }
+/* pristine default snapshots of the obsdef tables ----------------------------
+ * #186: set_obsdef() rewrites the working tables in place, zeroing the bands
+ * not in the selected pair. Without a pristine reference, signal selection is
+ * not idempotent across rtkrcv restarts — a band trimmed by one selection
+ * cannot be restored by a later one, and switching to correction=igs (which
+ * skips apply_pppsig) leaves the tables trimmed. We snapshot the default tables
+ * on first use, before any mutation, so set_obsdef() / reset_obsdef() can always
+ * rebuild from them. The working-table initialisers above stay the single
+ * source of truth for the default values.
+ *---------------------------------------------------------------------------*/
+static obsdef_t obsdef_GPS_def[MAXFREQ], obsdef_GLO_def[MAXFREQ], obsdef_GAL_def[MAXFREQ], obsdef_QZS_def[MAXFREQ],
+    obsdef_SBS_def[MAXFREQ], obsdef_BDS_def[MAXFREQ], obsdef_BD2_def[MAXFREQ], obsdef_IRN_def[MAXFREQ];
+static int obsdef_defaults_saved = 0;
+
+/* helper: select pristine-default obsdef table by system (mirrors get_obsdef) */
+static obsdef_t* get_obsdef_default(int sys) {
+    switch (sys) {
+        case SYS_GPS:
+            return obsdef_GPS_def;
+        case SYS_GLO:
+            return obsdef_GLO_def;
+        case SYS_GAL:
+            return obsdef_GAL_def;
+        case SYS_QZS:
+            return obsdef_QZS_def;
+        case SYS_SBS:
+            return obsdef_SBS_def;
+        case SYS_CMP:
+            return obsdef_BDS_def;
+        case SYS_BD2:
+            return obsdef_BD2_def;
+        case SYS_IRN:
+            return obsdef_IRN_def;
+        default:
+            return NULL;
+    }
+}
+
+/* capture the pristine default tables on first use (before any mutation) */
+static void save_obsdef_defaults(void) {
+    if (obsdef_defaults_saved) {
+        return;
+    }
+    memcpy(obsdef_GPS_def, obsdef_GPS, sizeof(obsdef_GPS));
+    memcpy(obsdef_GLO_def, obsdef_GLO, sizeof(obsdef_GLO));
+    memcpy(obsdef_GAL_def, obsdef_GAL, sizeof(obsdef_GAL));
+    memcpy(obsdef_QZS_def, obsdef_QZS, sizeof(obsdef_QZS));
+    memcpy(obsdef_SBS_def, obsdef_SBS, sizeof(obsdef_SBS));
+    memcpy(obsdef_BDS_def, obsdef_BDS, sizeof(obsdef_BDS));
+    memcpy(obsdef_BD2_def, obsdef_BD2, sizeof(obsdef_BD2));
+    memcpy(obsdef_IRN_def, obsdef_IRN, sizeof(obsdef_IRN));
+    obsdef_defaults_saved = 1;
+}
+
+/* reset obsdef tables to their pristine defaults -----------------------------
+ * #186: restore the full multi-band tables, e.g. before re-applying signal
+ * selection on an rtkrcv restart, or when switching to correction=igs (which
+ * skips apply_pppsig and must see the receiver's actual bands, #135).
+ * return : none
+ *-----------------------------------------------------------------------------*/
+extern void reset_obsdef(void) {
+    save_obsdef_defaults();
+    memcpy(obsdef_GPS, obsdef_GPS_def, sizeof(obsdef_GPS));
+    memcpy(obsdef_GLO, obsdef_GLO_def, sizeof(obsdef_GLO));
+    memcpy(obsdef_GAL, obsdef_GAL_def, sizeof(obsdef_GAL));
+    memcpy(obsdef_QZS, obsdef_QZS_def, sizeof(obsdef_QZS));
+    memcpy(obsdef_SBS, obsdef_SBS_def, sizeof(obsdef_SBS));
+    memcpy(obsdef_BDS, obsdef_BDS_def, sizeof(obsdef_BDS));
+    memcpy(obsdef_BD2, obsdef_BD2_def, sizeof(obsdef_BD2));
+    memcpy(obsdef_IRN, obsdef_IRN_def, sizeof(obsdef_IRN));
+}
+
 /* set observation definition by frequency number array -----------------------
  * rearrange obsdef table so that freq_nums[0..MAXFREQ-1] appear at indices
  * 0,1,2,... — used to apply pos2-sig* signal selection options.
@@ -283,30 +355,34 @@ static obsdef_t* get_obsdef(int sys) {
  * return : none
  *-----------------------------------------------------------------------------*/
 extern void set_obsdef(int sys, const int* freq_nums) {
-    obsdef_t obsdef_tmp[MAXFREQ] = {{0}};
     obsdef_t* obsdef;
+    const obsdef_t* def;
     obsdef_t obsdef0 = {0};
     int i, j;
 
-    if (!(obsdef = get_obsdef(sys))) {
+    save_obsdef_defaults();
+
+    if (!(obsdef = get_obsdef(sys)) || !(def = get_obsdef_default(sys))) {
         return;
     }
-
+    /* #186: rebuild from the pristine defaults (not the current table) so a band
+       trimmed by a previous selection can still be restored — idempotent. On the
+       first call the defaults equal the current table, so the result is
+       bit-identical to the historical in-place behaviour. */
     for (i = 0; i < MAXFREQ; i++) {
-        obsdef_tmp[i] = obsdef[i];
         obsdef[i] = obsdef0;
     }
     for (i = 0; i < MAXFREQ; i++) {
         for (j = 0; j < MAXFREQ; j++) {
-            if (obsdef_tmp[j].freq_num == freq_nums[i]) {
+            if (def[j].freq_num == freq_nums[i]) {
                 break;
             }
         }
         if (j == MAXFREQ) {
             continue;
         }
-        obsdef[i].freq_num = obsdef_tmp[j].freq_num;
-        obsdef[i].freq_hz = obsdef_tmp[j].freq_hz;
+        obsdef[i].freq_num = def[j].freq_num;
+        obsdef[i].freq_hz = def[j].freq_hz;
     }
 }
 /* apply PPP signal selection options to obsdef tables -----------------------
