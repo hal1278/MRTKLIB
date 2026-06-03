@@ -1269,3 +1269,40 @@ extern int mrtk_sigcfg_to_obsdef(const mrtk_sigcfg_t* cfg) {
     }
     return 0;
 }
+/* mrtk_sigcfg_freq_idx: sigcfg-driven obs slot for a decoded (sys,code) -------
+ * #189: see mrtk_obs.h. When a constellation is configured in sigcfg, the
+ * decoded code is kept only if it is the preferred code for one of the
+ * configured bands (placed at that band's obsdef slot); any other code — a
+ * non-preferred code on a configured band, or any code on a non-configured
+ * band — is dropped. A constellation with no sigcfg entry yields NOOPINION so
+ * the caller keeps its legacy (-R/-G/... option) behaviour.
+ *-----------------------------------------------------------------------------*/
+extern int mrtk_sigcfg_freq_idx(int sys, uint8_t code, const mrtk_sigcfg_t* cfg, int nex) {
+    int sys_idx = sys2sigcfg_idx(sys);
+    int fn, base_idx, i;
+    const mrtk_sigcfg_t* c;
+
+    (void)nex; /* non-selected codes are dropped, not retained as extra obs (phase 1) */
+
+    if (sys_idx < 0 || !cfg) {
+        return MRTK_SIGCFG_NOOPINION;
+    }
+    c = &cfg[sys_idx];
+    if (c->nsig <= 0) {
+        return MRTK_SIGCFG_NOOPINION; /* system not configured: fall back to defaults */
+    }
+
+    fn = code2freq_num(code); /* this code's band (by frequency number) */
+    for (i = 0; i < c->nsig; i++) {
+        if (mrtk_band_to_freq_num(sys, c->sig[i].band) != fn) {
+            continue; /* different band */
+        }
+        /* band is configured: accept only the preferred code (0 = auto/any) */
+        if (c->sig[i].preferred_code == 0 || c->sig[i].preferred_code == code) {
+            base_idx = code2freq_idx(sys, code);
+            return (base_idx >= 0 && base_idx < NFREQ) ? base_idx : -1;
+        }
+        return -1; /* a different code is preferred for this band */
+    }
+    return -1; /* band not configured for this (configured) system */
+}

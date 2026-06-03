@@ -1138,6 +1138,13 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
         strcpy(svr->raw[i].opt, rcvopts[i]);
         strcpy(svr->rtcm[i].opt, rcvopts[i]);
 
+        /* #189: propagate the configured signal selection to the raw decoder so
+         * `[positioning].signals` drives per-band code selection (e.g. GLONASS
+         * L2C/A as the 2nd frequency). Empty sigcfg leaves sigcfg_set=0 and the
+         * decoder keeps its legacy -R/-G option behaviour. */
+        memcpy(svr->raw[i].sigcfg, prcopt->sigcfg, sizeof(svr->raw[i].sigcfg));
+        svr->raw[i].sigcfg_set = prcopt->sigcfg_set;
+
         /* connect dgps corrections */
         svr->rtcm[i].dgps = svr->nav.dgps;
     }

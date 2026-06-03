@@ -101,8 +101,10 @@ typedef struct {
     int outtype;                            /**< output message type */
     uint8_t buff[MAXRAWLEN];                /**< message buffer */
     char opt[256];                          /**< receiver dependent options */
-    int format;                             /**< receiver stream format */
-    void* rcv_data;                         /**< receiver dependent data */
+    mrtk_sigcfg_t sigcfg[MRTK_NSYS]; /**< #189: per-constellation signal config (drives decoder code selection) */
+    int sigcfg_set;                  /**< #189: 1 if sigcfg is configured (else fall back to opt/-Rxxx defaults) */
+    int format;                      /**< receiver stream format */
+    void* rcv_data;                  /**< receiver dependent data */
 } raw_t;
 
 /*============================================================================
