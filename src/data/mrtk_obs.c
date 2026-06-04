@@ -215,7 +215,7 @@ extern int code2freq_num(uint8_t code) {
  *            freq-index    0        1        2        3        4
  *            -----------------------------------------------------
  *            GPS          L1       L2       L5        -        -
- *            GLONASS      G1       G2       G3        -        -
+ *            GLONASS      G1       G2        -        -        -
  *            Galileo      E1      E5a      E5b       E6      E5a+b
  *            QZSS         L1       L5       L2       L6        -
  *            SBAS         L1       L5       -         -        -

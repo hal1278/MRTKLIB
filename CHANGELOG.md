@@ -17,8 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `code2idx()` / `band2idx_fixed()` are removed. **Output change (converter
   only, no positioning impact):** RINEX obs-type columns now follow obsdef band
   order, so Galileo lists **E5a before E5b** and QZSS lists **L5 before L2**
-  (BeiDou columns reorder similarly). The `-freq N` band count keeps its
-  meaning but now selects the same N bands the positioning engines use.
+  (BeiDou columns reorder similarly). The `-f` / `--freq N` band count keeps
+  its meaning but now selects the same N bands the positioning engines use.
   Positioning output is byte-identical (the obsdef tables are untouched).
 
 ### Known limitations
@@ -30,7 +30,7 @@ positioning, so the tables are intentionally left as-is
 
 - **GLONASS G3 (CDMA, GLONASS-K2 only)** — no `obsdef_GLO` slot.
 - **BeiDou B2a+b (AltBOC)** — maps to the 6th obsdef slot, beyond the
-  converter's 5-band `-freq` mask.
+  converter's 5-band `--freq` mask.
 
 ### Tests
 
