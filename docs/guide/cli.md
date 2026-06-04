@@ -143,6 +143,31 @@ mrtk convert [options] rawfile
 mrtk convert -r ubx -v 3.04 --output obs.obs --nav nav.nav raw.ubx
 ```
 
+**Frequency ordering and `-freq N`.** Observation types are written in the
+library's obsdef band order — the same order the positioning engines use — so
+the *N*-th band selected by `-freq N` matches what `mrtk post` / `mrtk run`
+would use. Per constellation that order is:
+
+| System | band 1 | band 2 | band 3 | band 4 | band 5 |
+|--------|--------|--------|--------|--------|--------|
+| GPS | L1 | L2 | L5 | – | – |
+| GLONASS | G1 | G2 | – | – | – |
+| Galileo | E1 | **E5a** | **E5b** | E6 | E5a+b |
+| QZSS | L1 | **L5** | **L2** | L6 | – |
+| BeiDou | B1I | B3 | B2b | B1C | B2a |
+| SBAS | L1 | L5 | – | – | – |
+| NavIC | L5 | S | – | – | – |
+
+So `mrtk convert -f 2` keeps the first two bands of each system (e.g. Galileo
+E1 + E5a). All bands above are emitted at the default (`-f 5`).
+
+!!! note "Known limitations: GLONASS G3 and BeiDou B2a+b"
+    Two rare signals have no slot in the obsdef frequency tables and are not
+    emitted to RINEX: **GLONASS G3** (CDMA, GLONASS-K2 only) and **BeiDou
+    B2a+b** (AltBOC, beyond the converter's 5-band `-freq` mask). Adding slots
+    for them would perturb GLONASS / BeiDou positioning, so the tables are left
+    as-is (see [#71](https://github.com/h-shiono/MRTKLIB/issues/71)).
+
 ---
 
 ## Format Translation

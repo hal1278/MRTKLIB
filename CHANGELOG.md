@@ -5,6 +5,39 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **RINEX converter unified on obsdef frequency indexing**
+  ([#71](https://github.com/h-shiono/MRTKLIB/issues/71)) — `mrtk convert`
+  (convrnx) now derives observation-type frequency indices from
+  `code2freq_idx()`, the obsdef-based mapping already used by every receiver
+  decoder, the RINEX parser, RTCM3 and CLAS. The legacy fixed per-band
+  `code2idx()` / `band2idx_fixed()` are removed. **Output change (converter
+  only, no positioning impact):** RINEX obs-type columns now follow obsdef band
+  order, so Galileo lists **E5a before E5b** and QZSS lists **L5 before L2**
+  (BeiDou columns reorder similarly). The `-freq N` band count keeps its
+  meaning but now selects the same N bands the positioning engines use.
+  Positioning output is byte-identical (the obsdef tables are untouched).
+
+### Known limitations
+
+`mrtk convert` does not emit two rare signals that have no slot in the obsdef
+frequency tables. Adding slots for them would perturb GLONASS / BeiDou
+positioning, so the tables are intentionally left as-is
+([#71](https://github.com/h-shiono/MRTKLIB/issues/71)):
+
+- **GLONASS G3 (CDMA, GLONASS-K2 only)** — no `obsdef_GLO` slot.
+- **BeiDou B2a+b (AltBOC)** — maps to the 6th obsdef slot, beyond the
+  converter's 5-band `-freq` mask.
+
+### Tests
+
+- `utest_t_freqidx` — pins the `code2freq_idx()` (sys, code) → frequency-index
+  contract for GPS/GLONASS/Galileo/QZSS/BeiDou, including the GLONASS G3
+  regression guard.
+
 ## [v0.6.12] - 2026-06-03
 
 **Real-time MADOCA-PPP multi-GNSS signal selection.** Brings the real-time
