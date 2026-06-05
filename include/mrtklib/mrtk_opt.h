@@ -303,6 +303,14 @@ typedef struct prcopt_t {         /* processing options type */
     int tdcp;        /* SPP TDCP mode (0:off, 1:on time-differenced carrier phase) */
     double tdcpjump; /* TDCP jump-rejection threshold (m); reject epoch if the code position
                       * change disagrees with the TDCP displacement by more than this (<=0: code default) */
+
+    /* PPP-RTK/VRS a-priori SPP seed quality (appended for ABI stability).
+     * When set, the per-epoch single-point seed (pntpos) used to (re)initialize
+     * the CLAS/VRS filter applies the proven v0.6.10 SPP profile (C/N0 weighting
+     * + IGG-III robust + TDCP jump-reject) on its PRIVATE option copy only, so
+     * the CLAS measurement model (which reuses err[5]/err[6] as iono/trop terms)
+     * is left untouched. Default 0: bit-identical to prior seed behaviour. */
+    int enhanced_spp_seed; /* 0:off, 1:apply v0.6.10 SPP profile to the a-priori seed */
 } prcopt_t;
 
 /*============================================================================

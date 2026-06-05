@@ -47,6 +47,7 @@ static const toml_map_t toml_mapping[] = {
     /* ── positioning.clas ──────────────────────────────────────────────────── */
     {"positioning.clas", "grid_selection_radius", "pos1-gridsel"},
     {"positioning.clas", "receiver_type", "pos1-rectype"},
+    {"positioning.clas", "enhanced_spp_seed", "pos1-seedenh"},
     {"positioning.clas", "position_uncertainty_x", "pos1-rux"},
     {"positioning.clas", "position_uncertainty_y", "pos1-ruy"},
     {"positioning.clas", "position_uncertainty_z", "pos1-ruz"},

@@ -2717,6 +2717,23 @@ extern int rtkpos(mrtk_ctx_t* ctx, rtk_t* rtk, const obsd_t* obs, int n, nav_t* 
         /* PPP-RTK/VRS: force broadcast ephemeris for SPP initial position */
         if (sppopt.mode == PMODE_PPP_RTK || sppopt.mode == PMODE_VRS_RTK) {
             sppopt.sateph = EPHOPT_BRDC;
+            /* Enhanced seed (opt-in): give the a-priori single-point fix the proven
+             * v0.6.10 SPP error model on this PRIVATE copy only. err[5]/err[6] are
+             * the C/N0 snr_max/snr_error coefficients here (varerr in mrtk_spp.c);
+             * the CLAS engine reads rtk->opt where the same slots mean the iono/trop
+             * estimation-error terms, so it stays untouched. Values match
+             * conf/benchmark/single.toml. Skipped when the flag is 0, leaving the
+             * seed bit-identical to prior behaviour. */
+            if (rtk->opt.enhanced_spp_seed) {
+                sppopt.err[5] = 50.0; /* C/N0 reference snr_max (dB-Hz) */
+                sppopt.err[6] = 0.5;  /* C/N0 weighting coefficient (m) */
+                sppopt.robust = 1;    /* IGG-III robust pseudorange re-weighting */
+                sppopt.robustk[0] = 1.5;
+                sppopt.robustk[1] = 4.0;
+                sppopt.tdcp = 1;       /* TDCP velocity + jump-rejection QC */
+                sppopt.tdcpjump = 5.0; /* reject seed epoch on code-vs-TDCP jump > 5 m */
+                sppopt.thresdop = 1.0; /* TDCP cycle-slip Doppler threshold (cyc/s) */
+            }
         }
         if (!pntpos(ctx, obs, nu, nav, &sppopt, &rtk->sol, NULL, rtk->ssat, msg)) {
             errmsg(rtk, "point pos error (%s)\n", msg);
