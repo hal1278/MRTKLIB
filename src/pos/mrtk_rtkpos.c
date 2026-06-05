@@ -2727,9 +2727,11 @@ extern int rtkpos(mrtk_ctx_t* ctx, rtk_t* rtk, const obsd_t* obs, int n, nav_t* 
             if (rtk->opt.enhanced_spp_seed) {
                 sppopt.err[5] = 50.0; /* C/N0 reference snr_max (dB-Hz) */
                 sppopt.err[6] = 0.5;  /* C/N0 weighting coefficient (m) */
-                sppopt.robust = 1;    /* IGG-III robust pseudorange re-weighting */
-                sppopt.robustk[0] = 1.5;
-                sppopt.robustk[1] = 4.0;
+                /* IGG-III robust intentionally omitted: it improves average seed
+                 * accuracy but perturbs the seed trajectory enough to trip the
+                 * filter's reset/AR thresholds, and fix-and-hold then locks the
+                 * resulting wrong integer (tokyo_run3 misfix 5->71). C/N0+TDCP
+                 * keep the p95 benefit without that regression. */
                 sppopt.tdcp = 1;       /* TDCP velocity + jump-rejection QC */
                 sppopt.tdcpjump = 5.0; /* reject seed epoch on code-vs-TDCP jump > 5 m */
                 sppopt.thresdop = 1.0; /* TDCP cycle-slip Doppler threshold (cyc/s) */
