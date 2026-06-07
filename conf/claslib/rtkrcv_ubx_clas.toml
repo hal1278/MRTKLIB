@@ -18,7 +18,6 @@ elevation_mask = 15.0                                              # (deg)
 dynamics = true                                                    # kinematic
 satellite_ephemeris = "brdc+ssrapc"                                # (3:brdc+ssrapc)
 excluded_sats = ""
-# constellations    = 25  # deprecated: use systems instead
 systems = ["GPS", "Galileo", "QZSS"]
 
 [positioning.clas]

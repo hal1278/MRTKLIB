@@ -2717,6 +2717,32 @@ extern int rtkpos(mrtk_ctx_t* ctx, rtk_t* rtk, const obsd_t* obs, int n, nav_t* 
         /* PPP-RTK/VRS: force broadcast ephemeris for SPP initial position */
         if (sppopt.mode == PMODE_PPP_RTK || sppopt.mode == PMODE_VRS_RTK) {
             sppopt.sateph = EPHOPT_BRDC;
+            /* Enhanced seed (default SEEDENH_BASE = cn0+tdcp; set OFF to disable):
+             * apply the proven v0.6.10 SPP error model to this PRIVATE copy only.
+             * err[5]/err[6] are the C/N0 snr_max/snr_error coefficients here (varerr
+             * in mrtk_spp.c); the CLAS engine reads rtk->opt where the same slots
+             * mean the iono/trop estimation-error terms, so it stays untouched. When
+             * the profile is OFF the seed is bit-identical to prior behaviour. */
+            if (rtk->opt.enhanced_spp_seed >= SEEDENH_BASE) {
+                sppopt.err[5] = 50.0;  /* C/N0 reference snr_max (dB-Hz) */
+                sppopt.err[6] = 0.5;   /* C/N0 weighting coefficient (m) */
+                sppopt.tdcp = 1;       /* TDCP velocity + jump-rejection QC */
+                sppopt.tdcpjump = 5.0; /* reject seed epoch on code-vs-TDCP jump > 5 m */
+                sppopt.thresdop = 1.0; /* TDCP cycle-slip Doppler threshold (cyc/s) */
+                /* IGG-III robust is an explicit opt-in (SEEDENH_ROBUST), not the
+                 * recommended default: it improves average seed accuracy but in deep
+                 * urban canyons perturbs the seed enough to trip the filter into
+                 * fix-and-hold mis-fixes (tokyo_run3 misfix 5->71). Auto-gating it
+                 * from seed-local diagnostics proved infeasible (the harm is a filter
+                 * coupling effect, invisible to the robust residual statistics); see
+                 * docs/design/spp-accuracy.md. So it is left to the operator, who
+                 * knows whether the environment is open-sky (use it) or urban (don't). */
+                if (rtk->opt.enhanced_spp_seed == SEEDENH_ROBUST) {
+                    sppopt.robust = 1;
+                    sppopt.robustk[0] = 1.5;
+                    sppopt.robustk[1] = 4.0;
+                }
+            }
         }
         if (!pntpos(ctx, obs, nu, nav, &sppopt, &rtk->sol, NULL, rtk->ssat, msg)) {
             errmsg(rtk, "point pos error (%s)\n", msg);

@@ -736,3 +736,87 @@ primary, ○ corroborating / applied.
   (§5.2/§5.3), able to absorb errors the loose post-filter cannot. Not pursued
   now; the residual tail is largely NLOS bias, which no filter fixes (needs
   3DMA / external aiding).
+
+## 11. Enhanced a-priori SPP seed for PPP-RTK (2026-06)
+
+### 11.1 Motivation and mechanism
+
+PPP-RTK/VRS computes a single-point fix every epoch (`pntpos`) that seeds and,
+on reset, re-seeds the CLAS/VRS filter position state `x[0..2]`
+([`mrtk_rtkpos.c`](../../src/pos/mrtk_rtkpos.c) seed block). On filter resets
+(obs-loss gap, persistent-FLOAT, large PPP-RTK↔SPP divergence) `udpos_ppp`
+re-initialises the position from this seed, and `resamb_LAMBDA` then builds its
+float vector — including the position states — from `rtk->x`. So a poor seed can
+propagate into the ambiguity search. The hypothesis was that the v0.6.10 SPP
+accuracy work could lift the seed quality and reduce mis-fixes.
+
+### 11.2 The err[5]/err[6] aliasing constraint
+
+The seed runs on a private option copy (`prcopt_t sppopt = rtk->opt`), but until
+now it inherited the CLAS error model verbatim. The two slots `err[5]`/`err[6]`
+are **overloaded**: in `mrtk_spp.c::varerr` they are the C/N0 `snr_max`/`snr_error`
+coefficients, but in `mrtk_ppp_rtk.c::varerr` the same slots are the iono/trop
+estimation-error terms. Setting them on `rtk->opt` to enable seed C/N0 weighting
+would corrupt the CLAS measurement model. The fix is to set the SPP error model
+on `sppopt` **only**, leaving `rtk->opt` (read by the CLAS engine) untouched.
+
+### 11.3 The `enhanced_spp_seed` profile
+
+`[positioning.clas] enhanced_spp_seed` (opt key `pos1-seedenh`):
+
+| Value | Seed gets |
+|-------|-----------|
+| `off` | nothing — bit-identical to prior behaviour |
+| `cn0+tdcp` | C/N0 weighting + TDCP jump-reject (**default**, `prcopt_default`) |
+| `cn0+tdcp+robust` | the above + IGG-III robust (open-sky opt-in) |
+
+PPC-Dataset (6 urban runs), `cn0+tdcp` vs baseline: fix rate 23.7 % → 24.7 %,
+fixed-epoch 95th-pct 3.23 m → 3.02 m, with no large-misfix regression. It is the
+default because it is a net win on kinematic data and **inert on the static
+regression suite** — all six claslib static (みなしローバー) cases run
+byte-close to the off baseline, with deltas (sub-cm RMS-vs-reference) well inside
+the existing test tolerances; one VRS case improves (fix 98.9 % → 99.9 %).
+
+### 11.4 Why robust is opt-in, not default — and why it cannot be auto-gated
+
+Adding `robust` raises the aggregate fix rate (+1.0 pp more) and helps open-sky
+runs markedly (nagoya_run2 fixed-RMS 2.00 m → 1.12 m, worst fixed error 24.8 m →
+14.8 m). **But on the deep-urban-canyon run (tokyo_run3) it is destructive**:
+mis-fixes 5 → 71, worst fixed error 4.4 m → 12 m, in sustained ~15-epoch clusters.
+
+The mechanism is *not* seed inaccuracy — robust actually improves that run's seed
+accuracy (Q1 median 2.48 m → 2.23 m). Instead, the *different* (even better) seed
+trajectory trips the filter's reset/AR thresholds at discrete epochs, and
+fix-and-hold then locks the resulting wrong integer (the clusters hold a constant
+multi-metre offset). Dropping fix-and-hold globally is not viable — it halves the
+fix rate on this data.
+
+Two auto-gating strategies were implemented and benchmarked, then **removed**:
+
+- **Self-gating in `estpos`** (skip robust when its MAD scale `s0` is large or the
+  flagged-satellite fraction is high): *failed*. On tokyo_run3 robust is
+  internally valid (residuals are not flagged), so the gate never fired —
+  identical to always-on — and per-epoch on/off flipping worsened aggregate p95.
+- **Filter-health gating** (enable robust only when an EWMA of recent fixed
+  epochs is high): *partial*. Best aggregate p95 and fewest mis-fixes among the
+  robust arms, and it halved tokyo_run3 mis-fixes (88 → 38), but it failed to
+  capture robust's per-case benefit and a 12 m cluster survived.
+
+**Conclusion:** robust's harm is a filter-coupling effect invisible to any
+seed-local diagnostic; only an external filter-state signal points the right way,
+and a coarse one cannot cleanly separate. The robust harm correlates with the
+SPP-fallback regime (tokyo_run3 = 82 % SPP fallback vs nagoya_run2 = 11 %), i.e.
+how reset-prone the filter is — not with geometry (tokyo_run3 has the *most*
+satellites). So robust is left as an explicit operator opt-in: use it where the
+environment is open-sky, omit it in dense urban canyons.
+
+### 11.5 Real-time applicability
+
+Real-time PPP-RTK/VRS-RTK (`mrtk run`) runs the same `rtkpos()` and the same seed
+block (`mrtk_rtksvr.c` calls `rtkpos(&svr->rtk, ...)`), with the loaded `prcopt`
+propagated to `svr->rtk.opt` via `rtkinit` in `rtksvrstart`, so the default
+profile is active in real time as well. The persistent `svr->rtk.ssat` carries
+the TDCP phase history across the stream loop. Real-time is arguably where the
+seed matters most — stream gaps and cycle slips make it the reset-prone regime
+the enhancement targets — but the benchmark numbers in this document are
+post-processing; the real-time effect has not yet been separately measured.

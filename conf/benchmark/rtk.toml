@@ -2,16 +2,14 @@
 # Converted from: rtk.conf
 
 [positioning]
-mode = "kinematic"  # (2:kinematic)
-correction = "none" # relative RTK uses rover+base, no SSR correction (explicit)
-# frequency           = "l1+2+3"  # triple-freq
+mode = "kinematic"                                                                             # (2:kinematic)
+correction = "none"                                                                            # relative RTK uses rover+base, no SSR correction (explicit)
 signals = ["G1C", "G2W", "G5X", "E1C", "E5Q", "E7Q", "J1C", "J5Q", "J2X", "C2I", "C6I", "C7I"]
 solution_type = "forward"
 elevation_mask = 15.0                                                                          # (deg)
 dynamics = true                                                                                # kinematic
 satellite_ephemeris = "brdc"
 excluded_sats = ""
-# constellations    = 57  # deprecated: use systems instead
 systems = ["GPS", "Galileo", "QZSS", "BeiDou"]
 
 [positioning.snr_mask]

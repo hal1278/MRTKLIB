@@ -546,6 +546,67 @@ horizontal error < 2 m.
 
 ---
 
+## Enhanced a-priori SPP seed for PPP-RTK (CLAS)
+
+PPP-RTK computes a single-point fix every epoch that seeds — and, on a filter
+reset (obs-loss gap, persistent-FLOAT, large PPP-RTK↔SPP divergence), re-seeds —
+the CLAS filter position, which then feeds the ambiguity search. The same
+v0.6.10 SPP error model can be applied to that seed **without touching the CLAS
+measurement model** (the seed runs on a private option copy; the C/N0 slots
+`err[5]/err[6]` mean snr_max/snr_error in SPP but iono/trop terms in the CLAS
+engine, so they are set on the copy only). Controlled by
+`[positioning.clas] enhanced_spp_seed`, **default `cn0+tdcp`**:
+
+| Value | Seed gets |
+|-------|-----------|
+| `off` | nothing — bit-identical to prior behaviour |
+| `cn0+tdcp` | C/N0 weighting + TDCP jump-reject (**default**) |
+| `cn0+tdcp+robust` | the above + IGG-III robust (open-sky opt-in) |
+
+Full rationale in [`docs/design/spp-accuracy.md`](../design/spp-accuracy.md) §11.
+
+### Results: CLAS PPP-RTK, baseline (off) → default (`cn0+tdcp`)
+
+`--mode clas --skip-epochs 60`. **Fix%** = Q=4 epochs; **p95** = 95th-percentile
+horizontal error over fixed epochs.
+
+| Case | Fix% | p95 (fixed) |
+|------|-----:|------------:|
+| nagoya_run1 | 13.9 → 12.3 % | 4.60 → 5.07 m |
+| nagoya_run2 | 35.0 → **36.1 %** | 1.08 → 1.24 m |
+| nagoya_run3 | 8.7 → 8.8 % | 2.31 → 2.30 m |
+| tokyo_run1  | 30.3 → **32.3 %** | 5.44 → **3.52 m** |
+| tokyo_run2  | 42.5 → **46.4 %** | 5.86 → 5.84 m |
+| tokyo_run3  | 11.9 → 12.4 % | 0.10 → 0.12 m |
+| **Mean** | **23.7 → 24.7 %** | **3.23 → 3.02 m** |
+
+### Key findings
+
+- A **modest net-positive**: mean fix rate **+1.0 pp**, mean fixed-epoch p95
+  **−21 cm**, with the largest single gain on tokyo_run1 (p95 5.44 → 3.52 m).
+  The change is per-case mixed (nagoya_run1 regresses slightly), so it is a
+  refinement, not a step change.
+- **C/N0 weighting drives the p95 (tail) improvement**; the seed-only TDCP
+  jump-reject guards against wild SPP jumps but is neutral on this data.
+- **IGG-III robust is opt-in, not default.** It lifts the mean fix rate a further
+  +1.0 pp and helps open-sky runs, but on the deep-urban-canyon run (tokyo_run3) it
+  shifts the seed enough to trip fix-and-hold into sustained mis-fixes
+  (mis-fixes 5 → 71, worst fixed error 4.4 m → 12 m). The harm is a filter-
+  coupling effect invisible to seed-local diagnostics and could not be reliably
+  auto-gated, so robust is left to the operator (use in open sky, omit in dense
+  urban). See [`docs/design/spp-accuracy.md`](../design/spp-accuracy.md) §11.4.
+- **Inert on static positioning.** All six claslib static (みなしローバー)
+  regression cases run byte-close to the off baseline — deltas sub-cm RMS,
+  inside the existing test tolerances — so the default is safe for the static
+  use case while helping the kinematic one.
+- **Applies to real-time too.** Real-time PPP-RTK/VRS-RTK (`mrtk run`) calls the
+  same `rtkpos()` seed path, so the default profile is active there as well —
+  arguably where it matters most (stream gaps and slips make real-time the
+  reset-prone regime the seed targets). The numbers above are post-processing;
+  the real-time effect has not yet been separately benchmarked.
+
+---
+
 ## Metrics Definitions
 
 | Metric | Description |
@@ -571,7 +632,7 @@ the keys it specifies.
 
 **Mode confs** (common settings per algorithm):
 
-- `conf/benchmark/clas.toml` — CLAS PPP-RTK
+- `conf/benchmark/clas.toml` — CLAS PPP-RTK (a-priori SPP seed enhanced by default; see above)
 - `conf/benchmark/madoca.toml` — MADOCA PPP
 - `conf/benchmark/rtk.toml` — Baseline RTK
 - `conf/benchmark/single.toml` — SPP (single-point), with the v0.6.10 accuracy features enabled

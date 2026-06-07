@@ -5,6 +5,72 @@ All notable changes to MRTKLIB are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [v0.6.13] - 2026-06-07
+
+**Enhanced PPP-RTK SPP seed; RINEX converter frequency unification.** The CLAS
+PPP-RTK / VRS-RTK per-epoch single-point seed now uses the v0.6.10 SPP error
+model (C/N0 weighting + TDCP jump-reject) by default, improving kinematic fix
+rate and the fixed-epoch error tail while leaving static positioning unchanged.
+Separately, `mrtk convert` (RINEX converter) unifies its frequency indexing on
+the obsdef tables, reordering some observation-type columns (no positioning
+impact).
+
+### Added
+
+- **Enhanced a-priori SPP seed for PPP-RTK/VRS**
+  ([#196](https://github.com/h-shiono/MRTKLIB/pull/196)) — the single-point fix
+  that seeds (and, on a filter reset, re-seeds) the CLAS/VRS precise filter can
+  apply the proven v0.6.10 SPP error model. New `[positioning.clas]
+  enhanced_spp_seed` profile (`off` / `cn0+tdcp` / `cn0+tdcp+robust`), applied to
+  a **private** SPP option copy so the CLAS measurement model is untouched
+  (`err[5]/err[6]` mean C/N0 in SPP but iono/trop in the CLAS engine). On the PPC
+  urban benchmark: mean fix rate +1.0 pp, fixed-epoch p95 3.23 m → 3.02 m. IGG-III
+  robust is an explicit open-sky opt-in (it can trip fix-and-hold mis-fixes in
+  deep urban canyons). Applies to real-time (`mrtk run`) too.
+
+### Changed
+
+- **Enhanced SPP seed on by default** (`cn0+tdcp`)
+  ([#196](https://github.com/h-shiono/MRTKLIB/pull/196)) — `prcopt_default` now
+  enables the C/N0 + TDCP seed for PPP-RTK/VRS. **Positioning change** for those
+  modes (kinematic improves; the static regression suite is byte-close and within
+  tolerances). Set `enhanced_spp_seed = "off"` to restore prior behaviour. Plain
+  PPP / PPP-AR are unaffected (the seed coupling there was investigated and found
+  inert).
+- Removed 31 deprecated commented `# constellations` / `# frequency` keys from the
+  shipped configs (superseded by the active `systems` / `signals` keys); no value
+  change.
+- **RINEX converter unified on obsdef frequency indexing**
+  ([#71](https://github.com/h-shiono/MRTKLIB/issues/71)) — `mrtk convert`
+  (convrnx) now derives observation-type frequency indices from
+  `code2freq_idx()`, the obsdef-based mapping already used by every receiver
+  decoder, the RINEX parser, RTCM3 and CLAS. The legacy fixed per-band
+  `code2idx()` / `band2idx_fixed()` are removed. **Output change (converter
+  only, no positioning impact):** RINEX obs-type columns now follow obsdef band
+  order, so Galileo lists **E5a before E5b** and QZSS lists **L5 before L2**
+  (BeiDou columns reorder similarly). The `-f` / `--freq N` band count keeps
+  its meaning but now selects the same N bands the positioning engines use.
+  Positioning output is byte-identical (the obsdef tables are untouched).
+
+### Known limitations
+
+`mrtk convert` does not emit two rare signals that have no slot in the obsdef
+frequency tables. Adding slots for them would perturb GLONASS / BeiDou
+positioning, so the tables are intentionally left as-is
+([#71](https://github.com/h-shiono/MRTKLIB/issues/71)):
+
+- **GLONASS G3 (CDMA, GLONASS-K2 only)** — no `obsdef_GLO` slot.
+- **BeiDou B2a+b (AltBOC)** — maps to the 6th obsdef slot, beyond the
+  converter's 5-band `--freq` mask.
+
+### Tests
+
+- `utest_t_freqidx` — pins the `code2freq_idx()` (sys, code) → frequency-index
+  contract for GPS/GLONASS/Galileo/QZSS/BeiDou, including the GLONASS G3
+  regression guard.
+
 ## [v0.6.12] - 2026-06-03
 
 **Real-time MADOCA-PPP multi-GNSS signal selection.** Brings the real-time

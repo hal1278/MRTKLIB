@@ -103,8 +103,6 @@ static char* obscodes[] = {
  * Private Functions
  *===========================================================================*/
 
-static int band2idx_fixed(mrtk_band_t band); /* forward declaration */
-
 /* compare observation data -------------------------------------------------*/
 static int cmpobs(const void* p1, const void* p2) {
     obsd_t *q1 = (obsd_t*)p1, *q2 = (obsd_t*)p2;
@@ -194,31 +192,6 @@ extern char* code2obs(uint8_t code) {
         return "";
     }
     return obscodes[code];
-}
-/* system and obs code to frequency index --------------------------------------
- * convert system and obs code to frequency index
- * args   : int    sys       I   satellite system (SYS_???)
- *          uint8_t code     I   obs code (CODE_???)
- * return : frequency index (-1: error)
- *            freq-index    0        1        2        3        4
- *            Signal ID    L1       L2       L3       L4       L5
- *            -----------------------------------------------------
- *            GPS          L1       L2       L5        -        -
- *            GLONASS    G1/G1a   G2/G2a     G3        -        -
- *            Galileo      E1       E5b     E5a       E6      E5a+b
- *            QZSS         L1       L2       L5       L6        -
- *            SBAS         L1       L5       -         -        -
- *            BDS      B1/B1C/B1A B2/B2b    B2a     B3/B3A    B2a+b
- *            NavIC        L5        S       -         -        -
- *-----------------------------------------------------------------------------*/
-extern int code2idx(int sys, uint8_t code) {
-    int freq_num = code2freq_num(code);
-    mrtk_band_t band;
-    if (sys == SYS_BD2) {
-        sys = SYS_CMP;
-    }
-    band = mrtk_rinex_freq_to_band(sys, freq_num);
-    return band2idx_fixed(band);
 }
 /* obs code to frequency number ------------------------------------------------
  * extract frequency number from obs code
@@ -819,52 +792,6 @@ extern double mrtk_band2freq_hz(mrtk_band_t band) {
         case MRTK_BAND_IRN_L5:  return FREQ5;
         case MRTK_BAND_IRN_S:   return FREQ9;
         default:                return 0.0;
-    }
-    /* clang-format on */
-}
-
-/* band2idx_fixed: physical band -> fixed frequency index ---------------------
- * convert mrtk_band_t to the fixed per-system frequency index used by code2idx().
- * this is the "Layer A" mapping that does NOT depend on obsdef table ordering.
- * args   : mrtk_band_t band  I  physical frequency band
- * return : fixed frequency index (0,1,2,...), -1 on error
- *----------------------------------------------------------------------------*/
-static int band2idx_fixed(mrtk_band_t band) {
-    /* clang-format off */
-    switch (band) {
-        /* GPS: L1=0, L2=1, L5=2 */
-        case MRTK_BAND_GPS_L1:  return 0;
-        case MRTK_BAND_GPS_L2:  return 1;
-        case MRTK_BAND_GPS_L5:  return 2;
-        /* GLO: G1=0, G2=1, G3=2 */
-        case MRTK_BAND_GLO_G1:  return 0;
-        case MRTK_BAND_GLO_G2:  return 1;
-        case MRTK_BAND_GLO_G3:  return 2;
-        /* GAL: E1=0, E5b=1, E5a=2, E6=3, E5ab=4 */
-        case MRTK_BAND_GAL_E1:  return 0;
-        case MRTK_BAND_GAL_E5b: return 1;
-        case MRTK_BAND_GAL_E5a: return 2;
-        case MRTK_BAND_GAL_E6:  return 3;
-        case MRTK_BAND_GAL_E5ab:return 4;
-        /* QZS: L1=0, L2=1, L5=2, L6=3 */
-        case MRTK_BAND_QZS_L1:  return 0;
-        case MRTK_BAND_QZS_L2:  return 1;
-        case MRTK_BAND_QZS_L5:  return 2;
-        case MRTK_BAND_QZS_L6:  return 3;
-        /* SBS: L1=0, L5=1 */
-        case MRTK_BAND_SBS_L1:  return 0;
-        case MRTK_BAND_SBS_L5:  return 1;
-        /* BDS: B1C/B1I=0, B2b=1, B2a=2, B3=3, B2ab=4 */
-        case MRTK_BAND_BDS_B1C: return 0;
-        case MRTK_BAND_BDS_B1I: return 0;
-        case MRTK_BAND_BDS_B2b: return 1;
-        case MRTK_BAND_BDS_B2a: return 2;
-        case MRTK_BAND_BDS_B3:  return 3;
-        case MRTK_BAND_BDS_B2ab:return 4;
-        /* IRN: L5=0, S=1 */
-        case MRTK_BAND_IRN_L5:  return 0;
-        case MRTK_BAND_IRN_S:   return 1;
-        default:                return -1;
     }
     /* clang-format on */
 }

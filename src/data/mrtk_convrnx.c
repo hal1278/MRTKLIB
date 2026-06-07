@@ -344,8 +344,8 @@ static void sort_obstype(uint8_t* codes, uint8_t* types, int n, int sys) {
 
     for (i = 0; i < n - 1; i++)
         for (j = i + 1; j < n; j++) {
-            idx1 = code2idx(navsys[sys], codes[i]);
-            idx2 = code2idx(navsys[sys], codes[j]);
+            idx1 = code2freq_idx(navsys[sys], codes[i]);
+            idx2 = code2freq_idx(navsys[sys], codes[j]);
             pri1 = getcodepri(navsys[sys], codes[i], "");
             pri2 = getcodepri(navsys[sys], codes[j], "");
             if (idx1 < idx2 || (idx1 == idx2 && pri1 >= pri2)) continue;
@@ -370,7 +370,7 @@ static void setopt_obstype(const uint8_t* codes, const uint8_t* types, int sys, 
     if (!(navsys[sys] & opt->navsys)) return;
 
     for (i = 0; codes[i]; i++) {
-        if (!(id = code2obs(codes[i])) || (idx = code2idx(navsys[sys], codes[i])) < 0) {
+        if (!(id = code2obs(codes[i])) || (idx = code2freq_idx(navsys[sys], codes[i])) < 0) {
             continue;
         }
         if (!(opt->freqtype & (1 << idx)) || opt->mask[sys][codes[i] - 1] == '0') {

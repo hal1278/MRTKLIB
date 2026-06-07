@@ -46,6 +46,7 @@ static char signals_[1024];
 
 /* system options table ------------------------------------------------------*/
 #define SWTOPT "0:off,1:on"
+#define SEEDOPT "0:off,1:cn0+tdcp,2:cn0+tdcp+robust"
 #define MODOPT                                                                                                    \
     "0:single,1:dgps,2:kinematic,3:static,4:movingbase,5:fixed,6:ppp-kine,7:ppp-static,8:ppp-fixed,9:ppp-rtk,10:" \
     "ssr2osr,11:ssr2osr-fixed,12:vrs-rtk"
@@ -101,6 +102,7 @@ opt_t sysopts[] = {
     {"pos1-robustk1", 1, (void*)&prcopt_.robustk[1], ""},
     {"pos1-tdcp", 3, (void*)&prcopt_.tdcp, SWTOPT},
     {"pos1-tdcpjump", 1, (void*)&prcopt_.tdcpjump, "m"},
+    {"pos1-seedenh", 3, (void*)&prcopt_.enhanced_spp_seed, SEEDOPT},
     {"pos1-sateph", 3, (void*)&prcopt_.sateph, EPHOPT},
     {"pos1-posopt1", 3, (void*)&prcopt_.posopt[0], SWTOPT},
     {"pos1-posopt2", 3, (void*)&prcopt_.posopt[1], SWTOPT},

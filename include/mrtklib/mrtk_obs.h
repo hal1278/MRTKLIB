@@ -88,14 +88,6 @@ uint8_t obs2code(const char* obs);
 char* code2obs(uint8_t code);
 
 /**
- * @brief Convert system and obs code to frequency index.
- * @param[in] sys   Satellite system (SYS_???)
- * @param[in] code  Obs code (CODE_???)
- * @return Frequency index (-1: error)
- */
-int code2idx(int sys, uint8_t code);
-
-/**
  * @brief Extract frequency number from obs code.
  * @param[in] code  Obs code (CODE_???)
  * @return Frequency number (1,2,5,...) (0: error)
