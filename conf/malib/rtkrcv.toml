@@ -2,14 +2,13 @@
 # Converted from: rtkrcv.conf
 
 [positioning]
-mode = "ppp-kine"                   # (0:single,1:dgps,2:kinematic,3:static,4:movingbase,5:fixed,6:ppp-kine,7:ppp-static,8:ppp-fixed)
-frequency = "l1+2"                  # (1:l1,2:l1+2,3:l1+2+3,4:l1+2+3+4,5:l1+2+3+4+5)
-solution_type = "forward"           # (0:forward,1:backward,2:combined)
-elevation_mask = 10.0               # (deg)
-dynamics = false                    # (0:off,1:on)
-satellite_ephemeris = "brdc+ssrapc" # (0:brdc,1:precise,2:brdc+sbas,3:brdc+ssrapc,4:brdc+ssrcom)
-excluded_sats = ""                  # (prn ...)
-# constellations    = 29  # deprecated: use systems instead
+mode = "ppp-kine"                               # (0:single,1:dgps,2:kinematic,3:static,4:movingbase,5:fixed,6:ppp-kine,7:ppp-static,8:ppp-fixed)
+frequency = "l1+2"                              # (1:l1,2:l1+2,3:l1+2+3,4:l1+2+3+4,5:l1+2+3+4+5)
+solution_type = "forward"                       # (0:forward,1:backward,2:combined)
+elevation_mask = 10.0                           # (deg)
+dynamics = false                                # (0:off,1:on)
+satellite_ephemeris = "brdc+ssrapc"             # (0:brdc,1:precise,2:brdc+sbas,3:brdc+ssrapc,4:brdc+ssrcom)
+excluded_sats = ""                              # (prn ...)
 systems = ["GPS", "GLONASS", "Galileo", "QZSS"]
 
 [positioning.snr_mask]
