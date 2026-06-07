@@ -762,16 +762,20 @@ on `sppopt` **only**, leaving `rtk->opt` (read by the CLAS engine) untouched.
 
 ### 11.3 The `enhanced_spp_seed` profile
 
-`[positioning.clas] enhanced_spp_seed` (opt key `pos1-seedenh`), default off:
+`[positioning.clas] enhanced_spp_seed` (opt key `pos1-seedenh`):
 
 | Value | Seed gets |
 |-------|-----------|
 | `off` | nothing — bit-identical to prior behaviour |
-| `cn0+tdcp` | C/N0 weighting + TDCP jump-reject (**recommended "on"**) |
+| `cn0+tdcp` | C/N0 weighting + TDCP jump-reject (**default**, `prcopt_default`) |
 | `cn0+tdcp+robust` | the above + IGG-III robust (open-sky opt-in) |
 
 PPC-Dataset (6 urban runs), `cn0+tdcp` vs baseline: fix rate 23.7 % → 24.7 %,
-fixed-epoch 95th-pct 3.23 m → 3.02 m, with no large-misfix regression.
+fixed-epoch 95th-pct 3.23 m → 3.02 m, with no large-misfix regression. It is the
+default because it is a net win on kinematic data and **inert on the static
+regression suite** — all six claslib static (みなしローバー) cases run
+byte-close to the off baseline, with deltas (sub-cm RMS-vs-reference) well inside
+the existing test tolerances; one VRS case improves (fix 98.9 % → 99.9 %).
 
 ### 11.4 Why robust is opt-in, not default — and why it cannot be auto-gated
 
