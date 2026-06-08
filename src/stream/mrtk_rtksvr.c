@@ -480,24 +480,21 @@ static int decoderaw(rtksvr_t* svr, int index) {
              svr->format[index] == STRFMT_SEPT)) {
             int k, ch, cret, max_cret = 0;
 
-            if (svr->format[index] == STRFMT_UBX) {
-                /* UBX: demux L6D frames by PRN (both channels in same stream) */
-                int l6prn = svr->rtcm[index].buff[4]; /* PRN from L6 frame header */
-                if (svr->clas->l6delivery[0] < 0 || svr->clas->l6delivery[0] == l6prn) {
+            if (svr->format[index] == STRFMT_UBX || svr->format[index] == STRFMT_SEPT) {
+                /* UBX/SBF: both L6 channels arrive interleaved in one stream.
+                 * Single-channel CLAS (l6mrg=0) only ever reads ssr_ch[0], so
+                 * route every frame to ch 0 — this keeps corrections flowing
+                 * across a QZS satellite handover (PRN change), see #197.
+                 * Dual-channel CLAS (l6mrg!=0) demuxes by CLAS Transmit Pattern
+                 * ID (bits 2-1 of the L6 message-ID byte buff[5], i.e. the byte
+                 * after the 4-byte preamble and PRN), not by PRN, so each of the
+                 * two augmentation patterns locks to its own channel and a
+                 * handover within a pattern stays on the same channel. */
+                if (!svr->rtk.opt.l6mrg) {
                     ch = 0;
                 } else {
-                    ch = 1;
-                }
-            } else if (svr->format[index] == STRFMT_SEPT) {
-                /* SBF: demux L6D frames by PRN from raw->ephsat */
-                int l6prn = 0, sat = svr->raw[index].ephsat;
-                if (sat > 0) {
-                    satsys(sat, &l6prn);
-                }
-                if (svr->clas->l6delivery[0] < 0 || svr->clas->l6delivery[0] == l6prn) {
-                    ch = 0;
-                } else {
-                    ch = 1;
+                    int ptn = (svr->rtcm[index].buff[5] & 0x06) >> 1;
+                    ch = clas_pattern_to_ch(svr->clas, ptn);
                 }
             } else {
                 /* L6E: use stream index mapping (separate streams per channel) */
