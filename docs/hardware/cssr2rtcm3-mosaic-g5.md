@@ -173,7 +173,7 @@ Configure the mosaic-G5 using RxTools (the mosaic-G5 module does not have a Web 
     bidirectional setup this is the **same COM port that outputs SBF** (the
     one `mrtk relay -in` connects to, e.g. `COM1` / `USB1`). Set its **Input
     Type** explicitly to `RTCMv3` — output and input coexist on one port, as
-    the `gdio` line below shows (`RTCMv3` in, `SBF+NMEA` out).
+    the `gdio` line below shows (`RTCMv3` in, `SBF+NMEA+ASCIIDisplay` out).
 
     Via RxControl GUI: `Communication` > `Input/Output Selection`, choose the
     target port, set `Input Type` to `RTCMv3`, click `Apply`.
@@ -263,13 +263,13 @@ mrtk relay \
   -in serial://ttyACM0:115200 \
   -b 1 \
   -out tcpsvr://:9000 \
-  -out file://mosaic-g5_%Y%m%d%h.sbf::S=1h
+  -out file://mosaic-g5_%Y%m%d%h.sbf::S=1
 ```
 
 - `-in serial://ttyACM0:115200` — read SBF from the mosaic-G5 serial port (COM1)
 - `-b 1` — relay data received on **output stream 1** (the TCP server below) back into the serial input. Streams are numbered from the input (stream 0), so `-b 1` is the first `-out`. This is what carries RTCM3 to the receiver over the same port.
 - `-out tcpsvr://:9000` — output stream 1: serve SBF on TCP 9000 and accept RTCM3 back from `mrtk cssr2rtcm3`
-- `-out file://mosaic-g5_%Y%m%d%h.sbf::S=1h` — output stream 2: log raw SBF, split hourly (optional, for post-analysis)
+- `-out file://mosaic-g5_%Y%m%d%h.sbf::S=1` — output stream 2: log raw SBF, split hourly (optional, for post-analysis). `::S=` is the swap interval in **hours** (`1` = hourly); the value is read as a plain number, so do not append a unit suffix (e.g. `::S=1h` still means 1 hour, `::S=0.5` is 30 min).
 
 !!! warning "Keep the TCP server as the first `-out`"
     `-b 1` points at the first `-out`. Put `-out tcpsvr://…` before
