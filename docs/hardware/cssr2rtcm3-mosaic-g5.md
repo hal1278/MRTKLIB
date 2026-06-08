@@ -263,13 +263,13 @@ mrtk relay \
   -in serial://ttyACM0:115200 \
   -b 1 \
   -out tcpsvr://:9000 \
-  -out file://mosaic-g5_%Y%m%d%h.sbf::S=1
+  -out file://mosaic-g5_%Y%m%d%h.sbf::S=1h
 ```
 
 - `-in serial://ttyACM0:115200` — read SBF from the mosaic-G5 serial port (COM1)
 - `-b 1` — relay data received on **output stream 1** (the TCP server below) back into the serial input. Streams are numbered from the input (stream 0), so `-b 1` is the first `-out`. This is what carries RTCM3 to the receiver over the same port.
 - `-out tcpsvr://:9000` — output stream 1: serve SBF on TCP 9000 and accept RTCM3 back from `mrtk cssr2rtcm3`
-- `-out file://mosaic-g5_%Y%m%d%h.sbf::S=1` — output stream 2: log raw SBF, split hourly (optional, for post-analysis). `::S=` is the swap interval in **hours** (`1` = hourly); the value is read as a plain number, so do not append a unit suffix (e.g. `::S=1h` still means 1 hour, `::S=0.5` is 30 min).
+- `-out file://mosaic-g5_%Y%m%d%h.sbf::S=1h` — output stream 2: log raw SBF, split hourly (optional, for post-analysis). `::S=` is the swap interval in **hours**: it is read as a plain number (`sscanf("S=%lf")`) and any trailing letters are ignored, so `::S=1h` and `::S=1` both mean 1 hour. Use a fraction for sub-hour splits (`::S=0.5` = 30 min); a suffix like `::S=30m` is **not** 30 minutes — it parses as 30 hours.
 
 !!! warning "Keep the TCP server as the first `-out`"
     `-b 1` points at the first `-out`. Put `-out tcpsvr://…` before
