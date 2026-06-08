@@ -40,6 +40,7 @@
 #include <unistd.h>
 
 #include "mrtklib/mrtk_cli.h"
+#include "mrtklib/mrtk_context.h"
 #include "mrtklib/rtklib.h"
 
 #define PRGNAME "str2str"      /* program name */
@@ -248,6 +249,7 @@ int mrtk_relay(int argc, char** argv) {
     int i, j, n = 0, dispint = 5000, trlevel = 0, opts[] = {10000, 10000, 2000, 32768, 10, 0, 30, 0};
     int types[MAXSTR] = {STR_FILE, STR_FILE}, stat[MAXSTR] = {0}, log_stat[MAXSTR] = {0};
     int byte[MAXSTR] = {0}, bps[MAXSTR] = {0}, fmts[MAXSTR] = {0}, sta = 0;
+    mrtk_ctx_t* ctx = NULL;
 
     /* translate --long flags to their -short aliases before parsing */
     mrtk_normalize_args(argc, argv, opt_aliases);
@@ -359,6 +361,10 @@ int mrtk_relay(int argc, char** argv) {
     strsvrinit(&strsvr, n);
 
     if (trlevel > 0) {
+        /* trace*() resolve their target through the global runtime context;
+           without it traceopen() no-ops and no trace file is written (#79) */
+        ctx = mrtk_ctx_create();
+        g_mrtk_ctx = ctx;
         traceopen(NULL, *logfile ? logfile : TRFILE);
         tracelevel(NULL, trlevel);
     }
@@ -374,6 +380,14 @@ int mrtk_relay(int argc, char** argv) {
     /* start stream server */
     if (!strsvrstart(&strsvr, opts, types, paths, logs, conv, cmds, cmds_periodic, stapos)) {
         fprintf(stderr, "stream server start error\n");
+        for (i = 0; i < n; i++) {
+            strconvfree(conv[i]);
+        }
+        if (trlevel > 0) {
+            traceclose(NULL);
+            g_mrtk_ctx = NULL;
+            mrtk_ctx_destroy(ctx);
+        }
         return -1;
     }
     for (intrflg = 0; !intrflg;) {
@@ -398,6 +412,8 @@ int mrtk_relay(int argc, char** argv) {
     }
     if (trlevel > 0) {
         traceclose(NULL);
+        g_mrtk_ctx = NULL;
+        mrtk_ctx_destroy(ctx);
     }
     fprintf(stderr, "stream server stop\n");
     return 0;
