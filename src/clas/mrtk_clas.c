@@ -77,6 +77,7 @@ extern int clas_ctx_init(clas_ctx_t* ctx) {
     for (i = 0; i < CLAS_CH_NUM; i++) {
         ctx->l6facility[i] = -1;
         ctx->l6delivery[i] = -1;
+        ctx->l6pattern[i] = -1;
     }
     ctx->initialized = 1;
     return 0;
@@ -2857,6 +2858,27 @@ extern int clas_get_correct_fac(int msgid) {
                 return -1;
         }
     }
+}
+
+extern int clas_pattern_to_ch(clas_ctx_t* ctx, int ptn) {
+    int ch;
+
+    /* return the channel already locked to this pattern */
+    for (ch = 0; ch < CLAS_CH_NUM; ch++) {
+        if (ctx->l6pattern[ch] == ptn) {
+            return ch;
+        }
+    }
+    /* otherwise lock this pattern to the first free channel */
+    for (ch = 0; ch < CLAS_CH_NUM; ch++) {
+        if (ctx->l6pattern[ch] < 0) {
+            ctx->l6pattern[ch] = ptn;
+            trace(NULL, 2, "L6 pattern lock: ch=%d pattern=%d\n", ch, ptn);
+            return ch;
+        }
+    }
+    /* all channels taken (>2 patterns is not expected): fall back to ch 0 */
+    return 0;
 }
 
 extern int clas_input_cssr(clas_ctx_t* ctx, uint8_t data, int ch) {

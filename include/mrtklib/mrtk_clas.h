@@ -612,6 +612,12 @@ typedef struct {
     int l6delivery[CLAS_CH_NUM];
     int l6facility[CLAS_CH_NUM];
 
+    /* CLAS Transmit Pattern ID locked to each channel (-1=unset).
+     * Used by the real-time demux to route L6D frames by augmentation
+     * pattern instead of broadcasting PRN, so a QZS handover (PRN change
+     * within the same pattern) keeps feeding the same channel. */
+    int l6pattern[CLAS_CH_NUM];
+
     /* nav_t update flag (signals positioning engine to refresh) */
     int updateac;
 
@@ -746,6 +752,21 @@ void clas_check_grid_status(clas_ctx_t* ctx, const clas_corr_t* corr, int ch);
  * @return Facility ID (0-3)
  */
 int clas_get_correct_fac(int msgid);
+
+/**
+ * @brief Map a CLAS Transmit Pattern ID to an L6 channel index.
+ *
+ * Routes L6D frames by augmentation pattern rather than broadcasting PRN.
+ * The first pattern seen locks to ch 0; the other pattern locks to ch 1.
+ * A QZS satellite handover that changes the PRN but not the pattern keeps
+ * the same channel, so corrections are not stranded on an unread channel.
+ *
+ * @param[in,out] ctx  CLAS context (holds the per-channel pattern lock)
+ * @param[in]     ptn  CLAS Transmit Pattern ID, extracted from L6 header
+ *                     byte 5 as `(byte5 & 0x06) >> 1`
+ * @return L6 channel index (0..CLAS_CH_NUM-1)
+ */
+int clas_pattern_to_ch(clas_ctx_t* ctx, int ptn);
 
 /*============================================================================
  * Grid Interpolation (mrtk_clas_grid.c)
