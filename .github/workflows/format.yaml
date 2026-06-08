@@ -40,7 +40,11 @@ jobs:
           TAPLO_SHA256: 8fe196b894ccf9072f98d4e1013a180306e17d244830b03986ee5e8eabeb6156
         run: |
           mkdir -p "$HOME/.local/bin"
-          curl -fsSL -o taplo.gz \
+          # Retry transient GitHub Releases failures (e.g. HTTP 504) so an
+          # infra hiccup downloading taplo does not fail unrelated PRs.
+          # --retry-all-errors makes --retry also cover HTTP 5xx responses.
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 3 \
+            --connect-timeout 15 -o taplo.gz \
             https://github.com/tamasfe/taplo/releases/download/0.10.0/taplo-linux-x86_64.gz
           echo "${TAPLO_SHA256}  taplo.gz" | sha256sum -c -
           gunzip -c taplo.gz > "$HOME/.local/bin/taplo"
