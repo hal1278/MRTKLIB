@@ -42,19 +42,20 @@ In this approach, MRTKLIB converts CLAS corrections into standard RTCM3 MSM7
 messages and feeds them back to the mosaic-G5, which then computes a
 VRS-based RTK position using its built-in engine.
 
-1. `mrtk relay` bridges the serial connection to the mosaic-G5, forwarding SBF data to `mrtk cssr2rtcm3` and returning RTCM3 corrections
-2. `mrtk cssr2rtcm3` decodes L6D CSSR, computes OSR via `clas_ssr2osr()`, and encodes RTCM3 MSM7
-3. The mosaic-G5 receives the RTCM3 corrections and computes a VRS-RTK position
+1. `mrtk relay` bridges a **single bidirectional serial port** to the mosaic-G5: it forwards SBF to `mrtk cssr2rtcm3` over TCP, and its `-b` (relay-back) option feeds the RTCM3 it receives back into that same serial port
+2. `mrtk cssr2rtcm3` decodes L6D CSSR, computes OSR via `clas_ssr2osr()`, encodes RTCM3 MSM7, and returns it to `mrtk relay` over the TCP loopback
+3. The mosaic-G5 receives the RTCM3 corrections over the one serial port and computes a VRS-RTK position
 4. `mrtk relay` also outputs the positioning result (SBF/NMEA)
 
 ```mermaid
 flowchart LR
-    A["mosaic-G5 P3"] -- "Serial(SBF)" --> B["mrtk relay"]
+    A["mosaic-G5 P3"] -- "Serial (SBF)" --> B["mrtk relay"]
     subgraph "Host (PC / SBC)"
-    B -- "TCP/IP(SBF)" --> C["mrtk cssr2rtcm3"]
+    B -- "TCP/IP (SBF)" --> C["mrtk cssr2rtcm3"]
+    C -- "TCP/IP (RTCM3)" --> B
     B -- "SBF" --> D@{ shape: stadium, label: "Output" }
     end
-    C -- "Serial(RTCM3)" --> A
+    B -- "Serial (RTCM3, relay-back)" --> A
 ```
 
 #### Approach 2 — MRTKLIB Engine (`mrtk run`)
