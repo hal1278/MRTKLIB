@@ -24,12 +24,11 @@ satellite orbit and clock all drop out and only the correction/ambiguity
 content remains.
 
 Usage:
-    python3 osr_residual.py BRANCH.rtcm3 [--compare DEVELOP.rtcm3]
-                            [--jump-floor 0.05] [--csv out_prefix]
+    python3 osr_residual.py BRANCH.rtcm3 [--compare OTHER.rtcm3]
+                            [--jump-floor 0.05]
 
-The optional --compare runs the same analysis on a second file (e.g. develop
-vs a fix branch, or mosaic-CLAS vs cssr2rtcm3) and prints the jump counts
-side by side.
+The optional --compare runs the same analysis on a second file (e.g. a
+develop build vs a fix branch) and prints the jump counts side by side.
 """
 
 import argparse
@@ -141,7 +140,7 @@ def analyze(series, jump_floor):
         cmc_jumps = _jumps(cmc_ev, cmc_d, jump_floor)
 
         # lock-time decreases (encoder slip flag, if populated)
-        lt = [(t, l) for t, _p, _pm, l in sigs[sigA]]
+        lt = [(t, lk) for t, _p, _pm, lk in sigs[sigA]]
         lt_resets = sum(1 for a, b in zip(lt, lt[1:]) if b[1] < a[1])
 
         rows.append(
@@ -159,8 +158,11 @@ def analyze(series, jump_floor):
     return rows
 
 
-_MSM7_SYS = {1077: "GPS", 1087: "GLO", 1097: "GAL", 1117: "QZS"}
-_MSM7_PREFIX = {"GPS": "G", "GLO": "R", "GAL": "E", "QZS": "J"}
+# GLONASS (1087) is intentionally omitted: cssr2rtcm3 does not emit it and the
+# compare_rtcm3 obs decoder does not handle it, so the rest of this tool is
+# GPS/GAL/QZS only — keep the dead-obs scan to the same scope.
+_MSM7_SYS = {1077: "GPS", 1097: "GAL", 1117: "QZS"}
+_MSM7_PREFIX = {"GPS": "G", "GAL": "E", "QZS": "J"}
 
 
 def scan_dead_obs(msgs):
@@ -187,6 +189,8 @@ def scan_dead_obs(msgs):
         sig_mask = br.read_uint(32)
         sat_ids = [i + 1 for i in range(64) if sat_mask & (1 << (63 - i))]
         nsig = bin(sig_mask).count("1")
+        if not sat_ids or nsig == 0:
+            continue  # empty MSM (matches compare_rtcm3.parse_msm7's early return)
         for _ in range(len(sat_ids) * nsig):  # cell mask
             br.read_uint(1)
         prefix = _MSM7_PREFIX.get(sys, "?")
@@ -231,7 +235,6 @@ def report(rows, label):
             f"{r['gf_rms_mm']:>10.1f}{len(r['cmc_jumps']):>7}"
             f"{r['cmc_rms_mm']:>11.1f}{r['lock_resets']:>8}"
         )
-    nsat = len(rows) or 1
     gf_rms = statistics.median([r["gf_rms_mm"] for r in rows]) if rows else 0.0
     print(
         f"\n  satellites={len(rows)}  total GF jumps={tot_gf}  "
