@@ -1171,15 +1171,22 @@ int clas_osr_zdres(const obsd_t* obs, int n, const double* rs, const double* dts
         sys = satsys(sat, &prn);
         osr[i].sat = sat;
 
-        /* VRS mode (y==NULL): pre-populate obs codes from CLAS smode
-         * so that clas_osr_corrmeas can match bias corrections.
-         * Guard with code[j]==0 to avoid overwriting real receiver codes
-         * in PPP-RTK mode. */
+        /* VRS mode (y==NULL): set obs codes from CLAS smode so the per-signal
+         * slot ordering matches the VRS fill in clas_ssr2osr(), which emits
+         * obs[].code[j] = smode[j] and reads osr[].c[j] by the same index.
+         *
+         * This MUST be unconditional. The dummy-obs buffer is reused across
+         * epochs, so obs_copy[].code[j] can hold a stale non-zero code from a
+         * previous epoch (or a different satellite). A `code[j]==0` guard then
+         * leaves that stale code in place, desyncing the slot order from smode:
+         * zdres computes osr[].c[] for one signal while the fill reads it as
+         * another, leaking a stale carrier value (observed as ~1153 m E5a
+         * glitches on E33 when the receiver-tracked signal set differs from the
+         * CLAS-corrected set). PPP-RTK mode (y!=NULL) skips this block entirely,
+         * so real receiver codes are preserved there. */
         if (y == NULL && sat > 0 && sat <= MAXSAT) {
             for (j = 0; j < nf; j++) {
-                if (obs_copy[i].code[j] == 0) {
-                    obs_copy[i].code[j] = corr->smode[sat - 1][j];
-                }
+                obs_copy[i].code[j] = corr->smode[sat - 1][j];
             }
         }
 
