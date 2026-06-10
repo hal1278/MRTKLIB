@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.6.14] - 2026-06-10
+
+**Real-time CLAS handover robustness + cssr2rtcm3 / VRS carrier-phase quality.**
+Two real-time reliability fixes. (1) Real-time CLAS PPP-RTK (`mrtk run`) no
+longer drops permanently to Single after a QZSS L6 satellite handover — the
+single-stream L6D demux now keeps each channel locked to one coherent PRN and
+re-locks across a handover for every rover format (the re-lock clock previously
+stalled for RTCM2/RTCM3 rovers). (2) The `mrtk cssr2rtcm3` VRS/OSR carrier phase
+no longer leaks phase-bias-wrap jumps or stale-slot carrier glitches, removing
+the cycle slips behind the downstream RTK fix-rate gap and vertical sawtooth.
+
+### Fixed
+
+- **Real-time CLAS no longer freezes on a QZSS satellite handover**
+  ([#197](https://github.com/h-shiono/MRTKLIB/issues/197),
+  [#205](https://github.com/h-shiono/MRTKLIB/issues/205);
+  PRs [#200](https://github.com/h-shiono/MRTKLIB/pull/200),
+  [#201](https://github.com/h-shiono/MRTKLIB/pull/201),
+  [#209](https://github.com/h-shiono/MRTKLIB/pull/209)) — in real-time PPP-RTK
+  the UBX/SBF single-stream L6D demux locked channel 0 to the first PRN it saw
+  and never released it, so when that QZS set below the horizon corrections
+  froze and the solution dropped to Single (`age=1e4`) permanently until a
+  restart. The demux now (a) keeps each CLAS channel locked to a single
+  coherent active-source PRN (no multi-PRN subframe-interleave corruption on a
+  D9C-class 2-channel receiver) and (b) re-locks to a live PRN after the locked
+  one goes silent (handover). The re-lock timeout clock now advances for
+  **RTCM2/RTCM3 rovers** too (it was driven by `raw[0].time`, which a
+  decoded-RTCM rover never updates, so the timeout never fired — the root cause
+  of the "drops to Single and never recovers" reports). Verified by replaying a
+  captured stream that froze on a real handover: the channel now re-locks within
+  ~14 s and stays Fix instead of freezing.
+- **cssr2rtcm3 / VRS phase-bias-wrap repair applied to the output carrier**
+  ([#97](https://github.com/h-shiono/MRTKLIB/issues/97),
+  [#98](https://github.com/h-shiono/MRTKLIB/issues/98);
+  PR [#207](https://github.com/h-shiono/MRTKLIB/pull/207)) — the ±100-cycle
+  CLAS phase-bias-wrap repair (`clas_osr_zdres()`) was computed but never applied
+  to the synthesized VRS/OSR carrier phase (the port kept only the PPP-RTK
+  ambiguity-state half of upstream's two output variants). On a CLAS phase-bias
+  (ST5) wrap, ~100 cycles (~19 m at L1) leaked into the base carrier, forcing a
+  cycle slip on the downstream RTK rover. Now applied to `obs[].L` in the VRS
+  fill — prime suspect for the cssr2rtcm3 fix-rate gap vs mosaic-CLAS (#98) and
+  vertical sawtooth (#97).
+- **cssr2rtcm3 / VRS signal-slot desync and dead-satellite emission**
+  ([#98](https://github.com/h-shiono/MRTKLIB/issues/98);
+  PR [#208](https://github.com/h-shiono/MRTKLIB/pull/208)) — the reused VRS dummy
+  obs buffer could carry a stale per-signal code from a previous epoch,
+  desyncing the OSR signal-slot order from `smode` and leaking a stale carrier
+  value (observed as single-epoch ~1153 m carrier-phase glitches on Galileo E5a
+  when the receiver-tracked signal set differed from the CLAS-corrected set).
+  VRS obs codes are now set unconditionally from `smode`, unused slots cleared,
+  and satellites with no usable observation (invalid MSM rough range 255) are no
+  longer advertised. CLAS RTCM3 output is byte-identical for `nf=2`.
+- **`mrtk relay -t` now writes a trace file**
+  ([#79](https://github.com/h-shiono/MRTKLIB/issues/79);
+  PR [#204](https://github.com/h-shiono/MRTKLIB/pull/204)) — `relay` did not
+  create the runtime context, so `trace*()` no-opped and `-t <level>` produced
+  no file. The context is now created when a trace level is requested and torn
+  down on both exit paths (including the `strsvrstart` failure path, which also
+  now frees its stream converters).
+
+### Added
+
+- **cssr2rtcm3 OSR carrier-phase self-consistency analyzer**
+  ([#206](https://github.com/h-shiono/MRTKLIB/pull/206)) —
+  `scripts/analysis/osr_residual.py`, a no-ephemeris diagnostic that decodes the
+  RTCM3 (MSM7 + 1005) emitted by `mrtk cssr2rtcm3` and, per satellite, tracks
+  geometry-free phase, code-minus-carrier and lock-time to surface carrier
+  discontinuities (slips, bias-wrap, glitches) and satellites advertised with an
+  invalid rough range. Used to root-cause the #97/#98 OSR-quality defects above.
+
+### Changed
+
+- **Documentation**: single-port relay-back VRS setup guide for cssr2rtcm3
+  ([#117](https://github.com/h-shiono/MRTKLIB/issues/117),
+  PR [#202](https://github.com/h-shiono/MRTKLIB/pull/202)); CI retries transient
+  `taplo` download failures ([#203](https://github.com/h-shiono/MRTKLIB/pull/203)).
+
 ## [v0.6.13] - 2026-06-07
 
 **Enhanced PPP-RTK SPP seed; RINEX converter frequency unification.** The CLAS
