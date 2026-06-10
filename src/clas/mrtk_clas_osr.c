@@ -1190,6 +1190,13 @@ int clas_osr_zdres(const obsd_t* obs, int n, const double* rs, const double* dts
             for (j = 0; j < nf; j++) {
                 obs_copy[i].code[j] = corr->smode[sat - 1][j];
             }
+            /* Clear the unused (>= nf) code slots too: the reused input buffer
+             * can leave stale non-zero codes there, and downstream readers
+             * (sat_wavelengths over all slots, the GAL L2-slot / L2C checks)
+             * would otherwise pick them up when nf < NFREQ. */
+            for (j = nf; j < NFREQ + NEXOBS; j++) {
+                obs_copy[i].code[j] = 0;
+            }
         }
 
         /* compute wavelengths for this satellite */
