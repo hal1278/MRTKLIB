@@ -73,7 +73,7 @@ is in the [CHANGELOG](CHANGELOG.md) and [release notes](docs/releases/):
 
 Real-time CLAS PPP-RTK positioning performance can be monitored on a public Grafana dashboard:
 
-> **[CLAS Summary Dashboard](http://34.84.98.16:3000/d/adsw2jc/clas-summary-dashboard)**
+> **[CLAS Summary Dashboard](https://live.pntmoni.com/)**
 
 The dashboard shows fix rate, ENU accuracy, satellite visibility, and correction age
 streamed from an active `mrtk run` session.
