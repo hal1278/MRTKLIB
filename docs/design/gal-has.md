@@ -245,3 +245,80 @@ The struct keeps its own `ssr_t ssr[MAXSAT]` (like `rtcm_t`) so callers copy to
 3. PPP run: `mrtk post` with RINEX converted from the same SBF, brdc nav,
    `correction = "gal-has"` — convergence and accuracy vs. surveyed position.
 4. Full ctest regression (no change to existing tests).
+
+### 11.1 Bundled regression test data
+
+`tests/data/has/has_testdata.tar.gz` (~2.1 MB gz) bundles
+`G5P3162a_15m.sbf`: a block-filtered, 15-minute-trimmed slice of the full-hour
+mosaic-G5 capture `G5P3162a.sbf` (2026/06/10 23:59:31 → 00:14:30 GPST, TOW
+window [345571000, 346471000) ms). It is produced by
+`scripts/tests/sbf_filter.py` keeping SBF blocks **4027** MeasEpoch, **4017**
+GPSRawCA, **4023** GALRawINAV, **4024** GALRawCNAV (5914 ReceiverTime is not
+present in the source and is not needed — the SBF decoder derives time from
+each block's own TOW). The QZSS L6E block (4271) is intentionally excluded from
+the bundle to keep it under the size budget; L6E extraction is exercised
+separately (see §11.3).
+
+The ctest pipeline (`has_*` in `CMakeLists.txt`) is:
+
+```
+has_setup    extract the tar.gz
+has_extract  mrtk l6extract  → G5P3162a_15m.has  (assert 4834 valid records)
+has_convert  mrtk convert    → RINEX obs/nav
+has_ppp      mrtk post -k conf/has/ppp_gal_has.toml → float PPP .pos
+has_ppp_check scripts/tests/check_has_ppp.py: epochs ≥ 95 % of 900, all Q=6,
+             last-5-min mean within 1.0 m horiz / 1.5 m 3D of the reference
+has_cleanup  remove extracted artefacts
+```
+
+**Trim equivalence proof** (all comparisons within the common 15-min window,
+trim must not change results):
+
+| Check | Result |
+|-------|--------|
+| (a) `.has` records (orig-window vs filtered) | **byte-identical**, 4834 records, md5 `6e43487dcd30f8ceb8cf035317b68c24` |
+| (b) `mrtk convert` OBS records | **identical**, 900 epochs, md5 `db9d8624…`. NAV: orbit/clock coefficients identical; only the GAL-week/data-source field (line 5) and transmission-time `ttr` (line 7) differ for 13 ephemerides — a transmission-time-snapshot artifact of the shorter horizon, **zero positioning effect**. Against a same-block-set full-hour control the trimmed NAV is a perfect subset (0 differences). |
+| (c) `mrtk post` PPP solutions | **bit-identical** over all 893 common solution epochs: max \|ΔENU\| = 0.000000 m, 0 Q mismatches. |
+
+### 11.2 Reference position and accuracy status
+
+Reference receiver position (passed to `check_has_ppp.py --ref-xyz`):
+
+```
+XYZ = -3961905.2046  3348992.8024  3698212.4790   (m, ITRF current epoch)
+LLH = 35.666341868°  139.792211087°  59.837 m
+```
+
+**Provenance:** derived 2026-06-12 from MADOCA-PPP static + combined PPP-AR over
+the full hour, ITRF current epoch, ~1–2 cm. As a cross-check against the CLAS
+reference frame (F5.1), Ref2 − Ref1 = **+4.4 cm in East** — within the
+combined PPP-AR / frame-realisation uncertainty.
+
+**HAS absolute-accuracy status:** the HAS float solution sits **~0.56 m
+horizontal / ~0.69 m 3D** from this reference (full-hour: dE +0.390 dN +0.397
+dU −0.400 m, self-RMS E/N 0.075 / U 0.38 m; trimmed-window last-5-min mean:
+horiz 0.575 m / 3D 0.634 m, all Q=6). This ~0.5 m offset is larger than mature
+PPP would give and the **accuracy investigation is open** (candidate causes:
+code-bias sign/selection, orbit/clock reference-point handling, troposphere
+estimation over the short window). The `has_ppp_check` thresholds (1.0 m horiz /
+1.5 m 3D) are set with ~2× margin over the measured offsets and never tighter
+than the full-hour result (0.56 m horiz) + 0.3 m, so the gate guards against
+regression without prejudging the accuracy investigation.
+
+### 11.3 l6extract L6E (mosaic-G5 block 4271)
+
+`apps/l6extract/l6extract.c` extracts QZSS L6E frames from SBF block **4271**
+(QZSRawL6E), whose payload is byte-identical to the L6D block 4270 except the
+Source field (offset 9) = 2 (L6E) vs 1 (L6D). mosaic-G5 numbers the L6E stream
++10 above the L6D PRN, so the per-PRN files are written as J204/J205/J209 (for
+the J194/J195/J199 L6D satellites), matching the MADOCA `.l6` PRN convention.
+Verified on the full SBF: J204/J205/J209, **3660 frames each, 250-byte frames
+with the 0x1ACFFC1D preamble**, and one extracted file (J204) drives a
+`mrtk post` MADOCA-PPP smoke run to Q=6 float solutions.
+
+### 11.4 Future work
+
+- **Real-time HAS replay ctest** (rtkrcv file replay). Not added here: the
+  rtkrcv headless RT replay path is known env-flaky on the maintainer's machine
+  (cf. `rtkrcv_rt`). To be added once the RT HAS decoder lands and the replay
+  harness is stabilised.

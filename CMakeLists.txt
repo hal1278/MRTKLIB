@@ -1443,3 +1443,124 @@ set_tests_properties(igsrts_ppp_check PROPERTIES
     FIXTURES_REQUIRED igsrts_data
     LABELS            "absolute;igs;ppp;igsrts"
 )
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Galileo HAS (High Accuracy Service) float-PPP regression tests
+# ═══════════════════════════════════════════════════════════════════════════════
+# Data: mosaic-G5 capture G5P3162a, 2026/06/10 23:59:31 (15-min window).
+# Source: block-filtered + time-trimmed from the full-hour G5P3162a.sbf via
+#         scripts/tests/sbf_filter.py (blocks 4027/4017/4023/4024; 15 min @ 1 s).
+#         A strict before/after-trim equivalence proof (.has byte-identity,
+#         identical obs records, bit-identical PPP solutions over the common
+#         window) backs the trim -- see docs/design/gal-has.md §11.
+# Archive: tests/data/has/has_testdata.tar.gz  (G5P3162a_15m.sbf, ~2.1 MB gz)
+#
+# Pipeline: SBF --l6extract--> .has  (HAS pages)
+#           SBF --convert----> RINEX obs/nav
+#           obs + nav + .has --post (correction=gal-has)--> float PPP
+#
+# Reference: ITRF current-epoch receiver position from MADOCA-PPP (static +
+#            combined PPP-AR) over the full hour, 2026-06-12, ~1-2 cm.
+#              XYZ = -3961905.2046 3348992.8024 3698212.4790
+#            HAS float sits ~0.56 m horiz / 0.69 m 3D from this reference
+#            (HAS Initial Service absolute accuracy; investigation open).
+set(_HASDATA      ${CMAKE_SOURCE_DIR}/tests/data/has)
+set(_CHECK_HASPPP ${CMAKE_SOURCE_DIR}/scripts/tests/check_has_ppp.py)
+set(_HAS_REF_XYZ  -3961905.2046 3348992.8024 3698212.4790)
+
+# ── Fixture: extract / clean HAS test data archive ────────────────────────────
+add_test(NAME has_setup
+    COMMAND bash -c "tar xzf ${_HASDATA}/has_testdata.tar.gz -C ${_HASDATA}"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(has_setup PROPERTIES
+    FIXTURES_SETUP  has_data
+    TIMEOUT         30
+    LABELS          "regression;has"
+)
+
+add_test(NAME has_cleanup
+    COMMAND bash -c "rm -f \
+        ${_HASDATA}/G5P3162a_15m.sbf \
+        ${_HASDATA}/G5P3162a_15m.has \
+        ${_HASDATA}/has_obs.obs \
+        ${_HASDATA}/has_nav.nav"
+)
+set_tests_properties(has_cleanup PROPERTIES
+    FIXTURES_CLEANUP has_data
+    LABELS           "regression;has"
+)
+
+# ── l6extract: SBF GALRawCNAV → .has, assert record count ─────────────────────
+# The bundled 15-min SBF yields exactly 4834 valid HAS records (8129 GALRawCNAV
+# blocks, 3 CRC-failed, 3292 dummy pages). The count is a stable fixture
+# constant -- a change signals a regression in the HAS page extractor.
+# l6extract writes the .has to <input-basename>.has in the working directory,
+# so run it in ${_HASDATA} where has_ppp expects G5P3162a_15m.has.
+add_test(NAME has_extract
+    COMMAND bash -c "\"$0\" l6extract -in \"$1\" -o \"$2\" 2>&1 | grep -q '4834 valid records'"
+        $<TARGET_FILE:mrtk>
+        ${_HASDATA}/G5P3162a_15m.sbf
+        ${CMAKE_BINARY_DIR}/has_l6
+    WORKING_DIRECTORY ${_HASDATA}
+)
+set_tests_properties(has_extract PROPERTIES
+    FIXTURES_REQUIRED has_data
+    DEPENDS           has_setup
+    TIMEOUT           60
+    LABELS            "regression;has"
+)
+
+# ── convert: SBF → RINEX obs/nav (test-step, archive stays SBF-only) ──────────
+add_test(NAME has_convert
+    COMMAND $<TARGET_FILE:mrtk> convert -r sbf
+        -o ${_HASDATA}/has_obs.obs -n ${_HASDATA}/has_nav.nav
+        ${_HASDATA}/G5P3162a_15m.sbf
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(has_convert PROPERTIES
+    FIXTURES_REQUIRED has_data
+    DEPENDS           has_setup
+    TIMEOUT           120
+    LABELS            "regression;has"
+)
+
+# ── post: Galileo HAS float PPP ───────────────────────────────────────────────
+add_test(NAME has_ppp
+    COMMAND $<TARGET_FILE:mrtk> post
+        -k ${CMAKE_SOURCE_DIR}/conf/has/ppp_gal_has.toml
+        -o ${CMAKE_BINARY_DIR}/out_has_ppp.pos
+        ${_HASDATA}/has_obs.obs
+        ${_HASDATA}/has_nav.nav
+        ${_HASDATA}/G5P3162a_15m.has
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(has_ppp PROPERTIES
+    FIXTURES_REQUIRED has_data
+    DEPENDS           "has_convert;has_extract"
+    TIMEOUT           180
+    LABELS            "regression;has;ppp"
+)
+
+# ── HAS float-PPP accuracy / quality gate ─────────────────────────────────────
+# Thresholds: measured trimmed-window offsets are horiz 0.575 m / 3D 0.634 m;
+# gates set to 1.0 m horiz (>= full-hour 0.56 m + 0.3 m floor) and 1.5 m 3D,
+# with ~2x margin over the measured offsets. All epochs must be Q=6 (float PPP)
+# and >= 95% of the 900 expected.
+add_test(NAME has_ppp_check
+    COMMAND ${Python3_EXECUTABLE} ${_CHECK_HASPPP}
+        ${CMAKE_BINARY_DIR}/out_has_ppp.pos
+        --ref-xyz ${_HAS_REF_XYZ}
+        --expected-epochs 900
+        --min-ratio 0.95
+        --interval 1
+        --last-min 5
+        --max-horiz 1.0
+        --max-3d 1.5
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+set_tests_properties(has_ppp_check PROPERTIES
+    DEPENDS           has_ppp
+    FIXTURES_REQUIRED has_data
+    LABELS            "regression;has;ppp"
+)
