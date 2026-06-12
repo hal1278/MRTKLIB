@@ -42,28 +42,59 @@ primitive polynomial 0x11D, g(x)=prod_{i=1..223}(x-alpha^i)).
 import argparse
 import json
 import math
+import os
 import struct
 import sys
 from collections import Counter, defaultdict
 
 import numpy as np
 
-CSSRLIB_SRC = "/Volumes/SDSSDX3N-2T00-G26/dev/cssrlib/src"
-if CSSRLIB_SRC not in sys.path:
-    sys.path.insert(0, CSSRLIB_SRC)
 
-import bitstruct as bs  # noqa: E402
-import galois  # noqa: E402
+def _import_cssrlib():
+    """Import cssrlib, returning the symbols this script needs.
 
-from cssrlib.cssr_has import cssr_has  # noqa: E402
-from cssrlib.cssrlib import sCType  # noqa: E402
-from cssrlib.gnss import sat2id, sat2prn, uGNSS  # noqa: E402
+    Resolution order: (1) an already-installed/already-on-path cssrlib;
+    (2) the directory in the CSSRLIB_SRC environment variable, if set.
+    No developer-specific path is baked into the source. Deferred into a
+    function so ``--help`` works without cssrlib present.
+    """
+    try:
+        import cssrlib  # noqa: F401
+    except ImportError:
+        src = os.environ.get("CSSRLIB_SRC")
+        if src and src not in sys.path:
+            sys.path.insert(0, src)
+        try:
+            import cssrlib  # noqa: F401
+        except ImportError:
+            sys.exit(
+                "error: cssrlib is required but not importable.\n"
+                "  Install it (pip install cssrlib) or point CSSRLIB_SRC at a\n"
+                "  cssrlib source checkout, e.g.:\n"
+                "    CSSRLIB_SRC=/path/to/cssrlib/src python3 "
+                "scripts/tests/has_cssrlib_decode.py ...\n"
+                "  See https://github.com/hirokawa/cssrlib"
+            )
+
+    import bitstruct as bs
+    import galois
+
+    from cssrlib.cssr_has import cssr_has
+    from cssrlib.cssrlib import sCType
+    from cssrlib.gnss import sat2id, sat2prn, uGNSS
+
+    return bs, galois, cssr_has, sCType, sat2id, sat2prn, uGNSS
+
 
 # HAS RINEX-3 signal -> ICD signal-name mapping, per GNSS.
-# Keys are the rSigRnx.str() short codes cssrlib produces (e.g. "L1B").
+# Keyed by GNSS short name ("GPS"/"GAL") rather than the cssrlib uGNSS enum so
+# this module-level table does not depend on cssrlib being importable (the
+# import is deferred so --help works without it). The enum is resolved to a
+# name in sig_label() at call time.
+# Inner keys are the rSigRnx.str() short codes cssrlib produces (e.g. "L1B").
 # Values are the Galileo HAS ICD signal names used in the dump.
 SIG_NAME = {
-    uGNSS.GPS: {
+    "GPS": {
         "1C": "L1-C/A",
         "1P": "L1-P",
         "1W": "L1-Z",
@@ -79,7 +110,7 @@ SIG_NAME = {
         "5Q": "L5-Q",
         "5X": "L5-I+Q",
     },
-    uGNSS.GAL: {
+    "GAL": {
         "1B": "E1-B",
         "1C": "E1-C",
         "1X": "E1-B+C",
@@ -110,15 +141,16 @@ def _jval(x):
     return x
 
 
-def sig_label(rsig):
+def sig_label(rsig, uGNSS):
     """rSigRnx -> ICD signal name (falls back to RINEX-3 code)."""
     code = rsig.str().strip()  # e.g. "L1B" -> band+attr "1B"
     key = code[1:]  # drop the type char (L/C)
-    tbl = SIG_NAME.get(rsig.sys, {})
+    gname = {uGNSS.GPS: "GPS", uGNSS.GAL: "GAL"}.get(rsig.sys)
+    tbl = SIG_NAME.get(gname, {})
     return tbl.get(key, code)
 
 
-def build_gmat(path):
+def build_gmat(path, galois):
     """Generate the 255x32 systematic RS(255,32) generator matrix per ICD."""
     GF = galois.GF(256, irreducible_poly=0x11D, primitive_element=2)
     alpha = GF(2)
@@ -180,18 +212,31 @@ def load_records(path):
 
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--has", default="/Users/hayato/dev/MRTKLIB/G5P3162a.has")
-    ap.add_argument("--gmat", default="/tmp/has_gmat.csv")
-    ap.add_argument("--out", default="/Users/hayato/dev/MRTKLIB/G5P3162a_has_cssrlib.jsonl")
+    ap = argparse.ArgumentParser(description="Golden HAS MT1 decode via cssrlib.")
+    ap.add_argument("--has", required=True, help="input .has record file (64-byte LE records)")
+    ap.add_argument(
+        "--gmat",
+        default=None,
+        help="RS(255,32) generator matrix CSV (default: <stem>_gmat.csv in CWD)",
+    )
+    ap.add_argument(
+        "--out", default=None, help="output JSONL (default: <input-stem>_cssrlib.jsonl in CWD)"
+    )
     args = ap.parse_args()
 
-    import os
+    stem = os.path.splitext(os.path.basename(args.has))[0]
+    if args.out is None:
+        args.out = f"{stem}_cssrlib.jsonl"
+    if args.gmat is None:
+        args.gmat = f"{stem}_gmat.csv"
+
+    # Deferred so --help does not require cssrlib to be installed.
+    bs, galois, cssr_has, sCType, sat2id, sat2prn, uGNSS = _import_cssrlib()
 
     if os.path.exists(args.gmat):
         gMat = np.genfromtxt(args.gmat, dtype="u1", delimiter=",")
     else:
-        gMat = build_gmat(args.gmat)
+        gMat = build_gmat(args.gmat, galois)
 
     GF = galois.GF(256, irreducible_poly=0x11D, primitive_element=2)
 
@@ -388,7 +433,7 @@ def main():
             if has_cbias and sat in lc.cbias:
                 cb = {}
                 for rsig, val in lc.cbias[sat].items():
-                    name = sig_label(rsig)
+                    name = sig_label(rsig, uGNSS)
                     cb[name] = _jval(val)
                     sig_per_gnss[sat2id(sat)[0]].add(name)
                     if not (isinstance(val, float) and math.isnan(val)):
@@ -399,7 +444,7 @@ def main():
                 pb = {}
                 di = {}
                 for rsig, val in lc.pbias[sat].items():
-                    name = sig_label(rsig)
+                    name = sig_label(rsig, uGNSS)
                     pb[name] = _jval(val)
                     if sat in lc.di and rsig in lc.di[sat]:
                         di[name] = _jval(lc.di[sat][rsig])

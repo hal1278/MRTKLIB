@@ -253,6 +253,192 @@ int main(void) {
         has_free(has);
     }
 
+    /* ---- (E) phase-bias NA clears a previously valid bias (vpbias=0, pbias=0).
+     *          Regression for the float-PPP "keep carrier when no phase bias"
+     *          behavior: an NA must NOT leave SSR_INVALID_PBIAS behind. ---- */
+    {
+        has_t* has = has_new();
+        int gal1 = satno(SYS_GAL, 1);
+
+        /* message 1: mask + pbias (flags 100001), GAL PRN1, single signal sig0
+         * (E1-B = CODE_L1B), CMAF=1 with the one cell provided. Valid pbias. */
+        uint8_t m1[2 * PAGE_OCT];
+        memset(m1, 0, sizeof(m1));
+        put_mt1_header(m1, 0, 0x21, 0, 5); /* mask + pbias */
+        int bp = 32;
+        setbitu(m1, bp, 4, 1); /* Nsys = 1 */
+        bp += 4;
+        setbitu(m1, bp, 4, HAS_GNSS_GAL);
+        bp += 4;
+        setbitu(m1, bp, 1, 1); /* SatM PRN1 */
+        bp += 40;
+        setbitu(m1, bp, 1, 1); /* SigM sig0 (E1-B) */
+        bp += 16;
+        setbitu(m1, bp, 1, 1); /* CMAF = 1 */
+        bp += 1;
+        setbitu(m1, bp, 1, 1); /* cell mask: 1 signal provided */
+        bp += 1;
+        setbitu(m1, bp, 3, 0); /* NM */
+        bp += 3;
+        bp += 6;               /* mask Reserved */
+        setbitu(m1, bp, 4, 0); /* pbias VI */
+        bp += 4;
+        setbitu(m1, bp, 11, 50); /* PB value (non-NA) */
+        bp += 11;
+        setbitu(m1, bp, 2, 1); /* PDI */
+        bp += 2;
+
+        int ret = feed_message(has, m1, 2, time);
+        CHECK(ret == 10, "E: mask+pbias message decoded");
+        CHECK(has->ssr[gal1 - 1].vpbias[CODE_L1B - 1] == 1, "E: vpbias set after valid pbias");
+        CHECK(has->ssr[gal1 - 1].pbias[CODE_L1B - 1] != 0.0, "E: pbias non-zero after valid pbias");
+
+        /* message 2: pbias-only (flags 000001), same mask, NA value. */
+        uint8_t m2[PAGE_OCT];
+        memset(m2, 0, sizeof(m2));
+        put_mt1_header(m2, 0, 0x01, 0, 5); /* pbias only */
+        bp = 32;
+        setbitu(m2, bp, 4, 0); /* pbias VI */
+        bp += 4;
+        setbitu(m2, bp, 11, (uint32_t)(-1024) & 0x7FF); /* PB = NA (1000...0) */
+        bp += 11;
+        setbitu(m2, bp, 2, 0); /* PDI */
+        bp += 2;
+
+        ret = feed_message(has, m2, 1, time);
+        CHECK(ret == 10, "E: pbias-NA message decoded");
+        CHECK(has->ssr[gal1 - 1].vpbias[CODE_L1B - 1] == 0, "E: vpbias cleared on pbias NA");
+        CHECK(has->ssr[gal1 - 1].pbias[CODE_L1B - 1] == 0.0, "E: pbias cleared to 0 on NA (not SSR_INVALID_PBIAS)");
+        CHECK(has->ssr[gal1 - 1].update == 1, "E: update flag set so cleared state propagates");
+        has_free(has);
+    }
+
+    /* ---- (F) code-bias NA clears a previously valid bias (vcbias=0, cbias=0).
+     *          Prevents a stale valid bias persisting in nav->ssr_ch. ---- */
+    {
+        has_t* has = has_new();
+        int gal1 = satno(SYS_GAL, 1);
+
+        /* message 1: mask + cbias (flags 100010), GAL PRN1, sig0, valid cbias. */
+        uint8_t m1[2 * PAGE_OCT];
+        memset(m1, 0, sizeof(m1));
+        put_mt1_header(m1, 0, 0x22, 0, 5); /* mask + cbias */
+        int bp = 32;
+        setbitu(m1, bp, 4, 1);
+        bp += 4;
+        setbitu(m1, bp, 4, HAS_GNSS_GAL);
+        bp += 4;
+        setbitu(m1, bp, 1, 1); /* SatM PRN1 */
+        bp += 40;
+        setbitu(m1, bp, 1, 1); /* SigM sig0 */
+        bp += 16;
+        setbitu(m1, bp, 1, 1); /* CMAF = 1 */
+        bp += 1;
+        setbitu(m1, bp, 1, 1); /* cell mask */
+        bp += 1;
+        setbitu(m1, bp, 3, 0); /* NM */
+        bp += 3;
+        bp += 6;               /* mask Reserved */
+        setbitu(m1, bp, 4, 0); /* cbias VI */
+        bp += 4;
+        setbitu(m1, bp, 11, 40); /* CB value (non-NA) */
+        bp += 11;
+
+        int ret = feed_message(has, m1, 2, time);
+        CHECK(ret == 10, "F: mask+cbias message decoded");
+        CHECK(has->ssr[gal1 - 1].vcbias[CODE_L1B - 1] == 1, "F: vcbias set after valid cbias");
+        CHECK(has->ssr[gal1 - 1].cbias[CODE_L1B - 1] != 0.0f, "F: cbias non-zero after valid cbias");
+
+        /* message 2: cbias-only (flags 000010), NA value. */
+        uint8_t m2[PAGE_OCT];
+        memset(m2, 0, sizeof(m2));
+        put_mt1_header(m2, 0, 0x02, 0, 5); /* cbias only */
+        bp = 32;
+        setbitu(m2, bp, 4, 0); /* cbias VI */
+        bp += 4;
+        setbitu(m2, bp, 11, (uint32_t)(-1024) & 0x7FF); /* CB = NA */
+        bp += 11;
+
+        ret = feed_message(has, m2, 1, time);
+        CHECK(ret == 10, "F: cbias-NA message decoded");
+        CHECK(has->ssr[gal1 - 1].vcbias[CODE_L1B - 1] == 0, "F: vcbias cleared on cbias NA");
+        CHECK(has->ssr[gal1 - 1].cbias[CODE_L1B - 1] == 0.0f, "F: cbias cleared to 0 on NA (not SSR_INVALID_CBIAS)");
+        CHECK(has->ssr[gal1 - 1].update == 1, "F: update flag set so cleared state propagates");
+        has_free(has);
+    }
+
+    /* ---- (G) MS-change restart: an in-flight (MID,MT) collection that receives
+     *          a page with a different MS must restart, not mix generations into
+     *          one RS decode. Mixed pages must not complete a message; a clean,
+     *          self-consistent set then completes normally. ---- */
+    {
+        has_t* has = has_new();
+        int gal1 = satno(SYS_GAL, 1);
+
+        /* Build a valid 2-page (MS=2) mask+orbit message for GAL PRN1. */
+        uint8_t big[2 * PAGE_OCT];
+        memset(big, 0, sizeof(big));
+        put_mt1_header(big, 0, 0x30, 0, 5); /* mask + orbit */
+        int bp = 32;
+        setbitu(big, bp, 4, 1);
+        bp += 4;
+        setbitu(big, bp, 4, HAS_GNSS_GAL);
+        bp += 4;
+        setbitu(big, bp, 1, 1); /* SatM PRN1 */
+        bp += 40;
+        setbitu(big, bp, 1, 1); /* SigM sig0 */
+        bp += 16;
+        setbitu(big, bp, 1, 0); /* CMAF=0 */
+        bp += 1;
+        setbitu(big, bp, 3, 0); /* NM */
+        bp += 3;
+        bp += 6;                /* mask Reserved */
+        setbitu(big, bp, 4, 0); /* orbit VI */
+        bp += 4;
+        setbitu(big, bp, 10, 42); /* IODref */
+        bp += 10;
+        setbitu(big, bp, 13, 100); /* DR */
+        bp += 13;
+        setbitu(big, bp, 12, 50); /* DIT */
+        bp += 12;
+        setbitu(big, bp, 12, 25); /* DCT */
+        bp += 12;
+
+        /* Feed page 1 of an MS=2 collection (MID=0), then a page that re-uses
+         * MID=0 but advertises a different MS (MS=1). The mismatch must restart
+         * the collector, so neither the stale page nor the lone new page can
+         * complete a message. */
+        uint8_t page56[56];
+        memset(page56, 0, sizeof(page56));
+        setbitu(page56, 0, 2, 1);  /* HASS=1 */
+        setbitu(page56, 4, 2, 1);  /* MT=1 */
+        setbitu(page56, 6, 5, 0);  /* MID=0 */
+        setbitu(page56, 11, 5, 1); /* MS-1 = 1 -> MS=2 */
+        setbitu(page56, 16, 8, 1); /* PID=1 */
+        memcpy(page56 + 3, big, PAGE_OCT);
+        int ret = has_input_page(has, 1, page56, time);
+        CHECK(ret != 10, "G: first page of MS=2 collection does not complete");
+
+        /* same MID, different MS (MS=1) -> restart; this single page cannot
+         * RS-decode into the MS=2 message and must not complete. */
+        memset(page56, 0, sizeof(page56));
+        setbitu(page56, 0, 2, 1);
+        setbitu(page56, 4, 2, 1);
+        setbitu(page56, 6, 5, 0);                     /* MID=0 (reused) */
+        setbitu(page56, 11, 5, 0);                    /* MS-1 = 0 -> MS=1 */
+        setbitu(page56, 16, 8, 1);                    /* PID=1 */
+        memcpy(page56 + 3, big + PAGE_OCT, PAGE_OCT); /* page 2 payload (mismatched) */
+        ret = has_input_page(has, 1, page56, time);
+        CHECK(ret != 10, "G: MS-change page restarts collection (no mixed-gen decode)");
+        CHECK(count_gate_pass(has) == 0, "G: no satellite state applied from mixed pages");
+
+        /* Now a clean self-consistent MS=2 message on the same MID completes. */
+        ret = feed_message(has, big, 2, time);
+        CHECK(ret == 10, "G: clean MS=2 message completes after restart");
+        CHECK(has->ssr[gal1 - 1].t0[0].time != 0, "G: orbit state applied from clean set");
+        has_free(has);
+    }
+
     printf("\n%s: %d failure(s)\n", fails ? "FAILED" : "PASSED", fails);
     return fails ? 1 : 0;
 }

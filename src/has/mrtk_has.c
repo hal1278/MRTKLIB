@@ -546,7 +546,14 @@ static int decode_has_codebias(has_t* has, const uint8_t* msg, int i, int nbit, 
                 continue;
             }
             if (cb == HAS_CB_NA) {
-                has->ssr[sat - 1].cbias[code - 1] = (float)SSR_INVALID_CBIAS;
+                /* "data not available" -> clear the bias so corr_meas treats it as
+                 * absent (the !vcbias path drops the pseudorange, which is correct:
+                 * a HAS code bias replaces BGD and is required). Clearing both the
+                 * value and the valid flag also prevents a previously valid bias
+                 * from persisting in nav->ssr_ch via the update-gated copy loop. */
+                has->ssr[sat - 1].cbias[code - 1] = 0.0f;
+                has->ssr[sat - 1].vcbias[code - 1] = 0;
+                has->ssr[sat - 1].update = 1;
                 continue;
             }
             has->ssr[sat - 1].cbias[code - 1] = (float)(cb * 0.02); /* added to P (Eq. 25) */
@@ -595,7 +602,17 @@ static int decode_has_phasebias(has_t* has, const uint8_t* msg, int i, int nbit,
                 continue;
             }
             if (pb == HAS_PB_NA) {
-                has->ssr[sat - 1].pbias[code - 1] = SSR_INVALID_PBIAS;
+                /* "data not available" -> treat as "no phase bias provided" rather
+                 * than an invalid sentinel. With pbias cleared and vpbias=0,
+                 * corr_meas keeps the carrier for CORR_GAL_HAS (float PPP absorbs
+                 * the unknown satellite phase bias into the float ambiguity);
+                 * writing SSR_INVALID_PBIAS would instead force L[i]=0 and drop the
+                 * carrier. Clearing also evicts any stale valid bias from
+                 * nav->ssr_ch through the update-gated copy. discnt is left as-is
+                 * (no new discontinuity is signalled by an NA). */
+                has->ssr[sat - 1].pbias[code - 1] = 0.0;
+                has->ssr[sat - 1].vpbias[code - 1] = 0;
+                has->ssr[sat - 1].update = 1;
                 continue;
             }
             lam = has_code2lam(sys, code);
@@ -812,7 +829,19 @@ extern int has_input_page(has_t* has, int prn, const uint8_t* page56, gtime_t ti
     }
 
     col = has_find_collect(has, mid, mt, time);
-    if (!col->active || col->mid != mid || col->mt != mt) {
+    /* Restart the collection when the slot is fresh, or when an in-flight
+     * collector for this (MID, MT) reports a different MS. A MID is reused
+     * across content generations within the 150 s window, and a new generation
+     * (or a corrupted header) can carry a different MS. Mixing pages from two
+     * generations would feed the RS(255,32) decoder the wrong page count k and
+     * recover garbage, so drop the previously collected pages and begin again
+     * with this page. (PID duplicates that differ in payload across generations
+     * are first-wins; the toh/latency gate in decode_has_mt1 catches any
+     * residue that still RS-decodes.) */
+    if (!col->active || col->mid != mid || col->mt != mt || col->ms != ms) {
+        if (col->active && col->mid == mid && col->mt == mt && col->ms != ms) {
+            trace(NULL, 4, "has_input_page: MS change mid=%d %d->%d, restart collection\n", mid, col->ms, ms);
+        }
         memset(col, 0, sizeof(has_collect_t));
         col->active = 1;
         col->mid = mid;
