@@ -104,6 +104,9 @@ add_library(mrtklib STATIC
     src/madoca/mrtk_madoca_iono.c
     src/madoca/mrtk_madoca_local_corr.c
     src/madoca/mrtk_madoca_local_comb.c
+    # ── has/ (Galileo HAS処理) ─────────────────────────────────────────────────
+    src/has/mrtk_has.c
+    src/has/mrtk_has_rs.c
     # ── clas/ (CLAS CSSR処理) ──────────────────────────────────────────────────
     src/clas/mrtk_clas.c
     src/clas/mrtk_clas_grid.c
@@ -248,6 +251,31 @@ foreach(test IN LISTS _UTEST_SOURCES)
              WORKING_DIRECTORY ${_UTEST_DIR})
     set_tests_properties(utest_${test} PROPERTIES LABELS "utest")
 endforeach()
+
+# Galileo HAS RS(255,32,224) erasure decoder test. The source is named
+# utest_has_rs.c (not t_*.c) and the test name must be utest_has_rs, so it is
+# registered explicitly rather than via the t_* loop above (which prepends
+# utest_). Self-contained, but linking the full library is fine.
+add_executable(utest_has_rs ${_UTEST_DIR}/utest_has_rs.c)
+# mrtk_has_rs.h is an internal (non-public) header under src/has/.
+target_include_directories(utest_has_rs PRIVATE ${CMAKE_SOURCE_DIR}/src/has)
+# Override global -ansi (=C90): this test uses C99 for-loop declarations (P-01).
+target_compile_options(utest_has_rs PRIVATE -std=c11)
+target_link_libraries(utest_has_rs PRIVATE mrtklib)
+add_test(NAME utest_has_rs COMMAND utest_has_rs
+         WORKING_DIRECTORY ${_UTEST_DIR})
+set_tests_properties(utest_has_rs PROPERTIES LABELS "utest")
+
+# Galileo HAS MT1 decoder hardening test. Drives the public has_input_page()
+# API with synthetic recovered messages (no real signal data); same explicit
+# registration as utest_has_rs (source name is utest_has_mt1.c, not t_*.c).
+add_executable(utest_has_mt1 ${_UTEST_DIR}/utest_has_mt1.c)
+# Override global -ansi (=C90): this test uses C99 for-loop declarations (P-01).
+target_compile_options(utest_has_mt1 PRIVATE -std=c11)
+target_link_libraries(utest_has_mt1 PRIVATE mrtklib)
+add_test(NAME utest_has_mt1 COMMAND utest_has_mt1
+         WORKING_DIRECTORY ${_UTEST_DIR})
+set_tests_properties(utest_has_mt1 PROPERTIES LABELS "utest")
 
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)
