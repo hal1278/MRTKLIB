@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.7.0] - 2026-06-12
+
+**Galileo HAS (High Accuracy Service) float PPP.** Opens the v0.7.x series
+themed around global SSR correction services. MRTKLIB now decodes Galileo HAS
+corrections broadcast on the E6-B C/NAV signal and applies them in float PPP for
+GPS+Galileo, in both post-processing (`mrtk post`) and real-time (`mrtk run`).
+HAS is a free, global high-accuracy SSR service (orbit / clock / code bias) in
+the GTRF/ITRF2020 frame; the HAS Initial Service broadcasts no phase biases or
+ionosphere/troposphere corrections, so this release targets float PPP. The
+decoder was cross-validated bit-exact against the cssrlib reference
+implementation. (BDS PPP-B2b is planned next in the series.)
+
+### Added
+
+- **Galileo HAS E6-B C/NAV decoder** (`src/has/`,
+  [PR #214](https://github.com/h-shiono/MRTKLIB/pull/214)) — a new decoder
+  collects HAS pages (keyed by Message ID / page ID), runs the
+  **RS(255,32,224)** erasure decoder over GF(256) to recover each HAS message,
+  and decodes Mask + Orbit + Clock + Code-bias + Phase-bias (MT1) blocks into
+  `ssr_t`, feeding the existing `satpos_ssr()` / `corr_meas()` SSR application
+  path. The RS decoder builds its systematic generator matrix at init (no
+  embedded tables) and was validated against ICD Annex C; the MT1 decoder was
+  cross-validated **bit-exact against cssrlib** over 428 MT1 messages on a live
+  mosaic-G5 capture.
+- **`correction = "gal-has"`** for PPP modes — wires HAS corrections through the
+  SSR branch (orbit, clock, code bias) with a HAS-specific bias-code selector
+  (same-frequency fallback). Supported in post-processing and real-time, with
+  `satellite_ephemeris = "brdc+ssrapc"`. Sample configs `conf/has/ppp_gal_has.toml`
+  (post) and `conf/has/run_gal_has.toml` (real-time).
+- **`mrtk l6extract` HAS extraction** — extracts Galileo HAS pages from SBF
+  **GALRawCNAV** (block 4024) into a `.has` file consumed by `mrtk post`. The
+  same release also adds mosaic-G5 QZSS **L6E** extraction from SBF block
+  **4271** (byte-identical to L6D block 4270 apart from the Source field),
+  written per-PRN +10 above the L6D PRN.
+- **Bundled HAS regression tests** — `tests/data/has/has_testdata.tar.gz`
+  (~2.1 MB) ships a block-filtered 15-minute mosaic-G5 slice
+  (`G5P3162a_15m.sbf`) plus a `has_*` ctest pipeline (extract → convert → float
+  PPP → accuracy gate). A trim-equivalence proof shows the trimmed slice is
+  byte-identical to the corresponding full-hour window (`.has` records and OBS
+  records identical; PPP solutions bit-identical over all common epochs).
+
+### Known limitations
+
+- **Float PPP only** — the HAS Initial Service broadcasts no phase biases, so
+  integer PPP-AR is not yet possible; it is planned for when HAS reaches Full
+  Operational Capability (FOC) with phase biases.
+- **No ionosphere / troposphere corrections** — HAS carries none; troposphere is
+  estimated (`est-ztd`) and the iono-free combination is used, as in MADOCA-PPP.
+- **Absolute accuracy under investigation** — over 1 h of live data the HAS float
+  solution sits ~0.5–0.6 m horizontal from a cm-grade ITRF reference, larger than
+  mature PPP would give; the accuracy investigation is open
+  ([#215](https://github.com/h-shiono/MRTKLIB/issues/215)). Day-to-day
+  repeatability is good (RMS E 7.5 / N 7.3 / U 38 cm).
+- **GPS + Galileo only** — the constellations HAS corrects.
+
+### References
+
+- Galileo HAS SIS ICD, Issue 1.0 (May 2022).
+- cssrlib (MIT License, © 2021 Rui Hirokawa,
+  <https://github.com/hirokawa/cssrlib>), used as an independent development-time
+  cross-reference only — not bundled with or linked into MRTKLIB.
+
 ## [v0.6.14] - 2026-06-10
 
 **Real-time CLAS handover robustness + cssr2rtcm3 / VRS carrier-phase quality.**

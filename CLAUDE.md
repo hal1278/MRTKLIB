@@ -43,6 +43,10 @@ See [`docs/releases/changelog.md`](docs/releases/changelog.md) for the full hist
 | v0.6.9 | IGS-products integer PPP-AR (Bias-SINEX OSB phase biases) |
 | v0.6.10 | SPP accuracy (opt-in): C/N0 weighting, IGG-III robust, TDCP |
 | v0.6.11 | Developer experience: formatter CI gate + repo-wide format baseline, GSDC smartphone SPP benchmark, faster CI (no positioning change) |
+| v0.6.12 | Real-time MADOCA-PPP multi-GNSS signal selection (Galileo / QZSS / GLONASS L2C/A) |
+| v0.6.13 | Enhanced PPP-RTK SPP seed (C/N0 + TDCP) + RINEX converter obsdef frequency unification |
+| v0.6.14 | Real-time CLAS handover robustness + cssr2rtcm3 / VRS carrier-phase quality |
+| v0.7.0 | Galileo HAS (E6-B C/NAV) float PPP — opens the v0.7.x global SSR correction services series |
 
 ### Test Status
 
