@@ -116,6 +116,7 @@
 #define SBF_GLORAWCA 4026   /* SBF GLONASS L1CA or L2CA navigation string */
 #define SBF_GALRAWFNAV 4022 /* SBF Galileo F/NAV navigation page */
 #define SBF_GALRAWINAV 4023 /* SBF Galileo I/NAV navigation page */
+#define SBF_GALRAWCNAV 4024 /* SBF Galileo E6-B C/NAV page (HAS) */
 #define SBF_GEORAWL1 4020   /* SBF SBAS L1 navigation frame */
 #define SBF_BDSRAW 4047     /* SBF BDS navigation page */
 #define SBF_QZSRAWL1CA 4066 /* SBF QZSS C/A subframe */
@@ -898,6 +899,81 @@ static int decode_galrawinav(raw_t* raw) {
     raw->ephset = 0; /* 0:I/NAV */
     return 2;
 }
+/* decode SBF Galileo E6-B C/NAV page (HAS) ----------------------------------*/
+/**
+ * @brief Decode an SBF GALRawCNAV block (4024) into a staged Galileo HAS page.
+ *
+ * The block payload (after the 8-byte SBF header) is: TOW u4, WNc u2, SVID u1,
+ * CRCPassed u1, ViterbiCnt u1, Source u1, FreqNr u1, RxChannel u1,
+ * NAVBits u4[16]. The 16 little-endian words are concatenated MSB-first into
+ * 512 bits; the 448-bit HAS page is bits 14..461 (56 bytes). The staged page is
+ * routed to svr->has by decoderaw(). Dummy pages (24-bit header 0xAF3BC3),
+ * CRC failures and out-of-range PRNs are skipped here (return 0); TOW sentinels
+ * are filtered upstream in decode_sbf before this handler runs.
+ *
+ * @param[in,out] raw  Receiver raw data control struct (buff holds the block;
+ *                     raw->time already set by input_sbf from this block's
+ *                     TOW/WNc)
+ * @return 13 when a valid HAS page is staged in raw->has_page/has_prn/has_time,
+ *         0 when the page is skipped, -1 on length error.
+ */
+static int decode_galrawcnav(raw_t* raw) {
+    uint8_t* p = raw->buff + 14;
+    uint8_t bits[64]; /* 512 bits, MSB-first */
+    uint32_t hdr24;
+    int i, svid, crc_ok, prn, srcbit, b;
+
+    /* need SVID(1) CRCPassed(1) ...(4) + NAVBits u4[16]: 14 hdr + 6 + 64 = 84 */
+    if (raw->len < 84) {
+        trace(NULL, 2, "sbf galrawcnav length error: len=%d\n", raw->len);
+        return -1;
+    }
+    svid = U1(p);
+    crc_ok = U1(p + 1);
+
+    prn = svid - 70; /* GAL PRN = SVID - 70 */
+    if (prn < 1 || prn > 40) {
+        trace(NULL, 2, "sbf galrawcnav svid error: svid=%d\n", svid);
+        return 0;
+    }
+    if (raw->outtype) {
+        sprintf(raw->msgtype + strlen(raw->msgtype), " prn=%d crc=%d", prn, crc_ok);
+    }
+    if (!crc_ok) {
+        trace(NULL, 3, "sbf galrawcnav crc fail: prn=%d\n", prn);
+        return 0;
+    }
+
+    /* concatenate 16 NAVBits words MSB-first into a 512-bit buffer */
+    for (i = 0; i < 16; i++) {
+        uint32_t w = U4(raw->buff + 20 + i * 4);
+        bits[i * 4] = (w >> 24) & 0xFF;
+        bits[i * 4 + 1] = (w >> 16) & 0xFF;
+        bits[i * 4 + 2] = (w >> 8) & 0xFF;
+        bits[i * 4 + 3] = w & 0xFF;
+    }
+
+    /* HAS page = bits 14..461 (448 bits = 56 bytes), MSB-first */
+    for (i = 0; i < 56 * 8; i++) {
+        srcbit = 14 + i;
+        b = (bits[srcbit >> 3] >> (7 - (srcbit & 7))) & 1;
+        if (b) {
+            raw->has_page[i >> 3] |= (uint8_t)(1 << (7 - (i & 7)));
+        } else {
+            raw->has_page[i >> 3] &= (uint8_t)~(1 << (7 - (i & 7)));
+        }
+    }
+
+    /* skip dummy pages (24-bit HAS header == 0xAF3BC3) */
+    hdr24 = ((uint32_t)raw->has_page[0] << 16) | ((uint32_t)raw->has_page[1] << 8) | raw->has_page[2];
+    if (hdr24 == 0xAF3BC3) {
+        return 0;
+    }
+
+    raw->has_prn = prn;
+    raw->has_time = raw->time; /* set by input_sbf from this block's TOW/WNc */
+    return 13;
+}
 /* decode SBF SBAS L1 navigation frame ---------------------------------------*/
 static int decode_georawl1(raw_t* raw) {
     uint8_t *p = raw->buff + 14, buff[32];
@@ -1573,6 +1649,8 @@ static int decode_sbf(raw_t* raw, rtcm_t* rtcm) {
             return decode_galrawfnav(raw);
         case SBF_GALRAWINAV:
             return decode_galrawinav(raw);
+        case SBF_GALRAWCNAV:
+            return decode_galrawcnav(raw);
         case SBF_GEORAWL1:
             return decode_georawl1(raw);
         case SBF_BDSRAW:
@@ -1621,8 +1699,8 @@ static int sync_sbf(uint8_t* buff, uint8_t data) {
  * notes  : supported SBF block (block ID):
  *
  *           MEASEPOCH(4027), GPSRAWCA(4017), GLORAWCA(4026), GALRAWFNAV(4022),
- *           GALRAWINAV(4023), GEORAWL1(4020), BDSRAW(4047), QZSRAWL1CA(4066),
- *           NAVICRAW(4093)
+ *           GALRAWINAV(4023), GALRAWCNAV(4024), GEORAWL1(4020), BDSRAW(4047),
+ *           QZSRAWL1CA(4066), NAVICRAW(4093)
  *
  *          to specify input options for sbf, set raw->opt to the following
  *          option strings separated by spaces.

@@ -33,6 +33,7 @@ extern "C" {
 #include "mrtklib/mrtk_clas.h"
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtk_foundation.h"
+#include "mrtklib/mrtk_has.h"
 #include "mrtklib/mrtk_nav.h"
 #include "mrtklib/mrtk_obs.h"
 #include "mrtklib/mrtk_opt.h"
@@ -90,6 +91,7 @@ typedef struct {                      /* RTK server type */
     rtk_lock_t lock;                  /* lock flag */
     mrtk_ctx_t* ctx;                  /* runtime context */
     clas_ctx_t* clas;                 /* CLAS CSSR decoder context (NULL if unused) */
+    has_t* has;                       /* Galileo HAS decoder context (NULL if unused) */
 } rtksvr_t;
 
 /*============================================================================

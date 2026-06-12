@@ -28,6 +28,7 @@
 #include "mrtklib/mrtk_clas.h"
 #include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_geoid.h"
+#include "mrtklib/mrtk_has.h"
 #include "mrtklib/mrtk_ionex.h"
 #include "mrtklib/mrtk_madoca.h"
 #include "mrtklib/mrtk_madoca_local_corr.h"
@@ -103,6 +104,10 @@ static FILE* fp_rtcm = NULL;                   /* rtcm data file pointer */
 static char qzssl6e_file[1024] = "";           /* QZSS L6E data file */
 static char qzssl6e_path[1024] = "";           /* QZSS L6E data path */
 static FILE* fp_qzssl6e = NULL;                /* QZSS L6E data file pointer */
+static has_t* gal_has = NULL;                  /* Galileo HAS decode context (heap) */
+static char gal_has_file[1024] = "";           /* Galileo HAS data file */
+static char gal_has_path[1024] = "";           /* Galileo HAS data path */
+static FILE* fp_gal_has = NULL;                /* Galileo HAS data file pointer */
 static mdcl6d_t mdcl6d[MIONO_MAX_PRN];         /* QZSS L6D control struct */
 static char qzssl6d_file[MIONO_MAX_PRN][1024]; /* QZSS L6D data file */
 static char qzssl6d_path[MIONO_MAX_PRN][1024]; /* QZSS L6D data path */
@@ -353,6 +358,46 @@ static void update_qzssl6e(gtime_t time) {
         if (input_qzssl6ef(l6e, fp_qzssl6e) < -1) {
             break;
         }
+    }
+}
+/* update Galileo HAS PPP corrections ----------------------------------------*/
+static void update_gal_has(gtime_t time) {
+    char path[1024], tstr[32];
+    int i;
+
+    /* open or swap Galileo HAS .has file (64-byte little-endian records) */
+    reppath(gal_has_file, path, time, "", "");
+
+    if (strcmp(path, gal_has_path)) {
+        strcpy(gal_has_path, path);
+
+        if (fp_gal_has) {
+            fclose(fp_gal_has);
+        }
+        fp_gal_has = fopen(path, "rb");
+        if (fp_gal_has) {
+            trace(NULL, 2, "gal_has file open: %s\n", path);
+        }
+    }
+    if (!fp_gal_has || !gal_has) {
+        return;
+    }
+
+    /* feed all records up to the current epoch (has_input_file rewinds the first
+     * future record, so a single call per epoch advances the file in lock-step) */
+    has_input_file(gal_has, fp_gal_has, time);
+
+    strcpy(tstr, time_str(time, 3));
+    trace(NULL, 3, "update_gal_has: %s\n", tstr);
+
+    /* copy updated HAS corrections into the SSR channel */
+    for (i = 0; i < MAXSAT; i++) {
+        if (!gal_has->ssr[i].update || gal_has->ssr[i].iod[0] != gal_has->ssr[i].iod[1] ||
+            timediff(time, gal_has->ssr[i].t0[0]) < -1E-3) {
+            continue;
+        }
+        navs.ssr_ch[0][i] = gal_has->ssr[i];
+        gal_has->ssr[i].update = 0;
     }
 }
 /* initialize QZSS L6D control struct ----------------------------------------*/
@@ -618,6 +663,10 @@ static int inputobs(obsd_t* obs, int solq, const prcopt_t* popt) {
         /* update QZSS L6E MADOCA-PPP corrections */
         if (*qzssl6e_file) {
             update_qzssl6e(obs[0].time);
+        }
+        /* update Galileo HAS PPP corrections */
+        if (*gal_has_file) {
+            update_gal_has(obs[0].time);
         }
         /* update QZSS L6D MADOCA-PPP ionospheric corrections */
         if (popt->ionocorr) {
@@ -976,6 +1025,21 @@ static void readpreceph(char** infile, int n, const prcopt_t* prcopt, nav_t* nav
         }
     }
 
+    /* Galileo HAS .has file (first match only) */
+    for (i = 0; i < n; i++) {
+        if ((ext = strrchr(infile[i], '.')) && (!strcmp(ext, ".has") || !strcmp(ext, ".HAS"))) {
+            strcpy(gal_has_file, infile[i]);
+            if (!gal_has) {
+                gal_has = has_new();
+                if (!gal_has) {
+                    gal_has_file[0] = '\0';
+                    break;
+                }
+            }
+            break;
+        }
+    }
+
     /* MADOCA-PPP L6 and CLAS L6 files: discriminate by PRN and mode */
     {
         int nf_l6d = 0, nf_clas = 0;
@@ -1079,6 +1143,17 @@ static void freepreceph(nav_t* nav, sbs_t* sbs) {
         free(l6e);
         l6e = NULL;
     }
+
+    /* free Galileo HAS context */
+    if (fp_gal_has) {
+        fclose(fp_gal_has);
+        fp_gal_has = NULL;
+    }
+    if (gal_has) {
+        has_free(gal_has);
+        gal_has = NULL;
+    }
+    gal_has_file[0] = gal_has_path[0] = '\0';
 
     /* free CLAS context */
     if (clas_ctx) {

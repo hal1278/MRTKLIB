@@ -112,6 +112,7 @@
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtk_coords.h"
+#include "mrtklib/mrtk_has.h"
 #include "mrtklib/mrtk_ionex.h"
 #include "mrtklib/mrtk_madoca.h"
 #include "mrtklib/mrtk_mat.h"
@@ -647,10 +648,11 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
              * valid SSR bias is dropped (required for PPP-AR, MADOCALIB design).
              * Note: igs-rts does NOT take this path -- it uses the RTKLIB-style
              * measurement model above (RTCM-SSR has a different bias convention). */
-            ssrcode = mcssr_sel_biascode(sys, obs->code[i]);
+            ssrcode =
+                (corr == CORR_GAL_HAS) ? has_sel_biascode(sys, obs->code[i]) : mcssr_sel_biascode(sys, obs->code[i]);
 
-            /* for backward compatible to IS-QZSS-MDC-003 */
-            if (sys == SYS_GPS && ssrcode == CODE_L5Q) {
+            /* for backward compatible to IS-QZSS-MDC-003 (MADOCA-specific) */
+            if (corr != CORR_GAL_HAS && sys == SYS_GPS && ssrcode == CODE_L5Q) {
                 if (nav->ssr_ch[0][obs->sat - 1].pbias[ssrcode - 1] == 0.0 &&
                     nav->ssr_ch[0][obs->sat - 1].cbias[ssrcode - 1] == 0.0) {
                     ssrcode = CODE_L5X;
@@ -689,7 +691,10 @@ static int corr_meas(const obsd_t* obs, const nav_t* nav, const double* azel, co
                 L[i] += pb;
                 trace(NULL, tl > 0 ? 4 : 4, "corr_meas: %s pbias %s obscode=L%s ssrcode=L%s pbias=%7.3f\n", tstr, satid,
                       code2obs(obs->code[i]), code2obs(ssrcode), pb);
-            } else if (sys != SYS_GLO) {
+            } else if (sys != SYS_GLO && corr != CORR_GAL_HAS) {
+                /* HAS Initial Service may broadcast no phase bias; for float PPP the
+                 * carrier is kept and the float ambiguity absorbs the satellite phase
+                 * bias (phase bias is optional for HAS, unlike the required code bias). */
                 if (ssrcode == CODE_NONE || !nav->ssr_ch[0][obs->sat - 1].vpbias[ssrcode - 1]) {
                     L[i] = 0.0;
                     trace(NULL, tl > 0 ? 3 : 4,

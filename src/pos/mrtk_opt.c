@@ -180,8 +180,10 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
     /* reserved sources: present in the schema but not implemented yet.
      * igs-rts is NOT reserved any more (#138): the RTCM-SSR / IGS-SSR(MT4076)
      * decode-and-apply pipeline is inherited from the MADOCA-via-RTCM path and
-     * runs through the same SSR branch of corr_meas. */
-    if (opt->correction == CORR_GAL_HAS || opt->correction == CORR_BDS_B2B) {
+     * runs through the same SSR branch of corr_meas. gal-has is NOT reserved any
+     * more: HAS MT1 corrections decode into nav->ssr_ch[0] and run through the
+     * same SSR branch of corr_meas (float PPP). */
+    if (opt->correction == CORR_BDS_B2B) {
         if (msg) {
             snprintf(msg, msgsz, "correction source not implemented yet (correction=%s)", corr_name(opt->correction));
         }
@@ -193,20 +195,23 @@ extern int resolve_correction(prcopt_t* opt, char* msg, size_t msgsz) {
         case PMODE_PPP_KINEMA:
         case PMODE_PPP_STATIC:
         case PMODE_PPP_FIXED:
-            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA && opt->correction != CORR_IGS_RTS) {
+            if (opt->correction != CORR_IGS && opt->correction != CORR_QZS_MADOCA && opt->correction != CORR_IGS_RTS &&
+                opt->correction != CORR_GAL_HAS) {
                 if (msg) {
-                    snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use igs, igs-rts or qzs-madoca)",
+                    snprintf(msg, msgsz, "invalid correction=%s for mode=%s (use igs, igs-rts, qzs-madoca or gal-has)",
                              corr_name(opt->correction), mode_name(m));
                 }
                 return 0;
             }
-            /* igs-rts applies broadcast ephemeris + RTCM-SSR; it needs an SSR-aware
-             * satellite-ephemeris option (brdc+ssrapc or brdc+ssrcom). */
-            if (opt->correction == CORR_IGS_RTS && opt->sateph != EPHOPT_SSRAPC && opt->sateph != EPHOPT_SSRCOM) {
+            /* igs-rts and gal-has apply broadcast ephemeris + SSR corrections; they
+             * need an SSR-aware satellite-ephemeris option (brdc+ssrapc or
+             * brdc+ssrcom). */
+            if ((opt->correction == CORR_IGS_RTS || opt->correction == CORR_GAL_HAS) && opt->sateph != EPHOPT_SSRAPC &&
+                opt->sateph != EPHOPT_SSRCOM) {
                 if (msg) {
                     snprintf(msg, msgsz,
-                             "correction=igs-rts requires satellite_ephemeris=brdc+ssrapc or brdc+ssrcom (got %d)",
-                             opt->sateph);
+                             "correction=%s requires satellite_ephemeris=brdc+ssrapc or brdc+ssrcom (got %d)",
+                             corr_name(opt->correction), opt->sateph);
                 }
                 return 0;
             }

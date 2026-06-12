@@ -559,6 +559,25 @@ static int decoderaw(rtksvr_t* svr, int index) {
                       svr->clas->l6buf[ch].nframe, svr->clas->l6buf[ch].havebit, svr->clas->l6buf[ch].nbit);
             }
         }
+        /* route a staged Galileo HAS page (any SBF stream slot) to the HAS
+         * decoder; on a completed MT1 (ret==10) copy corrections into the SSR
+         * channel with the same gating as mrtk_postpos.c update_gal_has(). */
+        if (svr->has && ret == 13) {
+            gtime_t htime = svr->raw[index].has_time;
+            int hret = has_input_page(svr->has, svr->raw[index].has_prn, svr->raw[index].has_page, htime);
+            if (hret == 10) {
+                int k;
+                for (k = 0; k < MAXSAT; k++) {
+                    if (!svr->has->ssr[k].update || svr->has->ssr[k].iod[0] != svr->has->ssr[k].iod[1] ||
+                        timediff(htime, svr->has->ssr[k].t0[0]) < -1E-3) {
+                        continue;
+                    }
+                    svr->nav.ssr_ch[0][k] = svr->has->ssr[k];
+                    svr->has->ssr[k].update = 0;
+                }
+                trace(NULL, 2, "HAS MT1 decoded: prn=%d index=%d\n", svr->raw[index].has_prn, index);
+            }
+        }
         /* observation data received */
         if (ret == 1) {
             if (fobs < MAXOBSBUF) {
@@ -1000,6 +1019,7 @@ extern int rtksvrinit(rtksvr_t* svr) {
     *svr->cmd_reset = '\0';
     svr->bl_reset = 10.0;
     svr->clas = NULL;
+    svr->has = NULL;
     rtk_initlock(&svr->lock);
 
     return 1;
@@ -1025,6 +1045,10 @@ extern void rtksvrfree(rtksvr_t* svr) {
         clas_ctx_free(svr->clas);
         free(svr->clas);
         svr->clas = NULL;
+    }
+    if (svr->has) {
+        has_free(svr->has);
+        svr->has = NULL;
     }
 }
 /* lock/unlock rtk server ------------------------------------------------------
@@ -1200,6 +1224,15 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     }
     /* wire CLAS context into nav for PPP-RTK engine access */
     svr->nav.clas_ctx = svr->clas;
+
+    /* initialize Galileo HAS context for HAS float PPP (correction = gal-has).
+     * Any input stream may carry SBF GALRawCNAV pages; routing is index-agnostic. */
+    if (prcopt->correction == CORR_GAL_HAS && !svr->has) {
+        svr->has = has_new();
+        if (!svr->has) {
+            tracet(NULL, 1, "rtksvrstart: HAS context alloc error\n");
+        }
+    }
 
     /* open input streams */
     for (i = 0; i < 8; i++) {

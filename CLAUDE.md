@@ -180,6 +180,7 @@ Run `./build/mrtk --help` for the current full list and per-subcommand help via 
 |------|-----------------|
 | `rtksvr_t` | ~972 MB |
 | `rtcm_t` | ~103 MB |
+| `has_t` | ~1.6 MB |
 | `osb_t` | ~700 KB |
 | `clas_corr_t` | ~352 KB |
 
