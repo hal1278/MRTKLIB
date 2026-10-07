@@ -55,6 +55,7 @@
 | [0013](0013-finite-process-progress-and-cancel.md) | 終わる処理の進捗は機械可読な出力 mode で, 中止は stdin で伝える | Accepted |
 | [0014](0014-upstream-scope-and-language.md) | upstream には契約部分を英語で提案し, 経緯は fork に残す | Accepted |
 | [0015](0015-task-tracking.md) | 作業単位は当面 0003, upstream issue, `tasks/todo.md` で管理する | Accepted |
-| [0016](0016-reporting-existing-issues.md) | 調査で見つかった既存の問題の報告の仕方 | Accepted |
+| [0016](0016-reporting-existing-issues.md) | 調査で見つかった既存の問題の報告の仕方 | Accepted (security の行は 0019 で置き換え) |
 | [0017](0017-gui-repository-conventions.md) | GUI repository の license, 名前, 既存文書, 文書の分担 | Accepted |
 | [0018](0018-windows-porting-plan.md) | Windows 移植の段階, CI, 設計文書の時期 | Accepted |
+| [0019](0019-console-risks-handled-publicly.md) | rtkrcv console の危うさは非公開の報告にせず, 公開の設計と通常の bug 報告で扱う | Accepted |

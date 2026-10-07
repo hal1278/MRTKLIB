@@ -19,6 +19,7 @@
   - platform layer の境界 (内部 API の粒度, file 配置, public header が `pthread.h` / `sys/select.h` を include している点の扱い). Windows 対応の issue を出す前に設計文書の草案を作る (0018). process 起動は引数の配列で行い shell を介さない ([rtkrcv-control.md](rtkrcv-control.md) D-8). stdin の確認も含める ([decisions/0013](decisions/0013-finite-process-progress-and-cancel.md)).
   - upstream が platform layer 方式も受け入れない場合の扱い (issue への反応を見てから決める. 0018).
   - MSVC への対応の要否 (現時点では対象外. 0004).
+  - Windows 対応の issue を書くときは既存の issue との重複を避ける. 例: [h-shiono/MRTKLIB#301](https://github.com/h-shiono/MRTKLIB/issues/301) の監査は `src/core/mrtk_time.c:295` の `gmtime` (`gmtime_r` を使うべき) を既に挙げており, cross build で見つかった同じ行の型の不一致 ([findings/windows-cross-build.md](findings/windows-cross-build.md)) と関係する.
 
 ## U-03. `rtkrcv` の operation と state の意味
 
@@ -67,7 +68,9 @@
 
 ## U-11. 調査で見つかった既存の問題の扱い
 
-決定済み: [decisions/0016](decisions/0016-reporting-existing-issues.md).
+報告済み (2026-10-08): TOML 保存の欠落は [h-shiono/MRTKLIB#342](https://github.com/h-shiono/MRTKLIB/issues/342), serial の書き込みの戻り値は [h-shiono/MRTKLIB#343](https://github.com/h-shiono/MRTKLIB/issues/343).
+
+決定済み: [decisions/0016](decisions/0016-reporting-existing-issues.md). security の行は [decisions/0019](decisions/0019-console-risks-handled-publicly.md) で置き換え (非公開の報告はしない).
 
 ## U-12. 作業順序
 

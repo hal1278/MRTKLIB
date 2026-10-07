@@ -55,7 +55,7 @@
   - `openserial` は port 名の前に `/dev/` を付ける (SS:327). Cygwin では COM3 は `ttyS2` と指定することになる.
   - `tcgetattr` / `tcsetattr` / `tcflush` の戻り値を確認しない (SS:343-360).
   - `readserial` は `read` の error を 0 として返す (SS:393-395).
-  - `writeserial` は書き込み byte 数 `ns` を更新せず常に 0 を返す (SS:405-418). このため serial の送信 byte 数 (`outb`) は増えず (SS:3434-3436), 送信統計から送信の成否を判断できない.
+  - `writeserial` は書き込み byte 数 `ns` を更新せず常に 0 を返す ([h-shiono/MRTKLIB#343](https://github.com/h-shiono/MRTKLIB/issues/343) として報告, 2026-10-08) (SS:405-418). このため serial の送信 byte 数 (`outb`) は増えず (SS:3434-3436), 送信統計から送信の成否を判断できない.
 - ✔ `strread` は `stream->port` の確認を `strlock` の前に行う (SS:3326, 3330). `strwrite` も同様 (SS:3396, 3400). 並行する `strclose` が port を解放すると解放済み領域に触れうる.
 
 ## 5. 既存の状態取得関数

@@ -3,6 +3,7 @@
 - **対象:** `h-shiono/MRTKLIB` `develop` `8dc1fc6`
 - **調査日:** 2026-10-07
 - **再現:** 実機で確認済み
+- **報告:** upstream に [h-shiono/MRTKLIB#342](https://github.com/h-shiono/MRTKLIB/issues/342) として報告した (2026-10-08)
 
 ## 事実
 
@@ -34,11 +35,13 @@ rtkrcv> save saved.conf
 
 | file | section 数 | key 数 | 測位 option |
 |---|---|---|---|
-| 入力 `rtkrcv.toml` | 34 | 156 | あり |
-| `saved.toml` | 11 | 42 | なし (`[server]`, `[streams.*]`, `[console]`, `[files]` のみ) |
+| 入力 `rtkrcv.toml` | 34 | 160 | あり |
+| `saved.toml` | 11 | 42 | なし (`[server]`, `[streams.*]`, `[console]` と `[files]` の `cmd_file_1`–`cmd_file_3` のみ) |
 | `saved.conf` (legacy) | — | 242 | あり (`pos1-posmode`, `pos2-armode` など) |
 
-build は `8dc1fc6` に, 本件と無関係な未 commit の変更 (`src/data/rcv/mrtk_rcv_ublox.c` 1 行) を含む tree から行った.
+最初の再現 (2026-10-07) の build は, `8dc1fc6` に本件と無関係な未 commit の変更 (`src/data/rcv/mrtk_rcv_ublox.c` 1 行) を含む tree から行った.
+
+key 数は Python の `tomllib` で末端の key を数えた (2026-10-08 に 156 から訂正). 失われるのは測位 option だけでなく `sysopts` 全体であり, 解の出力 (`[output]`), antenna (`[antenna.*]`), 補助 file (`[files]` の `satellite_atx` など) も含む. 2026-10-08 に変更のない 8dc1fc6 の tree で再現し直し, 同じ結果を得た. 保存した file から起動し直すと `pos1-posmode = single`, `pos2-armode = continuous` になる (入力は `ppp-rtk`, `fix-and-hold`).
 
 ## 付随して観測した事実
 
