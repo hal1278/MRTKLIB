@@ -22,7 +22,7 @@
 3. base の単独測位平均 (RS:879-890).
 4. ✔ rover epoch ごとに rover / base 観測を結合し, lock 下で `rtkpos` (RS:900-908).
 5. `sol.stat != SOLQ_NONE` なら `timeset` (RS:913) と `writesol` (RS:916).
-6. fix がない間は 1 Hz で NONE 状態の solution を出す (RS:924-927). 周期 command, NMEA request.
+6. 解がない間 (`sol.stat == SOLQ_NONE`) は 1 Hz で NONE 状態の solution を出す (RS:924-927). 周期 command, NMEA request. したがって `writesol` (と `solbuf`) に入るのは, 解がある epoch では epoch ごとに 1 件, 解がない間は最大 1 Hz であり, 解のない epoch ごとに 1 件ではない. (2026-10-08 訂正: 以前は「fix がない間」と書いていた. float などの解は 5. で epoch ごとに出る.)
 7. `svr->cputime` に cycle 所要時間を記録し (RS:938), `cycle - cputime` だけ sleep (RS:942). 既定 cycle は 10 ms (`apps/rtkrcv/rtkrcv.c:133`).
 
 ### Solution の行き先 (`writesol`, RS:80-120)
@@ -47,7 +47,7 @@
 ## 4. Stream state
 
 - `stream_t` (SH:69-83): `type`, `mode`, `state` (`-1:error, 0:close, 1:open`), `inb` / `inr`, `outb` / `outr`, `path[1024]`, `msg[1024]` など. `state` は open / close でしか変わらず, 接続状態を表さない.
-- ✔ `int strstat(stream_t*, char* msg)` (SS:3453-3511) は `-1:error, 0:close, 1:wait, 2:connect, 3:active` を返す. 3 は「2 かつ 200 ms (`TINTACT`) 以内に data あり」である (SS:3504-3506). file は open 中ずっと 2 である.
+- ✔ `int strstat(stream_t*, char* msg)` (SS:3453-3511) は `-1:error, 0:close, 1:wait, 2:connect, 3:active` を返す. 3 は「2 かつ 200 ms (`TINTACT`) 以内に data あり」である (SS:3506-3507). file では `statefile` が open 中ずっと 2 を返し (SS:656), 読み書きの直後は `strstat` が 3 にする. (2026-10-08 訂正: 以前は「file は open 中ずっと 2 である」とし, 行番号を 3504-3506 としていた.)
 - 状態変化は `strread` / `strwrite` の中でしか起きない. 出力の無い stream は次の書き込みまで切断に気付かない.
 - `strsum` (SS:3584-3601) は byte 数と bps を `int` で返す. bps は read / write 時に 1000 ms ごとにしか更新されない.
 - `msg` は最後に書かれた自由文である (例: `connecting...`, `connect error (%d)`, `timeout`, `disconnected`, `%d clients`, `end`, NTRIP の応答 text). code はない.
@@ -56,12 +56,13 @@
   - `tcgetattr` / `tcsetattr` / `tcflush` の戻り値を確認しない (SS:343-360).
   - `readserial` は `read` の error を 0 として返す (SS:393-395).
   - `writeserial` は書き込み byte 数 `ns` を更新せず常に 0 を返す ([h-shiono/MRTKLIB#343](https://github.com/h-shiono/MRTKLIB/issues/343) として報告, 2026-10-08) (SS:405-418). このため serial の送信 byte 数 (`outb`) は増えず (SS:3434-3436), 送信統計から送信の成否を判断できない.
-- ✔ `strread` は `stream->port` の確認を `strlock` の前に行う (SS:3326, 3330). `strwrite` も同様 (SS:3396, 3400). 並行する `strclose` が port を解放すると解放済み領域に触れうる.
+  - 公開 header は `strwrite` の戻り値を `status (0:error,1:ok)` と説明するが (SH:181), 実装は書き込んだ byte 数 `ns` を返す (SS:3445). (2026-10-08 追記)
+- ✔ `strread` は `stream->mode` と `stream->port` の確認を `strlock` の前に行う (SS:3326, 3330). `strwrite` も同様 (SS:3396, 3400). この `port` の読み出しは, 並行する `strclose` による `port` の書き込みとの data race である. 一方 `strclose` は同じ stream の lock の下で port を解放し, `type = 0`, `port = NULL` とする (SS:3231-3283). `strread` / `strwrite` は lock を取った後に `type` で分岐し, 0 なら `default` で lock を解いて 0 を返す (SS:3332, 3364-3366, 3402, 3430-3432). したがってこの順序では解放済み領域には触れず, 解放済み領域への参照は確認できていない. `stropen` は stream の lock を取らずに `type`, `mode`, `port` を書き換える (SS:3168-3221) ので, open と read / write の競合は別に残る. (2026-10-08 訂正: 以前は「並行する `strclose` が port を解放すると解放済み領域に触れうる」と書いていた.)
 
 ## 5. 既存の状態取得関数
 
 - `void rtksvrsstat(rtksvr_t*, int* sstat, char* msg)` (RS:1533-1547): 8 stream の `strstat` と, 空でない message を `(%d) %s ` で連結した文字列. monitor は含まない.
-- `int rtksvrostat(svr, rcv, time, sat, az, el, snr, vsat)` (RS:1497-1525): 停止中は 0. 稼働中は lock 下で `obs[rcv][0]` から衛星番号, Az/El, SNR (整数 dBHz), 使用 flag を返す. **衛星表示と SNR を 1 回で得られる既存の関数である.**
+- `int rtksvrostat(svr, rcv, time, sat, az, el, snr, vsat)` (RS:1497-1525): 停止中は 0. 稼働中は lock 下で `obs[rcv][0]` から衛星番号, Az/El, SNR (整数 dBHz), 使用 flag を返す. 公開 header は SNR の単位を `0.001 dBHz` と説明するが (RH:187), 実装は観測値 (`0.001 dBHz` 単位の `uint16_t`) に `SNR_UNIT` (0.001) を掛けて丸めた整数 dBHz を返す (RS:1515) (2026-10-08 追記). **衛星表示と SNR を 1 回で得られる既存の関数である.**
 - 入力ごとの message 数 `nmsg[3][12]` (0:obs, 1:eph, 2:ion, 3:sbas, 4:antpos, 5:dgps, 6:geph, 7:ssr, 9:decode error, 10:stat, 11:lcl).
 
 ## 6. Process-global / static な状態
@@ -74,7 +75,7 @@
 ## 7. Log
 
 - server 側の診断出力は `trace()` / `tracet()` だけで, trace level に応じて trace file に書く (`src/core/mrtk_trace.c:78-105`). RS と SS に `fprintf(stderr)` はない.
-- `mrtk_ctx_t` の `last_err_code`, `last_err_msg`, `cb_showmsg` (`mrtk_context.h:80-89`) は設定も呼び出しもされていない.
+- `mrtk_ctx_t` の `last_err_code`, `last_err_msg`, `cb_showmsg` (`mrtk_context.h:80-89`) は初期化 (`src/core/mrtk_context.c:39-45`) 以外で設定も呼び出しもされていない. (2026-10-08 訂正: 以前は「設定も呼び出しもされていない」と書いていた.)
 
 ## Inference (未検証)
 
@@ -83,4 +84,4 @@
 - stream event は `strstat` / `strsum` を stream ごとに polling して差分を取るのが現実的である. `rtksvrsstat` 経由にすると `rtkpos` の間待たされる.
 - solution event には `writesol` への hook 追加, または command layer が `solbuf` の唯一の consumer になって配る方式が必要である. telnet と RPC が両方 `solbuf` を読んではならない.
 - 構造化された `log` topic には `trace` への sink hook 追加 (または `cb_showmsg` の配線) が必要である.
-- stream の実行時 open / close を machine interface に出す前に, `strread` / `strwrite` の race, stop の二重 join, `rtksvrmark` の deadlock を直すか避ける必要がある.
+- stream の実行時 open / close を machine interface に出す前に, `strread` / `strwrite` / `stropen` の race (§4 の訂正を参照), stop の二重 join, `rtksvrmark` の deadlock を直すか避ける必要がある.

@@ -29,7 +29,7 @@ method 名, payload schema, transport は定義しない. それらはこの文�
 | (追加) 衛星情報と SNR の統合 | §5.3 |
 | (追加) telnet 出力の互換性固定 | §8 |
 
-対象外 (#326 comment の合意どおり): MRTKLIB 全体の RPC namespace, post-processing 用 protocol, daemon / supervisor, stable C ABI.
+対象外 (hal1278 が #326 の comment (2026-09-07) で提案した範囲. upstream maintainer とは未合意): MRTKLIB 全体の RPC namespace, post-processing 用 protocol, daemon / supervisor, stable C ABI. (2026-10-08 訂正: 以前は「#326 comment の合意どおり」と書いていた.)
 
 ## 1. 用語
 
@@ -91,7 +91,7 @@ telnet だけに残すもの: `!command`, `log`, `help`, `exit`, 対話的な確
 
 - **D-1.** 失敗を state (`error`) にするか, `stopped` + `lastError` にするか. **Fork (2026-10-07):** `stopped` + `lastError`. 理由: 失敗後に取れる操作は `stopped` と同じであり, 状態を増やすと遷移と client の分岐が増える. `lastError` は次に start が成功したときに消える. 退けた案: `error` 状態を設ける (GUI で失敗を目立たせやすいが, 状態と遷移が増える).
 - **D-2.** 冪等性. **Fork (2026-10-07):** `running` での start は error (`alreadyRunning`). 理由: 設定を変えた後に restart のつもりで start した client が, 変更が反映されたと誤解するのを防ぐ. `stopped` での stop は成功 (no-op). 理由: 「止まっていてほしい」という意図は満たされており, GUI の終了処理などで事前に状態を確かめる手間を省ける. telnet の表示は変えない. 退けた案: どちらも成功 (設定の反映を誤解させる), どちらも error (client の手間が増える).
-- **D-3.** 遷移中の lifecycle 操作. **Fork (2026-10-07):** `busy` で reject. 理由: 結果がすぐに分かり, 複数 client がいても誰の操作が効いたかが明確である. client は status の通知で遷移の完了を知ってから再試行する. 退けた案: 遷移の完了まで待たせて順に実行する (応答が数秒遅れることがあり, 複数 client の操作順が分かりにくい).
+- **D-3.** 遷移中の lifecycle 操作. **Fork (2026-10-07):** `busy` で reject. 理由: 結果がすぐに分かり, 複数 client がいても誰の操作が効いたかが明確である. client は status を取得して遷移の完了を確かめてから再試行する (D-28 により通知ではなく取得. 2026-10-08 訂正). 退けた案: 遷移の完了まで待たせて順に実行する (応答が数秒遅れることがあり, 複数 client の操作順が分かりにくい).
 
 ### 3.3 入力の終端
 
@@ -135,7 +135,7 @@ file 入力の再生が終わっても server は `running` のままである.
 - これまでこれらを変えられたのは, configuration file を編集できる者と telnet console に login できる者だけだった. RPC の setConfig で変えられるようにすると, RPC に接続できる者が PC 上で任意の command を実行できる. loopback 限定でも, 同じ PC の他の process や, browser で開いた web page (WebSocket は同一 origin の制約を受けない) が接続しうる (認証と Origin の検査は D-25).
 
 - 許可した場合の危険 (2026-10-07 の分析): RPC から shell に届く設定を変更できると, RPC に接続できる者が PC 上で任意の command を実行できる.
-  - #326 の案では loopback での待ち受けに認証を要求しない. このとき同じ PC の他の process に加え, browser で開いた web page も接続できる. browser はどの site からでも `ws://127.0.0.1:...` への WebSocket 接続を許すため, server が Origin header を検査しない限り, 悪意のある page が設定を書き換えて start を送れる (cross-site WebSocket hijacking).
+  - #326 の案では loopback での待ち受けに認証を要求しない. このとき同じ PC の他の process に加え, browser で開いた web page も接続できる. browser がどの site からでも `ws://127.0.0.1:...` への WebSocket 接続を許すなら (一般知識による. browser の仕様と実装での確認は未了. 2026-10-08 注記), server が Origin header を検査しない限り, 悪意のある page が設定を書き換えて start を送れる (cross-site WebSocket hijacking).
   - loopback 以外では token を知る者が shell を得る. 初版は TLS なしの案であり, 同じ network 上で token を盗聴されうる.
   - 既存の telnet console も `!command` と `set misc-startcmd` を持ち同種の危険がある. ただし browser は telnet (生の TCP) に接続できない. WebSocket は web page からの攻撃という新しい経路を加える.
 
@@ -151,7 +151,7 @@ file 入力の再生が終わっても server は `running` のままである.
 ### 4.1 Staged と active
 
 - `set` / `load` は staged config を変える. 稼働中の server には restart まで反映しない (`console-*` を除く).
-- 変更済みの key は `modflgr` / `modflgs` で分かる.
+- `set` で変更した key には `modflgr` / `modflgs` の印が付く (`apps/rtkrcv/rtkrcv.c:1659`, `cmd_set`). `load` は印を付けない (`cmd_load`, `:1665-1687`). start は起動の成否が分かる前に印を消す (`:601-606`. `rtksvrstart` の呼び出しは `:633`). したがって印からは staged と active の差は分からない. D-9 の restart の要否は staged と active の値を比べて求める. (2026-10-08 訂正: 以前は「変更済みの key は `modflgr` / `modflgs` で分かる」と書いていた.)
 - active config は現状どこにも独立して保持されていない (`svr` 内の `rtk.opt` 等に分散).
 
 - **D-9.** 稼働中の設定変更の扱い. **Fork (2026-10-07, 当面の簡易な形. 将来変わりうる):**
@@ -229,16 +229,16 @@ epoch ごとの `sol_t` 相当: 時刻, solution status, 位置, 共分散, 速�
 
 背景 (2026-10-07 確認):
 
-- RTKLIB 2.4.3 の RTKNAVI の monitor 画面は 18 種類の表示を持つ (`app/winapp/rtknavi/mondlg.dfm:119-137`): RTK, Obs Data, Nav Data, Time/Iono, Streams, Sat Status, States, Covariance, SBAS 4 種, RTCM 3 種, Station Info, Input, Output. process 内の data 構造を timer で読み出して表示する.
+- RTKLIB 2.4.3 (b34) の RTKNAVI の monitor 画面は 19 種類の表示を持つ (`app/winapp/rtknavi/mondlg.dfm:119-138`): RTK, Obs Data, Nav Data, Time/Iono, Streams, Sat Status, States, Covariance, SBAS 4 種, RTCM 3 種, Station Info, Input, Output, Error/Warning. process 内の data 構造を timer で読み出して表示する. Error/Warning は `rtk.errbuf` を読み出して空にする (`mondlg.cpp:207-211`). D-20 の `errbuf` に当たる. (2026-10-08 訂正: 以前は Error/Warning を落として 18 種類と書いていた.)
 - STRSVR の monitor 画面は stream の生の byte 列を HEX / ASCII で表示する (`app/winapp/strsvr/mondlg.dfm:176-179`). peek buffer から取得する (`app/winapp/strsvr/svrmain.cpp:574`).
 - data の性質による JSON-RPC との相性:
   - 構造化された一覧 (観測, 航法, 衛星の状態, RTCM の受信数など) は載る. 画面を開いている間だけ 1 秒ごとに要求すれば足り, 大きさは数 KB から数十 KB である.
-  - 大きなもの (推定状態, 共分散) は範囲の指定が要る. PPP-AR では状態数が約 1,100 (#330) で, 共分散は double で約 10 MB になる. RTKNAVI も画面に見える範囲だけを表示する.
+  - 大きなもの (推定状態, 共分散) は範囲の指定が要る. PPP-AR では状態数が約 1,100 (#330) で, 共分散は double で約 10 MB になる. RTKNAVI は lock の下で状態 vector と共分散行列の全体を写し, 表に全要素を並べる (`mondlg.cpp:872-925`, `ShowCov`). 範囲の指定は RTKNAVI の前例ではなく, process 間で受け渡す量を抑えるための fork の案である. (2026-10-08 訂正: 以前は「RTKNAVI も画面に見える範囲だけを表示する」と書いていた.)
   - 生の byte 列 (RTKNAVI の Input / Output, STRSVR の monitor) は JSON-RPC に向かない. JSON は文字なので binary を base64 にすると約 33% 膨らむ. WebSocket の binary frame を使う別の経路の方が素直である. rtkrcv の log stream (入力の生 data を tcpsvr などに複製する) を使えば backend の変更なしで表示できる可能性もある (P3).
   - peek buffer (`pbuf`, `sbuf`) は単一 consumer 前提の破壊的 queue であり, 複数の画面に配るには D-17 と同様の配り直しが要る.
-- 18 の表示の 1 つ 1 つが契約 (schema) の追加と保守になる.
+- 19 の表示の 1 つ 1 つが契約 (schema) の追加と保守になる.
 
-- **D-16.** navidata, ssr, 生の観測値と monitor 画面相当の data を初版に含めるか. **Fork (2026-10-07):** 初版には含めない. 将来の追加で設計を壊さないよう, 次の枠だけを決めておく. (1) monitor の data は画面を開いている間だけ要求する on-demand の取得とする. (2) 大きなものは範囲を指定して取る. (3) 生の byte 列は JSON-RPC と別の経路 (binary frame, または既存の log stream) とする. 理由: 18 の表示の 1 つ 1 つが契約の追加と保守になり, 初版に含めると重い. 構造化された data は後から追加的 (minor 版) に加えられ, 枠を先に決めておけば設計を壊さない. 退けた案: 初版に観測データと航法データなど一部を含める (契約の範囲が広がる), 枠も決めない (後で生の byte 列を JSON-RPC に無理に載せることになりうる).
+- **D-16.** navidata, ssr, 生の観測値と monitor 画面相当の data を初版に含めるか. **Fork (2026-10-07):** 初版には含めない. 将来の追加で設計を壊さないよう, 次の枠だけを決めておく. (1) monitor の data は画面を開いている間だけ要求する on-demand の取得とする. (2) 大きなものは範囲を指定して取る. (3) 生の byte 列は JSON-RPC と別の経路 (binary frame, または既存の log stream) とする. 理由: 19 の表示の 1 つ 1 つが契約の追加と保守になり, 初版に含めると重い. 構造化された data は後から追加的 (minor 版) に加えられ, 枠を先に決めておけば設計を壊さない. 退けた案: 初版に観測データと航法データなど一部を含める (契約の範囲が広がる), 枠も決めない (後で生の byte 列を JSON-RPC に無理に載せることになりうる).
 
 ## 6. Events
 
@@ -256,10 +256,10 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 
 - **D-17.** solution の取得方法. 現状 `solbuf` は単一 consumer 前提の破壊的 queue で, 満杯 (256) になると以後を捨てる. telnet の `solution` が読むと他の consumer から消える.
   背景 (2026-10-07 の整理): `writesol` (`src/stream/mrtk_rtksvr.c:80-120`) は epoch ごとに, 出力 stream への書き込み, monitor port への書き込み, `solbuf` への追加を行う. 選択肢は 2 つある.
-  - A (hook): `rtksvr_t` に関数 pointer の欄を加え, `writesol` から呼ぶ. command layer が登録した関数が解を購読者ごとの queue に copy してすぐ戻る. 遅れはほぼなく, 満杯で捨てることもない. ただし `src/stream/mrtk_rtksvr.c` と公開 header `include/mrtklib/mrtk_rtksvr.h` を変える. #326 は既存 code の変更を rtkrcv の command layer に限るとしており, これを越える.
+  - A (hook): `rtksvr_t` に関数 pointer の欄を加え, `writesol` から呼ぶ. command layer が登録した関数が解を購読者ごとの queue に copy してすぐ戻る. 遅れはほぼなく, 満杯で捨てることもない. ただし `src/stream/mrtk_rtksvr.c` と公開 header `include/mrtklib/mrtk_rtksvr.h` を変える. #326 本文は, 既存の code 経路を変えるのは command layer の導入だけで, 測位 logic は触らないと述べており (Internal refactoring の節), A はこれを越える. ただし本文は変更の見積もりであり, 変更してよい file を限る規則ではない. 越える場合は理由を添えて提示する. (2026-10-08 補足: 以前は「#326 は既存 code の変更を rtkrcv の command layer に限るとしており」と書いていた.)
   - B (定期的な読み出し): command layer が唯一の consumer として `solbuf` を定期的に (例: 50 ms ごと) 読み, 購読者ごとの queue に配る. 変更は `apps/rtkrcv` の中だけである. 遅れは読み出しの間隔以内で, 読み出しが長く止まると満杯で捨てる (10 Hz なら 25 秒分までは捨てない).
-  command layer には streams の監視 (D-18) と satellites の定期通知 (D-26) のための定期処理の thread がどのみち要り, 同じ thread で読めば構成が単純になる.
-  **Fork (2026-10-07, 現時点):** B. 読み出した解は D-28 の seq 付き環状 buffer に積む (当初は購読者ごとの queue としていた). telnet の `solution` も command layer 経由の読み出しに直し, `solbuf` の取り合いをなくす. 理由: 変更が #326 の範囲 (rtkrcv の command layer) に収まり, 定期処理の thread を streams / satellites と共有できる. 当初の案は A だった.
+  command layer には streams の監視 (D-18) のための定期処理の thread がどのみち要り, 同じ thread で読めば構成が単純になる. (2026-10-08 訂正: satellites は D-26 で要求時の取得になったため, 定期処理の用途から外した.)
+  **Fork (2026-10-07, 現時点):** B. 読み出した解は D-28 の seq 付き環状 buffer に積む (当初は購読者ごとの queue としていた). telnet の `solution` も command layer 経由の読み出しに直し, `solbuf` の取り合いをなくす. 理由: 変更が #326 本文の述べた範囲 (rtkrcv の command layer) に収まり, 定期処理の thread を streams と共有できる (2026-10-08: satellites を外した. D-26 参照). 当初の案は A だった.
   制約: command layer が `solbuf` の唯一の consumer である. `nsol` の読み出しと 0 への書き戻しは `svr->lock` の下で行う. telnet を含め他の箇所は `solbuf` を直接読まない.
   限界: (1) 通知の遅れは読み出しの間隔以内 (例: 50 ms) である. (2) 読み出しが `MAXSOLBUF` (256) epoch 分止まると以後の解を捨てる. 解の rate によって猶予は変わる (10 Hz で 25.6 秒, 100 Hz で 2.56 秒). 満杯に達したことを検出したら, 欠落があったことを出来事として環状 buffer に積む. (3) 読み出しは `svr->lock` を取るため, `rtkpos` / `decoderaw` の間は待たされる (#299).
   A に移る条件: 表示に要る遅れが読み出しの間隔より短くなったとき, または満杯による欠落が実際に観測されたとき.
@@ -268,7 +268,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 - **D-19.** `status` に solution status (fix / float など) の変化を含めるか. **Fork (2026-10-07):** 含めない. `status` の出来事は server の状態の遷移と `lastError` だけとする. 理由: 解の品質は solution の通知で分かり, 同じ情報を 2 つの topic に載せない. 退けた案: 含める (solution を購読しない client でも品質の変化が分かるが, 情報が重複する).
 - **D-20.** `log` の発生源.
   背景 (2026-10-07 確認):
-  - `rtk.errbuf` (telnet の `error` の内容) に書くのは RTK (`src/pos/mrtk_rtkpos.c`, 23 箇所) と VRS (`src/pos/mrtk_vrs.c`, 6 箇所) だけである. 内容は outlier の除外, ambiguity の検定失敗, 基準局の観測なしなど. PPP, PPP-AR, CLAS (PPP-RTK), MADOCA の処理は `errbuf` に書かず, 診断を `trace()` にだけ出す. buffer は 4096 byte (`MAXERRMSG`) で, 読むと消える.
+  - `rtk.errbuf` (telnet の `error` の内容) に書くのは RTK (`src/pos/mrtk_rtkpos.c`, 22 箇所) と VRS (`src/pos/mrtk_vrs.c`, 5 箇所) だけである (`errmsg(rtk` を含む行から各 file の関数定義 1 行を除いた呼び出しの数. 2026-10-08 に 23 / 6 から訂正). 内容は outlier の除外, ambiguity の検定失敗, 基準局の観測なしなど. PPP, PPP-AR, CLAS (PPP-RTK), MADOCA の処理は `errbuf` に書かず, 診断を `trace()` にだけ出す. buffer は 4096 byte (`MAXERRMSG`) で, 読むと消える.
   - `trace()` / `tracet()` は trace file が開いていて level が trace level 以下のときだけ書き, それ以外では何もしない (`src/core/mrtk_trace.c:78-105`). level 1 の呼び出しは約 90 箇所, level 2 は約 800 箇所ある. level 2 には epoch ごとの slip 検出や outlier の除外と, 開発者向けの値の表示が混在する.
   - `mrtk_ctx_t` には表示用の callback の欄 `cb_showmsg` (`include/mrtklib/mrtk_context.h:89`) があるが, どこからも呼ばれていない.
   - GUI は子 process の stderr を読める. 解析せずに表示するだけなら P5 に反しない. ただし rtkrcv が stderr に出すのは起動失敗などに限られる.
@@ -286,7 +286,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 
 - push (購読): client が topic を購読し, backend が以後送り続ける. 送る相手は購読した client だけである. #326 の原案はこの形である. 出来事をすぐ届けられるが, backend は client ごとの送信 queue と遅い client への対処 (D-21) を持つ.
 - pull (取得): client が必要なときに取りに行く. 最も単純で, client の受け取れる速さに合う. ただし単純な状態の取得では poll の間に起きた出来事を取りこぼす.
-- RTKLIB 2.4.3 の RTKNAVI は 100 ms 間隔の timer で画面を更新する (`app/winapp/rtknavi/navimain.dfm:1694`). timer のたびに, 解の buffer を読み切って空にし (`navimain.cpp:1370-1376`), 衛星の C/N0 などを `rtksvrostat` で (`:1638-1639`), stream の状態を `rtksvrsstat` で (`:1605`) 取得する. すべてを自分から取りに行く pull であり, 解は溜まった分をまとめて取るので取りこぼさない.
+- RTKLIB 2.4.3 の RTKNAVI は 100 ms 間隔の timer で画面を更新する (`app/winapp/rtknavi/navimain.dfm:1694`). timer のたびに, 解の buffer を読み切って空にし (`navimain.cpp:1370-1376`), stream の状態を `UpdateStr` (`:1399`) から `rtksvrsstat` で取得する (`:1605`). 衛星の C/N0 などは timer 5 回ごと (500 ms) の `UpdatePlot` (`:1398`) から `DrawPlot` を経て `rtksvrostat` で取得する (`:1638-1639`). すべてを自分から取りに行く pull であり, 解は溜まった分をまとめて取る. ただし server 側の buffer は満杯なら以後の解を追加しない (`src/rtksvr.c:110-113`, `MAXSOLBUF` 256) ので, 取りこぼさないのは満杯にならない間だけである. (2026-10-08 訂正: 以前は衛星の情報も timer のたびに取得し, 解を取りこぼさないと書いていた.)
 - rtkrcv の telnet は user が求めたときに表示する (pull). 将来 CLI / TUI を client として作る場合もこれに近い. 現在の docker-ui も 1 秒ごとの pull である. RTKNAVI の既定画面は解と C/N0 を常時表示するが, 将来の frontend では変わりうる (hal1278 の指摘).
 - 解の取りこぼしは pull でも防げる. backend が出来事に通し番号 (seq) を付けて一定数を環状 buffer に保持し, client は「前回受け取った番号より後」を取りに行く. RTKNAVI の「溜まった分を読み切る」を複数 client で使える形にしたものである.
 
@@ -315,7 +315,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 - 現状のまま公開すると問題になる core 側の挙動 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md)):
   - start の二重起動 guard が thread の起動まで効かない. command layer の state で防ぐ.
   - stop の二重 join. command layer の state で防ぐ.
-  - `strread` / `strwrite` の port 解放 race. 実行時の stream open / close を公開しない限り顕在化しない. v1 では公開しない.
+  - `strread` / `strwrite` が lock の前に `mode` / `port` を読む data race と, `stropen` が stream の lock を取らずに field を書き換える点 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §4). 実行時の stream open / close を公開しない限り顕在化しない. v1 では公開しない. (2026-10-08 訂正: 以前は「port 解放 race」とし, 解放済み領域への参照を含意していたが, 確認できていない.)
   - `prssr` の `static` buffer. telnet adapter を layer 経由にする際に直す.
 
 ## 7.5 RPC endpoint の公開範囲と認証
@@ -330,9 +330,9 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 
 - 背景 (2026-10-07 の整理):
   - loopback で待ち受けても, 接続できるのは GUI だけではない. 同じ PC の他の program, 共有 PC の他の user account (loopback は OS の全 user で共通), browser で開いた任意の web page が接続できる.
-  - browser は, どの site の page からでも `ws://127.0.0.1:<port>` への WebSocket 接続を止めない. 接続時に `Origin` header で page の出所を伝えるので, server はこれを見て断れる. native の client は通常 `Origin` を送らない.
+  - (一般知識による. browser の仕様と実装での確認は未了. 2026-10-08 注記) browser は, どの site の page からでも `ws://127.0.0.1:<port>` への WebSocket 接続を止めない. 接続時に `Origin` header で page の出所を伝えるので, server はこれを見て断れる. native の client は通常 `Origin` を送らない.
   - 接続されると RPC でできることはすべてできる. D-8 で shell command の設定は塞いだが, 出力 file の path による任意 file の上書きや, command file の path による任意 file の読み出しと送出は残る.
-  - token は接続時に提示させる乱数の合言葉である. backend が作り, 起動した GUI にだけ渡せば (子 process の出力は親しか読めない), 操作できるのはその GUI だけになる.
+  - token は接続時に提示させる乱数の合言葉である. backend が作り, 起動した GUI にだけ渡せば, 操作できるのはその GUI だけになる. これは, 親が子 process の出力を親だけが読む pipe で受け取り, その行を log などに転送しないことを前提とする (設計上の前提. 2026-10-08 注記: 以前は「子 process の出力は親しか読めない」と事実のように書いていた). 例えば docker-ui は現在, 子 process の stdout / stderr の各行を log に転送している (`mrtklib-docker-ui` `4fcaf45` `src/mrtklib_web_ui/services/mrtk_run_service.py:603-632`).
   - TLS は通信の暗号化である. loopback の通信は PC の外に出ないので不要である. LAN 越しでは暗号化がないと token を盗聴されうる.
   - 各案で操作できる者: #326 の原案 (loopback は認証なし) では同じ PC の全 program, 他の user, 全 web page. 原案に Origin の検査を加えると web page は防げるが, 他の program と他の user は防げない. token を常に必須にすると, token を持つ者 (既定では起動した GUI) だけになる.
   - 既に user の権限で動いている malware は token がなくても file を直接読み書きできる. token が主に守るのは web page と共有 PC の他の user である.
@@ -393,7 +393,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-15 | 時刻と座標の表現 | GPST と UTC, ECEF と LLH を併記 | Fork |
 | D-15a | GPST と UTC の書式 | 未決 | Open |
 | D-16 | navidata / ssr / 生観測 / monitor 相当 | v1 に含めない. on-demand, 範囲指定, 生 byte 列は別経路という枠を決める | Fork |
-| D-17 | solution の取得 | layer が solbuf を定期的に読み購読者別 queue に配る (B). 制約と限界を明記. 条件を満たせば hook (A) | Fork |
+| D-17 | solution の取得 | layer が solbuf を定期的に読み seq 付き環状 buffer に積む (B, D-28). 制約と限界を明記. 条件を満たせば hook (A) | Fork |
 | D-18 | stream 変化の検出遅延 | 仕様として明記 | Fork |
 | D-19 | status に solution status を含めるか | 含めない | Fork |
 | D-20 | log の発生源 | layer の message と `errbuf`, および trace の level 1 (既定) を流す. 文面は契約にしない | Fork |

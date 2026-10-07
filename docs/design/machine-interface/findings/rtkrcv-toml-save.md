@@ -23,6 +23,8 @@ if (mode && strcmp(mode, "a") == 0) {
 
 このため 2 回目の書き込みは行われず, console には `options saved to <file>` と表示される.
 
+公開 header は `saveopts` を `"a"` で append し, 成功なら 1 を返すと説明しており (`include/mrtklib/mrtk_options.h:105-113`), TOML では書かずに 1 を返す例外を書いていない (2026-10-08 追記).
+
 ## 再現手順と結果
 
 `conf/claslib/rtkrcv.toml` を読み込ませて起動し, remote console から `save` を実行した.
@@ -41,10 +43,11 @@ rtkrcv> save saved.conf
 
 最初の再現 (2026-10-07) の build は, `8dc1fc6` に本件と無関係な未 commit の変更 (`src/data/rcv/mrtk_rcv_ublox.c` 1 行) を含む tree から行った.
 
-key 数は Python の `tomllib` で末端の key を数えた (2026-10-08 に 156 から訂正). 失われるのは測位 option だけでなく `sysopts` 全体であり, 解の出力 (`[output]`), antenna (`[antenna.*]`), 補助 file (`[files]` の `satellite_atx` など) も含む. 2026-10-08 に変更のない 8dc1fc6 の tree で再現し直し, 同じ結果を得た. 保存した file から起動し直すと `pos1-posmode = single`, `pos2-armode = continuous` になる (入力は `ppp-rtk`, `fix-and-hold`).
+key 数は Python の `tomllib` で末端の key を数えた (2026-10-08 に 156 から訂正). section 数は `[...]` の table 宣言の行数である. 入力では 34 で, `tomllib` で数えた table は implicit table を含めて 39 になる (2026-10-08 追記). 失われるのは測位 option だけでなく `sysopts` 全体であり, 解の出力 (`[output]`), antenna (`[antenna.*]`), 補助 file (`[files]` の `satellite_atx` など) も含む. 2026-10-08 に変更のない 8dc1fc6 の tree で再現し直し, 同じ結果を得た. 保存した file から起動し直すと `pos1-posmode = single`, `pos2-armode = continuous` になる (入力は `ppp-rtk`, `fix-and-hold`).
 
 ## 付随して観測した事実
 
+- 公開 header は `loadopts_toml` について未知の TOML key を黙って読み飛ばすと説明するが (`include/mrtklib/mrtk_toml.h:24`), 実装は stderr に警告を出して読み飛ばす (`src/core/mrtk_toml.c:472`) (2026-10-08 追記).
 - `-w <pwd>` で指定した password は, configuration file に `console-passwd` があると上書きされる. command line の解析 (`rtkrcv.c:2114-2145`, `-w` は `:2128`) の後に `loadopts(file, rcvopts)` (`rtkrcv.c:2185`) が実行されるためである. 上の再現では `-w admin` を与えたが, 使用した `conf/claslib/rtkrcv.toml` が `[console] passwd = ""` を含むため, 保存結果の `console-passwd` は空だった.
 - `saveopts_toml()` は渡された option table を走査して書き出す. 読み込んだ file にあった未知の key や comment は保存されない.
 

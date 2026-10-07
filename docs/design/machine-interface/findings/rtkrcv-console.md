@@ -48,7 +48,7 @@ command 名は前方一致で判定し, 複数一致したときは表の後ろ�
 
 1. **対話的な確認が制御処理の中にある.** `start` / `restart` の出力 file 上書き確認, `save` / `log` の上書き確認, `set` の値入力. machine interface では対話できないため, 方針を引数か設定で受け取る必要がある.
 2. **破壊的読み出しがある.** `solution` は `nsol = 0`, `error` は `neb = 0` とする. 複数の consumer (複数の telnet console, telnet と RPC) が同じ data を奪い合う. `solbuf` は満杯 (256) になると以後の solution を捨てる ([rtksvr-runtime.md](rtksvr-runtime.md)).
-3. **設定は 2 段階である.** `set` / `load` は static 変数 (編集中の設定) を変えるだけで, `startsvr` の時点で `rtksvrstart` に渡されたものが稼働中の設定になる. どの option を変えたかは `modflgr` / `modflgs` に残る.
+3. **設定は 2 段階である.** `set` / `load` は static 変数 (編集中の設定) を変えるだけで, `startsvr` の時点で `rtksvrstart` に渡されたものが稼働中の設定になる. `set` で変えた option には `modflgr` / `modflgs` の印が付く (`:1659`). `load` は印を付けず (`:1665-1687`), start は起動の成否が分かる前に印を消す (`:601-606`). (2026-10-08 訂正: 以前は「どの option を変えたかは `modflgr` / `modflgs` に残る」と書いていた.)
 4. **並行実行の保護がない.** ある console の `set` / `load` と別 console の `start` が同時に static 変数に触れうる. `prssr` の `static` buffer も同時実行で壊れうる.
 5. **server state は 2 値しか表示しない.** `prstatus` は `svr->state` を `stop` / `run` に写すだけである (`:832`, `:921`).
 6. **人間向けの単位・書式変換が表示関数の中にある.** 時刻系 (`console-timetype`), 座標表示 (`console-soltype`) は console 設定に依存する. machine interface では表示設定と独立した値を返す必要がある.
