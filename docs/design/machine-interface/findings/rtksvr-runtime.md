@@ -66,7 +66,7 @@
 ## 5. 既存の状態取得関数
 
 - `void rtksvrsstat(rtksvr_t*, int* sstat, char* msg)` (RS:1533-1547): 8 stream の `strstat` と, 空でない message を `(%d) %s ` で連結した文字列. monitor は含まない.
-- `int rtksvrostat(svr, rcv, time, sat, az, el, snr, vsat)` (RS:1497-1525): 停止中は 0. 稼働中は lock 下で `obs[rcv][0]` から衛星番号, Az/El, SNR (整数 dBHz), 使用 flag を返す. 公開 header は SNR の単位を `0.001 dBHz` と説明するが (RH:187), 実装は観測値 (`0.001 dBHz` 単位の `uint16_t`) に `SNR_UNIT` (0.001) を掛けて丸めた整数 dBHz を返す (RS:1515) (2026-10-08 追記). **衛星表示と SNR を 1 回で得られる既存の関数である.**
+- `int rtksvrostat(svr, rcv, time, sat, az, el, snr, vsat)` (RS:1497-1525): 停止中は 0. 稼働中は lock 下で, 衛星番号と SNR (整数 dBHz) を `obs[rcv][0]` から, Az/El と使用 flag を `rtk.ssat` から取って返す (RS:1506-1520) (2026-10-08 訂正: 以前はすべて `obs[rcv][0]` からと読める書き方だった). 公開 header は SNR の単位を `0.001 dBHz` と説明するが (RH:187), 実装は観測値 (`0.001 dBHz` 単位の `uint16_t`) に `SNR_UNIT` (0.001) を掛けて丸めた整数 dBHz を返す (RS:1515) (2026-10-08 追記). **衛星表示と SNR を 1 回で得られる既存の関数である.**
 - 入力ごとの message 数 `nmsg[3][12]` (0:obs, 1:eph, 2:ion, 3:sbas, 4:antpos, 5:dgps, 6:geph, 7:ssr, 9:decode error, 10:stat, 11:lcl).
 
 ## 6. Process-global / static な状態

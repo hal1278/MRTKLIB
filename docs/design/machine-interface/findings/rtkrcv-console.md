@@ -56,5 +56,5 @@ command 名は前方一致で判定し, 複数一致したときは表の後ろ�
 
 ## 付随して観測した事実
 
-- `load` は `resetsysopts()` で測位の option を既定値に戻してから file を読み (`:1675-1676`), file を読めないと「no options file」と表示して終わる (`:1677-1679`). このとき core の測位の option (`sysopts` が指す static 変数) は既定値に戻ったままである. start が使う rtkrcv 側の写し (`prcopt` など, `:152`, 使用は `:634`) は前の値のままなのですぐには影響しないが, その後に何か 1 つでも `set` すると, `cmd_set` が core の値を写し直す (`:1655`) ので測位の option がすべて既定値になる. rtkrcv 固有の option は既定値に戻さずに読むので, file にない key は前の値のまま残る (`:1682`). (2026-10-08 追記)
+- `load` は `resetsysopts()` で測位の option を既定値に戻してから file を読み (`:1675-1676`), file を読めないと「no options file」と表示して終わる (`:1677-1679`). このとき core の測位の option (`sysopts` が指す static 変数) の一部は既定値に戻ったままである (`resetsysopts` は SNR mask などを消さない, `src/pos/mrtk_options.c:681-712`). start が使う rtkrcv 側の copy (`prcopt` など, `:152`, 使用は `:634`) は前の値のままなのですぐには影響しないが, その後に何か 1 つでも `set` すると, `cmd_set` が core の値を copy し直す (`:1655`) ので, 既定値に戻った部分がそのまま rtkrcv 側の copy に入る (2026-10-08 訂正: 以前は「すべて既定値になる」と書いていた). rtkrcv 固有の option は既定値に戻さずに読むので, file にない key は前の値のまま残る (`:1682`). (2026-10-08 追記)
 - `navidata` の cycle 引数は `args[i]` ではなく `args[1]` を読む (`:1503`).
