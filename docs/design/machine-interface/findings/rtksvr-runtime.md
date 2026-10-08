@@ -29,6 +29,9 @@
 
 - sol1 / sol2 を `stream[3+i]` に書き, 同じ byte 列を lock 下で `sbuf[i]` に追記する.
 - ✔ `svr->moni` があれば既定の LLH 書式で solution text を書く (RS:110-113). monitor port が運ぶのは solution text と `rtksvrmark` の行だけで, status / satellite / stream の情報はない.
+- `outsols` は NONE の解に 0 byte を返す (`src/pos/mrtk_sol.c:1792-1793`). このため NONE は出力 stream と monitor port には書かれず, `solbuf` にだけ入る. NMEA の GSA / GSV は `outsolexs` が状態によらず書く (`src/pos/mrtk_sol.c:1859-1862`). (2026-10-08 追記)
+- `out-outsingle` が off のとき, `rtkpos` は SPP の解を `rtk->sol` に入れてから状態を NONE にする (`src/pos/mrtk_rtkpos.c:2756`, `:2779-2780`). その後の処理が失敗したときに座標が SPP の値のまま残るかは engine ごとに未確認である. (2026-10-08 追記)
+- telnet の `solution` は状態 0 の解を表示しない (`apps/rtkrcv/rtkrcv.c:738-739`). (2026-10-08 追記)
 - ✔ `solbuf[nsol++] = rtk.sol` を lock 下で行うが, `nsol < MAXSOLBUF` (256) のときだけである (RS:115-118). ring buffer ではなく, 満杯になると consumer が `nsol` を 0 に戻すまで新しい solution は捨てられる. 唯一の consumer は `rtkrcv` の `solution` command である.
 - `rtksvr_t` に関数 pointer はなく (RH:52-97), epoch / solution ごとの hook は存在しない. ✔ `mrtk_ctx_t.cb_showmsg` (`include/mrtklib/mrtk_context.h:89`) は `NULL` 初期化以外に使われていない.
 

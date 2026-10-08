@@ -248,23 +248,27 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 
 | 対象 | 種類 | 発生源 | 決定 |
 |---|---|---|---|
-| `solution` | 出来事 | command layer が `solbuf` を定期的に読む | D-17. epoch ごとに 1 件 |
+| `solution` | 出来事 | command layer が `solbuf` を定期的に読む | D-17. server が出力した解 (解がある epoch は epoch ごとに 1 件, 解がない間は NONE を最大 1 Hz) |
 | `satellites` | 状態 | 要求時に server から写し, 短時間使い回す | D-26 |
 | `streams` | 状態と出来事 | command layer の定期処理が `strstat` / `strsum` を読む | 現在の状態は取得. 接続状態と message の変化は出来事として積む (D-18) |
 | `status` | 状態と出来事 | command layer | 現在の状態は取得. 状態の遷移と `lastError` は出来事 (D-19) |
 | `log` | 出来事 | command layer の message, `errbuf`, `trace` の level 1 | D-20 |
 
 - **D-17.** solution の取得方法. 現状 `solbuf` は単一 consumer 前提の破壊的 queue で, 満杯 (256) になると以後を捨てる. telnet の `solution` が読むと他の consumer から消える.
-  背景 (2026-10-07 の整理): `writesol` (`src/stream/mrtk_rtksvr.c:80-120`) は epoch ごとに, 出力 stream への書き込み, monitor port への書き込み, `solbuf` への追加を行う. 選択肢は 2 つある.
-  - A (hook): `rtksvr_t` に関数 pointer の欄を加え, `writesol` から呼ぶ. command layer が登録した関数が解を購読者ごとの queue に copy してすぐ戻る. 遅れはほぼなく, 満杯で捨てることもない. ただし `src/stream/mrtk_rtksvr.c` と公開 header `include/mrtklib/mrtk_rtksvr.h` を変える. #326 本文は, 既存の code 経路を変えるのは command layer の導入だけで, 測位 logic は触らないと述べており (Internal refactoring の節), A はこれを越える. ただし本文は変更の見積もりであり, 変更してよい file を限る規則ではない. 越える場合は理由を添えて提示する. (2026-10-08 補足: 以前は「#326 は既存 code の変更を rtkrcv の command layer に限るとしており」と書いていた.)
-  - B (定期的な読み出し): command layer が唯一の consumer として `solbuf` を定期的に (例: 50 ms ごと) 読み, 購読者ごとの queue に配る. 変更は `apps/rtkrcv` の中だけである. 遅れは読み出しの間隔以内で, 読み出しが長く止まると満杯で捨てる (10 Hz なら 25 秒分までは捨てない).
+  背景 (2026-10-07 の整理, 2026-10-08 訂正): `writesol` (`src/stream/mrtk_rtksvr.c:80-120`) は, 出力 stream への書き込み, monitor port への書き込み, `solbuf` への追加を行う. 呼ばれるのは, 解がある epoch では epoch ごと (`:910-917`), 解がない間は NONE を最大 1 Hz (`:924-927`) である ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §2). RTKLIB 2.4.3 b34 も同じである (`src/rtksvr.c:643-660`). NONE のときは `outsols` が 0 byte を返すので, 出力 stream と monitor port には書かれず, `solbuf` にだけ入る (findings の同じ節). (2026-10-08 訂正: 以前は「epoch ごとに」と書いていた.)
+  core から command layer の環状 buffer (D-28) へ解を運ぶ選択肢は 2 つある. client から見える環状 buffer はどちらでも同じである.
+  - A (hook): `rtksvr_t` に関数 pointer の欄を加え, `writesol` から呼ぶ. command layer が登録した関数が解を環状 buffer に積んですぐ戻る. 遅れはほぼなく, `solbuf` を通らないので `solbuf` の満杯による欠落はない. ただし `src/stream/mrtk_rtksvr.c` と公開 header `include/mrtklib/mrtk_rtksvr.h` を変える. layer の関数は測位の thread の中で動くので待たない作りが必須であり, 詰まれば測位が止まる. #326 本文は, 既存の code 経路を変えるのは command layer の導入だけで, 測位 logic は触らないと述べており (Internal refactoring の節), A はこれを越える. ただし本文は変更の見積もりであり, 変更してよい file を限る規則ではない. 越える場合は理由を添えて提示する. (2026-10-08 補足: 以前は「#326 は既存 code の変更を rtkrcv の command layer に限るとしており」と書いていた.)
+  - B (定期的な読み出し): command layer が唯一の consumer として `solbuf` を定期的に (例: 50 ms ごと) 読み切り, 環状 buffer に積む. RTKLIB 2.4.3 の RTKNAVI が 100 ms ごとに `solbuf` を読み切るのと同じ方式である (`app/winapp/rtknavi/navimain.cpp:1370-1376`). 遅れは読み出しの間隔以内で, 読み出しが長く止まると満杯で捨てる (10 Hz なら 25.6 秒分までは捨てない).
+  どちらでも, client が環状 buffer の容量を超える間取りに来なければ欠落する (D-21). (2026-10-08 訂正: 以前は A を「満杯で捨てることもない」とし, 欠落がないかのように書いていた.)
   command layer には streams の監視 (D-18) のための定期処理の thread がどのみち要り, 同じ thread で読めば構成が単純になる. (2026-10-08 訂正: satellites は D-26 で要求時の取得になったため, 定期処理の用途から外した.)
-  **Fork (2026-10-07, 現時点):** B. 読み出した解は D-28 の seq 付き環状 buffer に積む (当初は購読者ごとの queue としていた). telnet の `solution` も command layer 経由の読み出しに直し, `solbuf` の取り合いをなくす. 理由: 変更が #326 本文の述べた範囲 (rtkrcv の command layer) に収まり, 定期処理の thread を streams と共有できる (2026-10-08: satellites を外した. D-26 参照). 当初の案は A だった.
+  **Fork (2026-10-08, hal1278 の作業 session での回答. 2026-10-07 の B を契約とあわせて決め直した):**
+  - 契約: `solution` の出来事は server が出力した解の列とする. 解がある epoch は epoch ごとに 1 件, 解がない間は NONE を最大 1 Hz であり, `solbuf` に入る列 (RTKNAVI と telnet の `solution` が読む列) と同じである. solution file と出力 stream には NONE が書かれない (`outsols` は NONE で 0 byte を返す. `src/pos/mrtk_sol.c:1792-1793`) ので, file と一致するのは解がある分である. 失敗した epoch ごとの出来事は出さない. 理由: RTKLIB の利用者が見慣れた列と一致し, 解がある分は file とそろう. NONE を出すので, 解を失ったことを client に伝えられる (D-19 は status に解の品質を含めず, 品質の変化を solution の出来事で伝える). RTKNAVI も NONE を表示・記録はしないが, その到着を server が処理を続けている合図として使う (RTKLIB 2.4.3 b34 `app/winapp/rtknavi/navimain.cpp:1370-1385`, `:1435`). core の変更も要らない. (2026-10-08 訂正: 以前は「solution file, 出力 stream, RTKNAVI が読む列と同じ」「file と RPC で解の数がそろう」と書いていた.) 失敗した epoch の数が要れば, status の counter として後から追加的に加えられる. 退けた案: 処理した epoch ごとに 1 件 (失敗を含む. epoch ごとの成否は分かるが, 測位の loop の変更が要り, file の列と食い違い, 失敗が続くと受信の rate で NONE が出る).
+  - 取り出し方: B. 読み出した解は D-28 の seq 付き環状 buffer に積む (当初は購読者ごとの queue としていた). telnet の `solution` も command layer 経由の読み出しに直し, `solbuf` の取り合いをなくす. 理由: GUI の表示と記録には読み出しの間隔 (50 ms) の遅れで足りる (RTKNAVI の画面の更新も 100 ms 間隔である). RTKNAVI で長く使われてきた方式である. 測位の thread で layer の code を動かさずに済み, core の公開 API の追加は欠落の件数 (P3) だけで済む. 定期処理の thread を streams と共有できる. 遅れの小ささが要る機械の用途は, RPC ではなく既存の出力 stream (TCP の NMEA など) で解を受け取る. 退けた案: A (遅れはないが, 公開 header に callback を足し, layer の code が測位の thread の中で動く. 欠落は環状 buffer の容量で B と同じく起きうる). 2026-10-07 以前の当初の案は A だった. 2026-10-07 の B の理由は「変更が #326 本文の範囲に収まる」だったが, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md) で core を自前で直すことにしたため, 上の理由に置き換えた.
+  - 未決: 観測が途切れた後も, 最後の NONE が同じ時刻のまま 1 Hz で繰り返されうる (`:924-927` は新しい epoch の有無によらず `svr->rtk.sol` を書くことからの推論). 繰り返しを契約に書くか layer で除くかは `docs/rpc/` で決める.
+  - 未決 (2026-10-08 追加): NONE の出来事の座標は解ではない. `out-outsingle` が off のとき, `rtkpos` は SPP の解を `rtk->sol` に入れてから状態だけを NONE にする (`src/pos/mrtk_rtkpos.c:2756`, `:2779-2780`). その後の PPP などが失敗したときに座標が SPP の値のまま残るかは, MRTKLIB の engine ごとには未確認である (MALIB 1.2.0 `d491842` では PPP の更新が成功しなければ状態も座標も更新しない. `src/ppp.c:1229-1245`). layer で NONE の座標を落とすか, 契約に「NONE では状態と時刻だけを見る」と書くかは `docs/rpc/` で決める.
   制約: command layer が `solbuf` の唯一の consumer である. `nsol` の読み出しと 0 への書き戻しは `svr->lock` の下で行う. telnet を含め他の箇所は `solbuf` を直接読まない.
-  限界: (1) 通知の遅れは読み出しの間隔以内 (例: 50 ms) である. (2) 読み出しが `MAXSOLBUF` (256) epoch 分止まると以後の解を捨てる. 解の rate によって猶予は変わる (10 Hz で 25.6 秒, 100 Hz で 2.56 秒). 満杯に達したことを検出したら, 欠落があったことを出来事として環状 buffer に積む. (3) 読み出しは `svr->lock` を取るため, `rtkpos` / `decoderaw` の間は待たされる (#299).
+  限界: (1) 通知の遅れは読み出しの間隔以内 (例: 50 ms) である. (2) 読み出しが `MAXSOLBUF` (256) epoch 分止まると以後の解を捨てる. 解の rate によって猶予は変わる (10 Hz で 25.6 秒, 100 Hz で 2.56 秒). 捨てた件数は core が数え (P3, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)), layer はそれを欠落の件数として環状 buffer に積む. P3 が merge されるまでは, 満杯を見たときに欠落の可能性を積む. (3) 読み出しは `svr->lock` を取るため, `rtkpos` / `decoderaw` の間は待たされる (#299).
   A に移る条件: 表示に要る遅れが読み出しの間隔より短くなったとき, または満杯による欠落が実際に観測されたとき.
-  退けた案 (現時点): A (遅れと欠落はないが, `src/stream/mrtk_rtksvr.c` と公開 header を変え #326 の範囲を越える).
-  core の修正の扱い (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)): command layer で保証できない箇所は core を自前で直し, RPC の PR とは別の PR にすることになった. 限界 (2) の欠落は, P3 で `writesol` に捨てた件数の counter を足し, 「欠落があった」から件数まで返せるようにする. P3 が merge されるまでは, 満杯を見たときに欠落の可能性を返す. B を選んだ理由 (#326 本文の範囲に収める) の重みが変わったため, A と B の選択は, 契約を「`writesol` が出力した解」とするか「epoch ごとに 1 件」とするか ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §2 の 6.) とあわせて見直す. それまで状態は Fork のまま変えない.
 - **D-18.** streams の変化検出. stream の状態は read / write 時にしか更新されないため, 出力の無い stream の切断は次の書き込みまで検出されない. **Fork (2026-10-07):** この遅れを仕様として明記する. 理由: 能動的に確かめる仕組みは stream 層の変更を要し, 初版の範囲を越える. 退けた案: 定期的に接続を確かめる仕組みを作る.
 - **D-19.** `status` に solution status (fix / float など) の変化を含めるか. **Fork (2026-10-07):** 含めない. `status` の出来事は server の状態の遷移と `lastError` だけとする. 理由: 解の品質は solution の通知で分かり, 同じ情報を 2 つの topic に載せない. 退けた案: 含める (solution を購読しない client でも品質の変化が分かるが, 情報が重複する).
 - **D-20.** `log` の発生源.
@@ -396,7 +400,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-15 | 時刻と座標の表現 | GPST と UTC, ECEF と LLH を併記 | Fork |
 | D-15a | GPST と UTC の書式 | 未決 | Open |
 | D-16 | navidata / ssr / 生観測 / monitor 相当 | v1 に含めない. on-demand, 範囲指定, 生 byte 列は別経路という枠を決める | Fork |
-| D-17 | solution の取得 | layer が solbuf を定期的に読み seq 付き環状 buffer に積む (B, D-28). 制約と限界を明記. 条件を満たせば hook (A) | Fork |
+| D-17 | solution の取得 | 契約は server が出力した解の列. layer が solbuf を定期的に読み seq 付き環状 buffer に積む (B, D-28). 制約と限界を明記. 条件を満たせば hook (A) | Fork |
 | D-18 | stream 変化の検出遅延 | 仕様として明記 | Fork |
 | D-19 | status に solution status を含めるか | 含めない | Fork |
 | D-20 | log の発生源 | layer の message と `errbuf`, および trace の level 1 (既定) を流す. 文面は契約にしない | Fork |
