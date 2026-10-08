@@ -106,6 +106,9 @@ file 入力の再生が終わっても server は `running` のままである.
   - MRTKLIB 自身の real-time 回帰 test も, 終端を出力 file の大きさが増えなくなったことから推測している (`tests/cmake/run_rtkrcv_test.sh:129` 以降).
   - 止めないことの利点は, 入力が混在するとき (補正だけが終わり rover が続くなど) の曖昧さを避けることと, telnet の既存の挙動を保つことである. 前者は「全入力が file で全て終端」という条件で避けられる. 後者で変わるのは server の状態だけで, process を終了させる既存の script はそのまま動く.
   **Fork (2026-10-07):** 全入力が file で全て終端に達したら, backend が自動で `stopped` に遷移する. 停止の理由 (利用者, 入力終端, error) を状態に含め, 入力終端は正常な完了として `lastError` にしない. 一部の入力だけが終わった場合は streams の状態として構造化して通知する. 理由: 終端後の server は読み進めることができず, 止めないと出力 file が開いたままになり, NONE の solution を書き続けることがある. 終端を client が推測する必要もなくなる. 条件を「全入力が file で全て終端」とすることで, 入力が混在する場合に誤って止めない. 退けた案: 止めない (当初の案. 根拠が現状維持に偏っていた), rover 入力の終端だけで止める (他の入力が続く場合に早く止めすぎる).
+  終端の検出 (2026-10-08 追加). 背景 (2026-10-08 確認): 通常の file は, 最後の byte を読んだ呼び出しで `feof` が立った時点で `"end"` になる (`src/stream/mrtk_stream.c:747-748`). その呼び出しで読んだ data は同じ cycle で decode と測位まで済む. timetag 付きの file は, tag file が尽きた時点で `"end"` になる (`:720-734`). 同じ呼び出しで data file の残りを読むが, 1 回に読むのは buffer の大きさ (既定 32768 byte, `apps/rtkrcv/rtkrcv.c:137`) までなので, 残りがそれより大きいと `"end"` の時点で読み残しがある. stdin からの入力は `"end"` を出さない (`:699-709`). 受信機の format によっては decoder が最後の epoch を次の epoch の到着まで出さない可能性があるが, 未確認であり, 今の rtkrcv と同じ挙動なのでこの判断の範囲外とする.
+  **Fork (2026-10-08, hal1278 の作業 session での回答):** command layer は stream の message (自由文) を読まず, core に「data を全部読んだ」ことを構造化して返す関数を足して使う. timetag の終端も全部読んだ時点に揃える. この core の変更は [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md) の基準による新しい単位 P7 (stream の終端) とする. stdin からの入力は終端を検出できないので, stdin の入力が 1 つでもあれば自動停止しない. 理由: MRTKLIB 内部の自由文に依存せず, timetag の末尾を読み残さない. 退けた案: layer が message の `"end"` を読む (core の変更は要らないが, 自由文への依存と timetag の読み残しが残る).
+  未決: 使っていない入力 (type が none) を「全入力」の条件にどう数えるか.
 
 ### 3.4 Process lifecycle
 
@@ -200,6 +203,22 @@ lock は `rtkpos` / `decoderaw` の間保持されるため, snapshot の取得�
 - server: lifecycle state, `lastError`, 稼働時間, cycle, cycle あたり CPU 時間, 欠落観測数, version
 - positioning: mode, 周波数数, solution status, solution 時刻, 位置 (single / float / fixed) と標準偏差, 速度, age, ratio, 衛星数 (rover / base / valid), DOP, 推定状態数, base 位置, baseline 長
 - 入力ごとの message 数 (`nmsg`)
+
+- **D-31.** status の各項目をどこから返すか.
+  背景 (2026-10-08 の整理): status の解の項目を server 内部 (`rtk.sol`) から直接写すと, `solbuf` を定期的に読む solution の出来事 (D-17) より先の解が入り, 初期同期 (D-22) の境界と整合しない. 一方 `sol_t` (`include/mrtklib/mrtk_sol.h:44-61`) が持つのは時刻, 位置と速度, 共分散, 受信機時計, 状態, valid の衛星数, age, ratio などであり, DOP, CPU 時間, 内部の float / fixed の推定値などはないので, status 全体を最後の解から作ることもできない.
+  **Fork (2026-10-08, hal1278 の作業 session での回答):** 項目を出どころで分ける.
+
+  | 項目 | 出どころ |
+  |---|---|
+  | lifecycle state, 停止の理由, `lastError` | command layer. 対応する出来事と同時に更新する |
+  | `sol_t` にある項目 (solution 時刻, solution status, 解の位置と標準偏差, 速度, valid の衛星数, age, ratio) | 最後に公開した solution の出来事と同じ写し |
+  | mode, 周波数数, cycle, version | active config または固定の値 |
+  | 稼働時間, CPU 時間, 欠落観測数, `nmsg` | 採取した時刻を付けた値. 出来事から再現できるとは約束しない |
+  | DOP, rover / base の衛星数, 内部の float / fixed の推定値, 推定状態数, base 位置, baseline 長 | 採取した時刻を付けた別の写し. 解と同じ epoch であることは約束しない |
+
+  satellites (D-26) も独立した状態であり, 初期同期の応答全体が同じ測位 epoch を表すことは約束しない. 内部の値 (解の項目, 採取した値, satellites) は `running` の間だけ返す (D-30).
+  理由: 出来事を持つ項目は出来事と同じ写しから返すことで初期同期の境界と整合する. それ以外の項目は, 出どころと採取した時刻を示せば解と同じ時点の値だと誤解されない.
+  退けた案: すべてを server 内部から直接写す (単純だが, 解の項目が出来事の列より先行し, 初期同期の境界と整合しない).
 
 ### 5.2 Streams
 
@@ -308,13 +327,23 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 
 ### 6.3 接続時の初期同期
 
-- **D-22.** 接続時の初期同期. **Fork (2026-10-07, D-28 から導出):** client は接続時に現在の状態と出来事の最新の seq を取得し, 以後はその seq より後の出来事を取得する. 理由: seq で前後関係が決まり, 取りこぼしも重複もない. 退けた案: 購読開始の応答に snapshot と seq を含める (push が前提).
+- **D-22.** 接続時の初期同期.
+  背景 (2026-10-08 の整理): 2026-10-07 の案は「client は接続時に現在の状態と出来事の最新の seq を取得し, 以後はその seq より後の出来事を取得する. seq で前後関係が決まり, 取りこぼしも重複もない」だった. しかし状態と seq を別々に取ると, 間に起きた変化が抜ける. 例えば streams の状態 (接続中) を取得した後に切断の出来事 (seq=101) が積まれ, その後に最新の seq (101) を取得すると, client は切断を受け取れない. 順序を逆にすると重複し, 正しさが client の取得の順序に頼る. 状態ごとに seq を付けても, 境界が状態ごとに異なると 1 つの cursor で再開できない.
+  **Fork (2026-10-08, hal1278 の作業 session での回答):**
+  - 境界: 初期同期では, client が使う状態のすべてを同じ公開の境界で写し, 1 つの seq `w` と一緒に返す. 写しは `w` までの出来事を反映し, `w` より後の出来事を反映しない. command layer は, 出来事を積むこと, 対応する状態の写しを更新すること, 公開した seq を進めることを同じ短い lock (公開の lock) の中で行い, 初期同期の写しも同じ lock の下で取る. 各項目の出どころは D-31 による. この意味を契約とし, method の形は `docs/rpc/` で決める.
+  - lock の順序: server や stream の値は, それぞれの lock (`svr->lock`, stream の lock) の下で局所変数に写してから lock を解き, その後で公開の lock を取って反映する. 公開の lock を持ったまま `svr->lock` や stream の lock を待たない. 測位は `svr->lock` の中で `trace()` を呼ぶ (`src/stream/mrtk_rtksvr.c:900-908`) ので, D-20 の出力先が公開の lock を取る場合も, 順序は `svr->lock` → 公開の lock の一方向に限られる. 送信, 直列化, join は公開の lock の外で行う.
+  - 保証の範囲: 同じ接続の中で, 写しとその後の取得の境界に欠落も重複も生じない. 発生源での欠落 (D-17 の `solbuf` の満杯), 環状 buffer からの消失 (D-21), 再試行による再受信は別に扱う. 欠落を受けた client は初期同期をやり直して状態を回復できるが, 失われた解の列や log は戻らない.
+  - cursor の有効範囲: seq による cursor は 1 本の WebSocket 接続の中でだけ有効とする. client は接続のたびに初期同期からやり直し, 前の接続の cursor から再開しない. backend の process を識別する instance id は v1 に含めない. 理由: 接続は process より長く生きられないので, cursor が別の process に渡ることはない. GUI が起動した backend では token も起動ごとに作られるので, 前の process の token では新しい process に接続できない (D-25). 前提: reverse proxy 越しでも, backend 側の接続が切れれば client 側の接続も切れる (一般的な挙動による. 未確認). 失うもの: 切断していた間の出来事 (解の列, log) は取り戻せない. 状態は初期同期で戻る. 解の記録が要る用途は, RPC ではなく server の既存の出力 stream (solution file, TCP などの出力) で受け取る.
+  - stop / start を跨ぐ履歴: 環状 buffer は start で消す. seq は process の中で増え続け, start でも戻さないので, 同じ接続の cursor はそのまま使える. 停止時の最後の読み切り (D-30) を含め, 出来事は次の start まで取得できる.
+  退けた案: 状態ごとに整合する seq を付けて client が対象ごとに適用する (共通の cursor を作れない), 取得の順序 (先に seq, 後で状態) を契約に書く (重複の吸収を client に任せ, 古い出来事で表示が巻き戻りうる), instance id を v1 に入れて再接続後に cursor から再開する (第一目標の client には要らない. §10), stop / start を跨いで履歴を残す (停止後は内部の値を返さない (D-30) ので跨ぐ必要がない), 購読開始の応答に snapshot と seq を含める (2026-10-07. push が前提).
 
 ## 7. 並行実行
 
 - command layer は 1 つの mutex で lifecycle 操作と configuration 操作を直列化する. telnet console の各 thread と RPC handler はこの layer を通す.
 - snapshot の取得は lifecycle 操作と並行してよい.
 - **D-30.** 起動・停止の前後に server 内部の値 (解, 衛星など) をどう返すか. 背景: start は server 内部の測位の状態を破棄して作り直すので, 起動中に内部の値を読むのは安全でない. 停止後は最後の状態が次の start まで残る. D-4 によりファイル再生の終了で自動停止するので, 停止後も最終結果を表示できることに価値がある. **Fork (2026-10-07):** `starting` の間は server の状態だけを返し, 内部の値は空とする. 停止処理を始める直前に command layer が最後の写しを保存し, `stopping` / `stopped` ではそれを停止中であることと合わせて返す. 次の start で消す. 理由: 再生の終了後も最終結果を表示でき, 停止処理と競合せずに済む. 退けた案: すべて空にする (停止後に最終結果が見えない), 停止後は server の内部を直接読む (停止処理との競合に注意が要る).
+  **Fork (2026-10-08 更新, hal1278 の作業 session での回答):** `stopped` で返す最終結果の写しは, server thread が終わった後に取る. 停止の手順は, stop の要求 → thread の終了 (join) → `solbuf` の最後の読み切り (出来事として環状 buffer に積む) → 写しを取る → `stopped` とする. `stopping` の間は, 停止処理を始める直前の写しを返す. 最後の読み切りが終わるまで次の start は受け付けない (`busy`, D-3). 背景 (2026-10-08 確認): stop の要求後も実行中の cycle は最後まで処理され (`src/stream/mrtk_rtksvr.c:848`), 解を出しうる. thread の終了時の片付け (`:945-961`) は測位の状態 (`svr->rtk`) と `solbuf` に触れず, これらは次の start まで残る (`:1198-1200` で消す). join の後は書く thread がいないので競合しない. 理由: 停止処理の直前の写しでは, 最後の cycle の結果が写しと出来事の両方から漏れうる. 2026-10-07 に退けた「停止後は server の内部を直接読む」の理由 (停止処理との競合) は, join の後に一度だけ読むことでなくなる. 退けた案: 停止処理の直前の写しを `stopped` でも返す (2026-10-07 の Fork. 最後の cycle の結果が漏れうる).
+  **Fork (2026-10-08 再更新, hal1278 の作業 session での回答. 同日の上の更新を置き換える):** 内部の値 (解の項目, satellites, D-31 の採取した値) は `running` の間だけ返す. `starting`, `stopping`, `stopped` では lifecycle の状態 (停止の理由, `lastError` を含む) だけを返す. 停止の手順のうち, join の後に `solbuf` を最後に読み切って出来事として積むことは残す. 最後の cycle の解は `stopped` への遷移の出来事より前の seq で列に入り, 次の start まで取得できる (D-22). 最後の読み切りが終わるまで次の start は受け付けない (`busy`, D-3). 理由: client は停止までに受け取った出来事で最終結果を表示し続けられる. RTKNAVI も解を自分の配列に記録し (RTKLIB 2.4.3 b34 `app/winapp/rtknavi/navimain.cpp:1430-1456`), 表示はその配列から行う (`:1499` 以降). 停止後の写しを持たないので, 写しの保存と消去の規則が要らない. 停止後に接続した client は最終結果を見られないが, solution file には残る. 退けた案: `stopped` で thread の終了後の写しを返す (同日の上の更新. 停止後に接続した client も最終結果を見られるが, 第一目標の client には要らない. §10).
   関係する範囲外の話: この写しは表示用であり, 共分散や ambiguity を含まないので, 停止時の状態を次の開始に使って収束を早める warm start には使えない. warm start は測位 engine の機能であり, この文書の範囲外とする ([unresolved.md](unresolved.md) U-19).
 - **D-23.** 長時間かかる start の間の他 client の要求. **Fork (2026-10-07):** lifecycle 操作は `busy` で拒否する (D-3). 取得の操作は並行して受け付け, status は `starting` / `stopping` を返す (D-28). start は開始時点で staged config を写し取ってから起動処理に入る. 起動中・停止処理中の setConfig / loadConfig は受け付けて staged config だけを変え, key ごとに restart が必要であることを返す. これは稼働中の設定変更の扱い (D-9) と同じである. 理由: `busy` で拒否する場面が増えず, GUI の user が起動中に option 画面を編集してもエラーにならない. 退けた案: 設定の変更も `busy` で拒否する (実装は単純だが起動中の編集がエラーになる), すべての要求を待たせて順に処理する (応答が数秒遅れる).
 - 現状のまま公開すると問題になる core 側の挙動 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md)). core の修正は自前で書き, RPC の PR とは別の PR にする (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md). P1 などはそこでの PR の単位):
@@ -385,7 +414,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-1 | 起動失敗の表し方 | `stopped` + `lastError` | Fork |
 | D-2 | lifecycle 操作の冪等性 | 二重 start は error, 停止中の stop は no-op | Fork |
 | D-3 | 遷移中の lifecycle 操作 | `busy` で reject | Fork |
-| D-4 | 入力終端での自動停止 | 全入力が file で全て終端なら自動停止 (停止理由付き). 一部の終端は streams で通知 | Fork |
+| D-4 | 入力終端での自動停止 | 全入力が file で全て終端なら自動停止 (停止理由付き). 終端は core の構造化した関数で検出 (P7). stdin があれば自動停止しない. 一部の終端は streams で通知 | Fork |
 | D-5 | 起動完了と port の通知 | port 0 可 + 確定した接続先を機械可読 1 行で出力. 拡張の制約あり | Fork |
 | D-6 | `shutdown` operation | `stop` と別に持つ | Fork |
 | D-7 | 出力 file の上書き | start / save に方針を渡す. 既定は既存なら失敗 | Fork |
@@ -405,7 +434,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-19 | status に solution status を含めるか | 含めない | Fork |
 | D-20 | log の発生源 | layer の message と `errbuf`, および trace の level 1 (既定) を流す. 文面は契約にしない | Fork |
 | D-21 | 遅い client | client ごとの queue なし. 消えた範囲は欠落と最古の seq を返す (D-28) | Fork |
-| D-22 | 接続時の初期同期 | 現在の状態と最新 seq を取り, 以後はそれより後 (D-28) | Fork |
+| D-22 | 接続時の初期同期 | 1 つの公開の境界で状態の写しと seq を返す. cursor は接続の中だけ有効 (再接続は初期同期から). instance id は v1 になし. 環状 buffer は start で消し seq は続ける | Fork |
 | D-23 | 長い start の間の他要求 | lifecycle は busy. 取得は並行. 設定変更は staged のみ変え restart 要と返す (D-9 と同じ) | Fork |
 | D-24 | telnet bind address の変更 | 凍結の例外. loopback 既定, 他は明示 option, loopback 以外で空 password は起動拒否 | Fork |
 | D-25 | RPC endpoint の公開範囲と認証 | token 常に必須 (自動生成し準備完了の 1 行で渡す). CLI でのみ検証用に無効化. Origin 許可 list. 既定 127.0.0.1, TLS なし | Fork |
@@ -413,4 +442,20 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-27 | console なし起動 | RPC だけを開く起動方法を設ける | Fork |
 | D-28 | 受け渡しの方式 | pull を基本. 出来事は seq 付き環状 buffer から「seq 以降」を取得. push は将来の追加 | Fork |
 | D-29 | 衛星の情報と SNR | satellites に信号ごとの処理状況として C/N0 を含める. P / L / D などの観測値は別 (D-16) | Fork |
-| D-30 | 起動・停止の前後の内部の値 | starting は空. 停止直前の写しを stopping / stopped で返す. 次の start で消す | Fork |
+| D-30 | 起動・停止の前後の内部の値 | 内部の値は running の間だけ. 他の状態では lifecycle だけ. 停止時は join の後に solbuf を読み切り出来事として積む | Fork |
+| D-31 | status の項目の出どころ | 出来事を持つ項目は出来事と同じ写し. 他は採取時刻付きの値で, 解と同じ epoch は約束しない | Fork |
+
+## 10. 将来の拡張
+
+第一目標の client (RTKNAVI 相当の GUI, [decisions/0007](decisions/0007-gui-suite-composition.md)) には要らないが, 後から追加的 (minor 版) に加えられるよう, 今の設計で妨げないもの. 加えるかは必要になった時点で判断する. 各項目の定義は「関係」の欄の owner に従う.
+
+| 拡張 | 必要になる場面 | 妨げないための今の設計 | 関係 |
+|---|---|---|---|
+| backend の instance id と, 再接続後の cursor からの再開 | 切断中の出来事も落とせない client, 自分が起動していない backend に接続し直す client | seq は process の中で単調に増やし, start でも戻さない. instance id は応答と要求に任意の項目として足せる | D-22 |
+| 停止後の最終結果の写し | 停止後に接続した client が最終結果を見る | 停止時は join の後で `solbuf` を読み切る. 停止後も `svr->rtk` は次の start まで残る | D-30 |
+| push (購読と通知) | 遅れの小ささが要る client | 出来事に seq を付けて環状 buffer に保持する | D-28 |
+| `writesol` の hook | 表示に要る遅れが読み出しの間隔より短くなる, または `solbuf` の満杯による欠落が観測される | D-17 の「A に移る条件」 | D-17 |
+| 失敗した epoch の数 | epoch ごとの成否を知りたい client | status の counter として加える | D-17 |
+| monitor 画面相当の data | RTKNAVI の monitor 画面の再現 | on-demand, 範囲の指定, 生の byte 列は別経路という枠 | D-16 |
+
+解の記録は, 拡張を待たずに server の既存の出力 stream (solution file, TCP などの出力) で行える (D-22). RPC で記録の欠落をなくすことが必要になったら, 1 行目の拡張で対応する.
