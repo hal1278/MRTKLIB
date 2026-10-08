@@ -3,7 +3,7 @@
 この文書は, 横断的な未決事項を記録する.
 ここにある事項は確定していない. 他の文書で確定事項として扱わない.
 
-`rtkrcv` の operation と state に関する判断事項 (D-1 – D-38) は [rtkrcv-control.md](rtkrcv-control.md) §9 が owner である. ここでは重複して書かない.
+`rtkrcv` の operation と state に関する判断事項 (D-1 – D-39) は [rtkrcv-control.md](rtkrcv-control.md) §9 が owner である. ここでは重複して書かない.
 
 決着した項目は `decisions/` に記録し, ここから削除して decision へのリンクだけを残す.
 

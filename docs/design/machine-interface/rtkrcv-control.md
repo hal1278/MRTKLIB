@@ -148,6 +148,7 @@ file 入力の再生が終わっても server は `running` のままである.
   理由: 固定の規則 1 つで済み, 起動 option や状態による切り替えが要らない. 組み込まれる値は escape ではなく shell を介さない実行で解決するので, 値が何であっても注入が起きず, RPC 用の特別な規則 (stream の type による拒否など) も要らない. Windows の `system()` は `cmd.exe` を経由し quote の規則も異なるため, process 起動は Windows 移植でも作り直す必要があり, 追加の作業はほとんどない.
   退けた案: 認証済みの client を信頼してすべて許可する (token の漏洩がそのまま shell の取得になる), RPC だけの起動では startcmd / stopcmd の実行自体を無効にする (起動 option と状態の組み合わせが増える).
   限界: これだけでは RPC の安全は完結しない. 出力 file の path を書き換えた任意 file の上書きや, `file-cmdfile` に任意の file を指定して内容を stream に送ることが残る. 「RPC を操作できるのは起動した GUI だけ」という土台は D-25 で決める.
+  **Fork (2026-10-08 更新, hal1278 の作業 session での回答):** 1. を廃止し, setConfig でも `misc-startcmd` と `misc-stopcmd` を受け付ける. 2. は残す. 背景 (2026-10-08 確認): startcmd は start のときに `system()` で shell を通して実行される (`apps/rtkrcv/rtkrcv.c:625`). server は入力 stream で受け取った byte 列をそのまま log stream に複製し (`src/stream/mrtk_rtksvr.c:859`), D-13 により log の path は任意である. よって token を持つ client は, 入力 stream を自分の server への接続にし, log stream で startcmd を含む `.toml` を任意の path に書かせ, それを loadConfig して start すれば shell を得られる (推論. 未実行). 1. は security の境界になっていなかった. 理由: token を持つ client は backend を動かす OS の user と同等に信頼する (D-39) ので, shell に届く key だけを拒否しても守れるものがなく, 規則が 1 つ増えるだけである. 退けた案: 1. を誤操作の防止として残し, security の境界ではないと明記する (GUI の汎用の option 画面からの誤設定は防げるが, 規則が増える). 2. を残す理由は, 設定値を command 文字列に組み込むときの注入を防ぐためであり, 信頼の範囲とは独立している.
 
 ## 4. Configuration
 
@@ -411,7 +412,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
   - loopback で待ち受けても, 接続できるのは GUI だけではない. 同じ PC の他の program, 共有 PC の他の user account (loopback は OS の全 user で共通), browser で開いた任意の web page が接続できる.
   - (一般知識による. browser の仕様と実装での確認は未了. 2026-10-08 注記) browser は, どの site の page からでも `ws://127.0.0.1:<port>` への WebSocket 接続を止めない. 接続時に `Origin` header で page の出所を伝えるので, server はこれを見て断れる. native の client は通常 `Origin` を送らない.
   - 接続されると RPC でできることはすべてできる. D-8 で shell command の設定は塞いだが, 出力 file の path による任意 file の上書きや, command file の path による任意 file の読み出しと送出は残る.
-  - token は接続時に提示させる乱数の合言葉である. backend が作り, 起動した GUI にだけ渡せば, 操作できるのはその GUI だけになる. これは, 親が子 process の出力を親だけが読む pipe で受け取り, その行を log などに転送しないことを前提とする (設計上の前提. 2026-10-08 注記: 以前は「子 process の出力は親しか読めない」と事実のように書いていた). 例えば docker-ui は現在, 子 process の stdout / stderr の各行を log に転送している (`mrtklib-docker-ui` `4fcaf45` `src/mrtklib_web_ui/services/mrtk_run_service.py:603-632`).
+  - token は接続時に提示させる乱数の合言葉である. (2026-10-08: 渡し方は D-25 の更新で, 親が作って環境変数で子に渡す形に変えた. 以下は 2026-10-07 の整理.) backend が作り, 起動した GUI にだけ渡せば, 操作できるのはその GUI だけになる. これは, 親が子 process の出力を親だけが読む pipe で受け取り, その行を log などに転送しないことを前提とする (設計上の前提. 2026-10-08 注記: 以前は「子 process の出力は親しか読めない」と事実のように書いていた). 例えば docker-ui は現在, 子 process の stdout / stderr の各行を log に転送している (`mrtklib-docker-ui` `4fcaf45` `src/mrtklib_web_ui/services/mrtk_run_service.py:603-632`).
   - TLS は通信の暗号化である. loopback の通信は PC の外に出ないので不要である. LAN 越しでは暗号化がないと token を盗聴されうる.
   - 各案で操作できる者: #326 の原案 (loopback は認証なし) では同じ PC の全 program, 他の user, 全 web page. 原案に Origin の検査を加えると web page は防げるが, 他の program と他の user は防げない. token を常に必須にすると, token を持つ者 (既定では起動した GUI) だけになる.
   - 既に user の権限で動いている malware は token がなくても file を直接読み書きできる. token が主に守るのは web page と共有 PC の他の user である.
@@ -424,6 +425,8 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
   - 設定は TOML の独立した section (port, bind address, 許可する Origin) と CLI option で与え, CLI を優先する.
   理由: 操作できる者を token の保持者 (既定では起動した GUI) だけにでき, web page と共有 PC の他の user を防げる. GUI ごとに専用の backend を起動するので ([decisions/0009](decisions/0009-backend-process-per-gui.md)), token は準備完了の 1 行で受け渡せ, GUI の追加の手間はほとんどない. loopback を例外にしないので code の経路が 1 つで済む. 検証の手軽さは CLI 限定の無効化で確保し, 無効のままの設定 file が配られる危険を避ける. contract test は準備完了の 1 行から token を読めるので無効化を要さず, token がないと拒否されることも test する.
   退けた案: #326 の原案 (loopback は認証なし. web page も防げない), 原案に Origin の検査を加える (同じ PC の他の program と他の user を防げない), 設定 file でも無効化できる (無効のままの設定が配られうる), 無効化を設けず固定 token だけにする (分岐は最少だが検証の手間が残る).
+  **Fork (2026-10-08 更新, hal1278 の作業 session での回答):** token の渡し方を変える. 親 (GUI) が乱数の token を作り, 環境変数で子の `mrtk` に渡す. backend は起動の直後にそれを読んで自分の環境から消し, startcmd や外部 command などの孫の process に引き継がせない. 準備完了の 1 行 (D-5) には接続先だけを書き, token は書かない. token を渡されなかったときだけ backend が作り, 手動で起動した user のために表示する. 環境変数の名前は `docs/rpc/` で決める. 背景: 2026-10-07 の案は backend が作った token を準備完了の 1 行 (stdout) で親に渡すものだったが, frontend が子の stdout を log に流すと token が漏れる. docker-ui は今, 子の stdout と stderr の各行を log に転送している (`mrtklib-docker-ui` `4fcaf45` `src/mrtklib_web_ui/services/mrtk_run_service.py:603-632`). 理由: 秘密を stdout に出さないので, frontend の log の扱いに頼らない. どの OS でも同じ方法で渡せる. 環境変数は同じ OS の user から読める (Linux では消した後も起動時の環境が同じ user から読める. 一般知識による) が, その user は D-39 により信頼の範囲内である. 退けた案: 準備完了の 1 行で渡し, 親はその行を log に出さないことを契約にする (2026-10-07 の案. frontend の扱いに頼る), stdin に 1 行書く (`mrtk run` は stdin を入力 stream や local の console に使いうる), 権限を絞った file で渡す (Windows では ACL の扱いが要り, 異常終了で file が残る), 継承した file descriptor / handle で渡す (親以外に見えないが, Windows では handle の継承を platform layer で扱う必要があり実装が多い), 引数で渡す (他の user から `ps` で見える). 親以外に一切見せない受け渡しは §10 の将来の拡張とする.
+- **D-39.** token を持つ client をどこまで信頼するか. 背景 (2026-10-08 確認): D-8 の背景のとおり, token を持つ client は RPC だけで任意の path に任意の内容を書かせ, shell を得られる (推論. 未実行). telnet console も, password を通れば `!command` で shell を実行できる (`apps/rtkrcv/rtkrcv.c:1754`). **Fork (2026-10-08, hal1278 の作業 session での回答):** token を持つ client は, backend を動かしている OS の user と同等に信頼する. 守る境界は token (D-25), `Origin` の検査, loopback での待ち受けであり, その内側に境界は設けない. D-12 (getConfig で平文を返す) と D-13 (任意の path) はこの前提で一貫する. 理由: rtkrcv の機能 (任意の path への出力と log, 外部 command) を保ったまま token の内側に境界を作るには, path, stream の種類, command file, load での startcmd などを広く制限することになり, RTKLIB の使い方と大きく食い違う. 退けた案: token を持つ client を制限付きで信頼する (上の理由). ありうる問題点 (2026-10-08): token の漏洩は, その OS の user の権限での任意の操作に直結する. token は schema で秘密の印を付け, 実行中の状態と log に出さない (D-12). loopback 以外での待ち受けは TLS がないので, reverse proxy や VPN の背後に置く (#326 の原案どおり).
 
 ## 8. 互換性
 
@@ -462,7 +465,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-6 | `shutdown` operation | `stop` と別に持つ | Fork |
 | D-7 | 出力 file の上書き | start / save に方針を渡す. 既定は既存なら失敗 | Fork |
 | D-7a | start / save に渡す上書き方針の形 | 上書きを許す path の一覧 | Fork |
-| D-8 | shell に届く設定 | startcmd / stopcmd は setConfig で拒否. 組み込まれる値は shell を介さない process 起動で解決 | Fork |
+| D-8 | shell に届く設定 | startcmd / stopcmd も setConfig で受け付ける (D-39). 組み込まれる値は shell を介さない process 起動で解決 | Fork |
 | D-9 | 稼働中の設定変更 | 即時反映なし. staged / active と key ごとの restart 要否. 応答は key ごとの適用状態 | Fork |
 | D-10 | configuration の key の形 | TOML の木. legacy 名は入力のみ. 値は同梱の設定例と同じ表現で, 型は schema が持つ | Fork |
 | D-11 | saveConfig の意味 | 全 key の canonical TOML (export). 前提として既存 bug を修正. `.toml` 以外の path は error. 文字列は常に escape (P5) | Fork |
@@ -472,6 +475,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-36 | load の意味 | 置き換え (既定値に戻してから file を当てる) | Fork |
 | D-37 | load と setConfig の失敗時 | 原子的. 失敗なら staged は元のまま, 全 error を返す | Fork |
 | D-38 | 問題のある key と値 | file の load は警告 (知らない key は無視, 不正な値は既定値, 古い path は既存の規則). 構文の誤りと setConfig の誤りは error. 診断は構造化 (P8) | Fork |
+| D-39 | token を持つ client の信頼の範囲 | backend を動かす OS の user と同等. 境界は token, Origin, loopback | Fork |
 | D-15 | 時刻と座標の表現 | GPST と UTC, ECEF と LLH を併記 | Fork |
 | D-15a | GPST と UTC の書式 | 未決 | Open |
 | D-16 | navidata / ssr / 生観測 / monitor 相当 | v1 に含めない. on-demand, 範囲指定, 生 byte 列は別経路という枠を決める | Fork |
@@ -483,7 +487,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-22 | 接続時の初期同期 | 1 つの境界で状態の snapshot と seq を返す. cursor は接続の中だけ有効 (再接続は初期同期から). instance id は v1 になし. ring buffer は start で消し seq は続ける | Fork |
 | D-23 | 長い start の間の他要求 | lifecycle は busy. 取得は並行. 設定変更は staged のみ変え restart 要と返す (D-9 と同じ) | Fork |
 | D-24 | telnet bind address の変更 | 凍結の例外. loopback 既定, 他は明示 option, loopback 以外で空 password は起動拒否 | Fork |
-| D-25 | RPC endpoint の公開範囲と認証 | token 常に必須 (自動生成し準備完了の 1 行で渡す). CLI でのみ検証用に無効化. Origin 許可 list. 既定 127.0.0.1, TLS なし | Fork |
+| D-25 | RPC endpoint の公開範囲と認証 | token 常に必須 (親が作り環境変数で渡す. 渡されなければ backend が作り表示). CLI でのみ検証用に無効化. Origin 許可 list. 既定 127.0.0.1, TLS なし | Fork |
 | D-26 | `satellites` の取得 | 要求時に snapshot を取り短時間使い回す. 間隔は client (D-28) | Fork |
 | D-27 | console なし起動 | RPC だけを開く起動方法を設ける | Fork |
 | D-28 | 受け渡しの方式 | pull を基本. event は seq 付き ring buffer から「seq 以降」を取得. push は将来の追加 | Fork |
@@ -510,6 +514,8 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | event の種類による絞り込み | log の level 2 などを受け取りたくない client | cursor の意味を「server が走査し終えた seq」に広げれば足せる | D-34 |
 | 種類ごとの保持 | 頻度の低い event を長く保持したい client | seq を全種類で 1 本にする (D-32) | D-35 |
 | 処理した epoch の衛星の一覧を core が明示的に持つ | `ssat.spt` の意味が変わったとき | contract test で一覧の求め方の破綻を検出する | D-29 |
+| token を親以外に一切見せない受け渡し (継承した file descriptor / handle, stdin) | 同じ OS の user にも token を見せたくないとき | token の渡し方を D-25 の 1 か所に閉じる | D-25 |
+| token の代わりに OS の仕組みで相手を確かめる (Unix domain socket, Windows の named pipe) | native の client だけの構成で認証を OS に任せたいとき (browser はつなげない) | token は接続時に示すもので (D-25), method の定義に含まれないので, 転送路を足しても method は変わらない | D-25 |
 | 設定 file に書いた schema の版を持たせる | 警告で版の違いと打ち間違いを見分けたいとき | 警告の文面を補うだけに使い, 版によって挙動を変えない (変えると改名の履歴に比例して作業が増える) | D-38 |
 
 解の記録は, 拡張を待たずに server の既存の出力 stream (solution file, TCP などの出力) で行える (D-22). RPC で記録の欠落をなくすことが必要になったら, 1 行目の拡張で対応する.
