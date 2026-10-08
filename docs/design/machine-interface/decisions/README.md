@@ -59,3 +59,4 @@
 | [0017](0017-gui-repository-conventions.md) | GUI repository の license, 名前, 既存文書, 文書の分担 | Accepted |
 | [0018](0018-windows-porting-plan.md) | Windows 移植の段階, CI, 設計文書の時期 | Accepted |
 | [0019](0019-console-risks-handled-publicly.md) | rtkrcv console の危うさは非公開の報告にせず, 公開の設計と通常の bug 報告で扱う | Accepted |
+| [0020](0020-core-fixes-as-separate-prs.md) | command layer で保証できない箇所は core を自前で直し, 単独で閉じられる単位ごとに別の PR にする | Accepted |

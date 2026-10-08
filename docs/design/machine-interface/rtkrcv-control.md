@@ -264,6 +264,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
   限界: (1) 通知の遅れは読み出しの間隔以内 (例: 50 ms) である. (2) 読み出しが `MAXSOLBUF` (256) epoch 分止まると以後の解を捨てる. 解の rate によって猶予は変わる (10 Hz で 25.6 秒, 100 Hz で 2.56 秒). 満杯に達したことを検出したら, 欠落があったことを出来事として環状 buffer に積む. (3) 読み出しは `svr->lock` を取るため, `rtkpos` / `decoderaw` の間は待たされる (#299).
   A に移る条件: 表示に要る遅れが読み出しの間隔より短くなったとき, または満杯による欠落が実際に観測されたとき.
   退けた案 (現時点): A (遅れと欠落はないが, `src/stream/mrtk_rtksvr.c` と公開 header を変え #326 の範囲を越える).
+  core の修正の扱い (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)): command layer で保証できない箇所は core を自前で直し, RPC の PR とは別の PR にすることになった. 限界 (2) の欠落は, P3 で `writesol` に捨てた件数の counter を足し, 「欠落があった」から件数まで返せるようにする. P3 が merge されるまでは, 満杯を見たときに欠落の可能性を返す. B を選んだ理由 (#326 本文の範囲に収める) の重みが変わったため, A と B の選択は, 契約を「`writesol` が出力した解」とするか「epoch ごとに 1 件」とするか ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §2 の 6.) とあわせて見直す. それまで状態は Fork のまま変えない.
 - **D-18.** streams の変化検出. stream の状態は read / write 時にしか更新されないため, 出力の無い stream の切断は次の書き込みまで検出されない. **Fork (2026-10-07):** この遅れを仕様として明記する. 理由: 能動的に確かめる仕組みは stream 層の変更を要し, 初版の範囲を越える. 退けた案: 定期的に接続を確かめる仕組みを作る.
 - **D-19.** `status` に solution status (fix / float など) の変化を含めるか. **Fork (2026-10-07):** 含めない. `status` の出来事は server の状態の遷移と `lastError` だけとする. 理由: 解の品質は solution の通知で分かり, 同じ情報を 2 つの topic に載せない. 退けた案: 含める (solution を購読しない client でも品質の変化が分かるが, 情報が重複する).
 - **D-20.** `log` の発生源.
@@ -274,7 +275,7 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
   - GUI は子 process の stderr を読める. 解析せずに表示するだけなら P5 に反しない. ただし rtkrcv が stderr に出すのは起動失敗などに限られる.
   - どの案でも log の文面は人間向けの自由文であり, 契約にしない. client は表示するだけで解析しない (P5). 機械が判断に使う状態 (`lastError`, stream の状態, 解の品質) は別の method で返す.
   候補: A. command layer 自身の message と `errbuf` (変更は `apps/rtkrcv` だけ. RTK では有用だが PPP / CLAS / MADOCA ではほぼ空). B. `trace()` に出力先を足し, 指定 level 以下を流す (全 engine の診断が得られる唯一の経路. `src/core/mrtk_trace.c` の変更で #326 の範囲を越えるが, 未使用の `cb_showmsg` を使えば数行で済む. 複数 thread から呼ばれるので受け側は thread-safe にする). C. stderr を不透明な text として GUI が表示する (変更なし. 量が少ない). D. 初版は log なし.
-  **Fork (2026-10-07):** A に加え, B を level 1 (error) を既定として入れる. level 2 は設定で選べるようにする. 理由: MRTKLIB の主な用途である PPP / CLAS では A だけでは engine の診断がほぼ得られない. level 1 は約 90 箇所で量が少なく user に意味がある. level 2 は量が多く開発者向けの表示を含むので既定にしない. B は `src/core/mrtk_trace.c` の変更で #326 の範囲 (rtkrcv の command layer) を越えるため, 理由を添えて例外として #326 に提示する. 退けた案: A のみ (PPP / CLAS で engine の診断がほぼ得られない), 初版は log なし (stderr の表示だけになる).
+  **Fork (2026-10-07):** A に加え, B を level 1 (error) を既定として入れる. level 2 は設定で選べるようにする. 理由: MRTKLIB の主な用途である PPP / CLAS では A だけでは engine の診断がほぼ得られない. level 1 は約 90 箇所で量が少なく user に意味がある. level 2 は量が多く開発者向けの表示を含むので既定にしない. B は `src/core/mrtk_trace.c` の変更で #326 の範囲 (rtkrcv の command layer) を越えるため, 理由を添えて例外として #326 に提示する. B の core の変更は RPC の PR に混ぜず, 別の PR (P4) として出す (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)). 退けた案: A のみ (PPP / CLAS で engine の診断がほぼ得られない), 初版は log なし (stderr の表示だけになる).
 
 - **D-26.** `satellites` の取得. #326 の open question (頻度) である. **Fork (2026-10-07):** satellites は状態として扱い, 取得の method で返す. 求められたときに server から現在の値を写して返し, 写しには観測の時刻を付ける. 直前の写しが十分新しければ (例: 0.5 秒以内) それを返し, 古ければ `svr->lock` を取って新たに写す. 取得の間隔は画面の必要を知る client が決める.
   仕組みの補足 (hal1278 の質問への回答): 出来事 (解など) は command layer の定期処理が 1 件ずつ seq と GPS 時刻を付けて環状 buffer に積み, client は seq 以降をすべて受け取る. 「時刻を指定して最も近い 1 件」ではない. 状態 (satellites) は環状 buffer に積まず, 最新の値だけを返す. RTKLIB の server の loop 周期 (`misc-svrcycle`, 既定 10 ms) と衛星の情報が変わる周期 (受信機の epoch) は異なり, 写しを取る時機は loop 周期に結び付けない.
@@ -312,9 +313,11 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
 - **D-30.** 起動・停止の前後に server 内部の値 (解, 衛星など) をどう返すか. 背景: start は server 内部の測位の状態を破棄して作り直すので, 起動中に内部の値を読むのは安全でない. 停止後は最後の状態が次の start まで残る. D-4 によりファイル再生の終了で自動停止するので, 停止後も最終結果を表示できることに価値がある. **Fork (2026-10-07):** `starting` の間は server の状態だけを返し, 内部の値は空とする. 停止処理を始める直前に command layer が最後の写しを保存し, `stopping` / `stopped` ではそれを停止中であることと合わせて返す. 次の start で消す. 理由: 再生の終了後も最終結果を表示でき, 停止処理と競合せずに済む. 退けた案: すべて空にする (停止後に最終結果が見えない), 停止後は server の内部を直接読む (停止処理との競合に注意が要る).
   関係する範囲外の話: この写しは表示用であり, 共分散や ambiguity を含まないので, 停止時の状態を次の開始に使って収束を早める warm start には使えない. warm start は測位 engine の機能であり, この文書の範囲外とする ([unresolved.md](unresolved.md) U-19).
 - **D-23.** 長時間かかる start の間の他 client の要求. **Fork (2026-10-07):** lifecycle 操作は `busy` で拒否する (D-3). 取得の操作は並行して受け付け, status は `starting` / `stopping` を返す (D-28). start は開始時点で staged config を写し取ってから起動処理に入る. 起動中・停止処理中の setConfig / loadConfig は受け付けて staged config だけを変え, key ごとに restart が必要であることを返す. これは稼働中の設定変更の扱い (D-9) と同じである. 理由: `busy` で拒否する場面が増えず, GUI の user が起動中に option 画面を編集してもエラーにならない. 退けた案: 設定の変更も `busy` で拒否する (実装は単純だが起動中の編集がエラーになる), すべての要求を待たせて順に処理する (応答が数秒遅れる).
-- 現状のまま公開すると問題になる core 側の挙動 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md)):
-  - start の二重起動 guard が thread の起動まで効かない. command layer の state で防ぐ.
-  - stop の二重 join. command layer の state で防ぐ.
+- 現状のまま公開すると問題になる core 側の挙動 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md)). core の修正は自前で書き, RPC の PR とは別の PR にする (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md). P1 などはそこでの PR の単位):
+  - start の二重起動 guard が thread の起動まで効かない. command layer の state で防ぎ, core でも P1 で直す.
+  - stop の二重 join. command layer の state で防ぎ, core でも P1 で直す.
+  - start は thread の起動の成否を待たずに成功を返し, 起動に失敗した thread は開いた stream と buffer を片付けない (2026-10-08 追記). P1 で直す. P1 が merge されるまで, command layer は `svr->state == 1` を確かめてから `running` にし, 一定時間 1 にならなければ失敗とする.
+  - thread が lock なしで書く値 (基準局の平均, `cputime`) を, 書き換えの途中で読みうる (2026-10-08 追記). 表示用の値である. P2 で直す.
   - `strread` / `strwrite` が lock の前に `mode` / `port` を読む data race と, `stropen` が stream の lock を取らずに field を書き換える点 ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §4). 実行時の stream open / close を公開しない限り顕在化しない. v1 では公開しない. (2026-10-08 訂正: 以前は「port 解放 race」とし, 解放済み領域への参照を含意していたが, 確認できていない.)
   - `prssr` の `static` buffer. telnet adapter を layer 経由にする際に直す.
 
