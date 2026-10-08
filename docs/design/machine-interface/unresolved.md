@@ -3,7 +3,7 @@
 この文書は, 横断的な未決事項を記録する.
 ここにある事項は確定していない. 他の文書で確定事項として扱わない.
 
-`rtkrcv` の operation と state に関する判断事項 (D-1 – D-31) は [rtkrcv-control.md](rtkrcv-control.md) §9 が owner である. ここでは重複して書かない.
+`rtkrcv` の operation と state に関する判断事項 (D-1 – D-38) は [rtkrcv-control.md](rtkrcv-control.md) §9 が owner である. ここでは重複して書かない.
 
 決着した項目は `decisions/` に記録し, ここから削除して decision へのリンクだけを残す.
 
@@ -19,6 +19,7 @@
   - platform layer の境界 (内部 API の粒度, file 配置, public header が `pthread.h` / `sys/select.h` を include している点の扱い). Windows 対応の issue を出す前に設計文書の草案を作る (0018). process 起動は引数の配列で行い shell を介さない ([rtkrcv-control.md](rtkrcv-control.md) D-8). stdin の確認も含める ([decisions/0013](decisions/0013-finite-process-progress-and-cancel.md)).
   - upstream が platform layer 方式も受け入れない場合の扱い (issue への反応を見てから決める. 0018).
   - MSVC への対応の要否 (現時点では対象外. 0004).
+  - Windows の native build で path の区切りをどう扱うか (2026-10-08 追加). MRTKLIB は区切りを `/` と決め打ちしており (`FILEPATHSEP '/'`, `include/mrtklib/mrtk_foundation.h:333`), path の分解は `\` を区切りと認識しない ([findings/windows-cross-build.md](findings/windows-cross-build.md)). `\` も区切りとして扱うか, `/` を規約とするかを platform layer の設計で決める. 設定 file の文字列の escape はこれと独立に常に行う ([rtkrcv-control.md](rtkrcv-control.md) D-11).
   - Windows 対応の issue を書くときは既存の issue との重複を避ける. 例: [h-shiono/MRTKLIB#301](https://github.com/h-shiono/MRTKLIB/issues/301) の監査は `src/core/mrtk_time.c:295` の `gmtime` (`gmtime_r` を使うべき) を既に挙げており, cross build で見つかった同じ行の型の不一致 ([findings/windows-cross-build.md](findings/windows-cross-build.md)) と関係する.
 
 ## U-03. `rtkrcv` の operation と state の意味
@@ -126,6 +127,6 @@ RTKLIB での対応 (2026-10-07, RTKLIB 2.4.3 の `app/winapp` で確認):
 
 - **発案 (2026-10-07, hal1278):** 停止時の推定状態を次の開始に使い, 収束を早める.
 - **整理:** 位置, 受信機時計, 対流圏, bias などを初期値に使えば float 解の収束を短縮できる見込みがある. ambiguity の再利用は, 停止中に搬送波位相の追尾が途切れたかを処理側で確かめられないため危険である. 位置の流用は停止中に antenna が動いていない場合に限られる. 数値の挙動を変える engine の機能であり, MRTKLIB の規則では精度の比較が要る.
-- **この取り組みとの関係:** [rtkrcv-control.md](rtkrcv-control.md) D-30 の写しは表示用で, 共分散や ambiguity を含まないため使えない.
+- **この取り組みとの関係:** [rtkrcv-control.md](rtkrcv-control.md) D-30 の snapshot は表示用で, 共分散や ambiguity を含まないため使えない.
 - **扱い (2026-10-07, hal1278):** 記録のみとし, 第一目標の後に検討する. upstream に engine の機能要望として issue を起こすかはその時に決める.
 
