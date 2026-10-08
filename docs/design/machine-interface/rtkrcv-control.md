@@ -262,6 +262,11 @@ lock は `rtkpos` / `decoderaw` の間保持されるため, snapshot の取得�
 
 `rtksvrsstat` 経由では `svr->lock` を待つため, command layer は各 stream の `strstat` / `strsum` を直接呼ぶ.
 
+- **D-40.** 入出力の byte 数の幅.
+  背景 (2026-10-08 確認): stream の累積の byte 数と bps は `uint32_t` で (`include/mrtklib/mrtk_stream.h:73-74`), `strsum` は `int` で返す (`:216`, `src/stream/mrtk_stream.c:3584-3600`). 数は stream を開くたびに 0 に戻る (`src/stream/mrtk_stream.c:3174`). `int` で受けると 2 GiB を超えたところで負になり, `uint32_t` でも 4 GiB で 0 に戻る. 2 GiB に届くのは, 10 KB/s の入力で約 2.5 日, 100 KB/s で約 6 時間である (計算による). 既存の対処: RTKLIB 2.4.3 b34 の STRSVR は表示の前に `uint32_t` に戻して `%u` で書き, 4 GiB までは正しく見せる (`app/winapp/strsvr/svrmain.cpp:57-67`). 4 GiB での一周への対処は, 上流の RTKLIB (`tomojitakasu/RTKLIB` の `rtklib_2.4.3` と `master`), demo5 (`rtklibexplorer/RTKLIB` の `main` と `demo5`), RTKLIB EX 2.5.1, MALIB 1.2.0, MRTKLIB の `develop` の source になかった. 3 つの GitHub repository (MRTKLIB の upstream, demo5, 上流の RTKLIB) の issue と PR も, open と closed の両方で 14 の語で検索したが該当はなかった (2026-10-08. GitHub 以外は未調査).
+  **Fork (2026-10-08, hal1278 の作業 session での回答):** 契約の byte 数は, stream を開いてからの 64 bit の符号なし整数とする. start で 0 に戻る. command layer が定期処理 (例: 50 ms ごと) で 32 bit の値の差を 2^32 を法として足し上げ, 64 bit に広げる. bps (bit/s) は今の 32 bit のまま返す. core は変えない. 理由: 2 GiB の符号の問題と 4 GiB の一周の両方を, 公開 API を変えずに避けられる. 50 ms の間に 1 つの stream で 4 GiB 流れることはない. 退けた案: core の `stream_t` と `strsum` を 64 bit にする (公開 header と API が変わる. upstream が望めば [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md) の基準で別の PR にする), 32 bit で一周することを契約に書き client に任せる.
+  ありうる問題点 (2026-10-08): (1) 定期処理が, 1 つの stream で 4 GiB 流れる間止まると数え落とす (100 MB/s でも約 43 秒. 実用上は起きない見込み). (2) start の後, 最初の定期処理までの値は 0 である. (3) STRSVR 相当で relay の統計を machine-readable にするとき (U-07) も同じ方法が要る. 今の `mrtk relay` は byte 数を `%10d` で書くので, 2 GiB を超えると負の値を表示する ([findings/rtksvr-runtime.md](findings/rtksvr-runtime.md) §4).
+
 ### 5.3 Satellites
 
 - **D-29.** 衛星の情報と SNR をまとめるか. 背景 (2026-10-07): satellites に入れるのは衛星ごとの処理状況 (測位処理の内部状態 `rtk.ssat`) と C/N0 であり, 疑似距離, 搬送波位相, ドップラー, LLI, code の種類などの観測値 (`svr->obs`. RTKNAVI の monitor の Obs Data, rtkrcv の `observ`) とは別である. 観測値は D-16 により初版に含めない. 現状 telnet では `satellite` (方位角・仰角, 使用の有無, fix, 残差, slip, lock) と `observ` (SNR) に分かれており, docker-ui は両方を解析している.
@@ -278,9 +283,18 @@ lock は `rtkpos` / `decoderaw` の間保持されるため, snapshot の取得�
   退けた案: 観測と処理状況を別の部分として返す (client が衛星ごとに突き合わせる必要がある), `rtksvrostat` 相当のまま epoch の混在を明記する (D-29 の目的に合わない), 全 engine が全項目を書くよう engine を直す (`src/pos/` などの変更と測位の回帰の確認が要る), 全 engine に共通の項目だけに絞る (信号ごとの処理状況が失われる).
   ありうる問題点 (2026-10-08): (1) `spt` は `pntpos` の内部用の欄 (TDCP 用, #318) であり, 意味が変わると一覧が黙って壊れる. contract test で一覧を確かめる. 必要になれば, 処理した epoch の衛星の一覧を core が明示的に持つ (§10). (2) 提供表が正しくないと, 書かない engine の古い値を返す. `pntpos` が消すのは第 1 周波数の一部の項目だけである. (3) 単独測位に失敗した epoch でも一覧と第 1 周波数の C/N0 は書かれるが, 衛星位置が求まらない衛星の方位角・仰角は 0 になる. 0 を有効な角度と誤解させない表現が要る.
 
+
+- **D-42.** base の SNR と sky plot. 背景 (2026-10-08 確認): RTKLIB 2.4.3 b34 の RTKNAVI と MALIB の Windows 版の GUI は, rover と base の SNR を並べた plot を持つ ([findings/gui-inventory.md](findings/gui-inventory.md)). RTKNAVI は `rtksvrostat` の rcv=1 で base の衛星と C/N0 を得る. server は観測を `svr->obs[3][MAXOBSBUF]` に rover, base, 補正の順に持つ (`include/mrtklib/mrtk_rtksvr.h:78`). D-29 の satellites は rover の処理状況であり, base の C/N0 を含まない.
+  **Fork (2026-10-08, hal1278 の作業 session での回答):** satellites に, base の観測の部分を別に持たせる. 直近に decode した base の epoch (`svr->obs[1][0]`) から, 衛星と信号ごとの C/N0 を, その観測時刻と一緒に `svr->lock` の下で copy する. 処理状況 (使用の有無, 残差など) は含めない. 方位角・仰角は rover の処理の結果 (`rtk.ssat`) から付ける (RTKNAVI の `rtksvrostat` と同じ). base の入力がない mode では空とする. 内部の値なので `running` の間だけ返す (D-30). 理由: RTK の利用者が base の受信状態を確かめるのに使い, command layer だけで作れる. 退けた案: v1 では rover だけにする (RTKNAVI の既定の plot の 1 つが作れない).
+  ありうる問題点 (2026-10-08): (1) base の観測時刻は rover の処理した epoch の時刻と一致しないことがある. 時刻を別に返すので client は区別できる. (2) rover の最後の epoch にない衛星は方位角・仰角が 0 になる. 0 を有効な角度と誤解させない表現が要る (D-29 の問題点と同じ).
 ### 5.4 Solution
 
 epoch ごとの `sol_t` 相当: 時刻, solution status, 位置, 共分散, 速度, 衛星数, age, ratio.
+
+- **D-41.** solution の event に base の位置を付けるか.
+  背景 (2026-10-08 確認): `sol_t` は base の位置を持たない (`include/mrtklib/mrtk_sol.h:44-61`). RTKLIB 2.4.3 b34 の RTKNAVI は, `solbuf` から読み切った解ごとに, 読み切る時点の `rtksvr.rtk.rb` を一緒に保存し (`app/winapp/rtknavi/navimain.cpp:1372-1373`, `:1443`), 基線 (E/N/U), pitch, yaw, 長さの表示に使う (`UpdatePos`, `:1499` 以降). moving-base の mode では base の位置が epoch ごとに変わる (`PMODE_MOVEB`, `include/mrtklib/mrtk_opt.h:49`).
+  **Fork (2026-10-08, hal1278 の作業 session での回答):** command layer が `solbuf` を読み切るときに, `svr->lock` の下でその時点の `rtk.rb` を読み, 読み切った各解の event に付ける (D-17, D-33). RTKNAVI と同じ近似である. status の base の位置 (D-31) は取得時刻付きの値のまま変えない. 理由: base が固定なら正確であり, core の変更が要らない. 退けた案: epoch ごとの正確な値にする (core が `solbuf` に base の位置も保存する. [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md) の P3 と同じ場所の変更が要る), 付けない (client は status の base の位置を使うことになり, moving-base では不正確).
+  ありうる問題点 (2026-10-08): moving-base で 1 回の読み切りに複数の epoch の解が溜まっていると, 古い方の解には後の epoch の base の位置が付く. ずれは読み出しの間隔 (例: 50 ms) の分の epoch に限られる.
 
 ### 5.5 初期 set に含めないもの
 
@@ -337,6 +351,15 @@ D-28 (pull を基本とする) により, 各対象は「状態」(取得の met
   - どの案でも log の文面は人間向けの自由文であり, 契約にしない. client は表示するだけで解析しない (P5). 機械が判断に使う状態 (`lastError`, stream の状態, 解の品質) は別の method で返す.
   候補: A. command layer 自身の message と `errbuf` (変更は `apps/rtkrcv` だけ. RTK では有用だが PPP / CLAS / MADOCA ではほぼ空). B. `trace()` に出力先を足し, 指定 level 以下を流す (全 engine の診断が得られる唯一の経路. `src/core/mrtk_trace.c` の変更で #326 の範囲を越えるが, 未使用の `cb_showmsg` を使えば数行で済む. 複数 thread から呼ばれるので受け側は thread-safe にする). C. stderr を不透明な text として GUI が表示する (変更なし. 量が少ない). D. 初版は log なし.
   **Fork (2026-10-07):** A に加え, B を level 1 (error) を既定として入れる. level 2 は設定で選べるようにする. 理由: MRTKLIB の主な用途である PPP / CLAS では A だけでは engine の診断がほぼ得られない. level 1 は約 90 箇所で量が少なく user に意味がある. level 2 は量が多く開発者向けの表示を含むので既定にしない. B は `src/core/mrtk_trace.c` の変更で #326 の範囲 (rtkrcv の command layer) を越えるため, 理由を添えて例外として #326 に提示する. B の core の変更は RPC の PR に混ぜず, 別の PR (P4) として出す (2026-10-08, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)). 退けた案: A のみ (PPP / CLAS で engine の診断がほぼ得られない), 初版は log なし (stderr の表示だけになる).
+  詳細 (2026-10-08 追加). 背景 (2026-10-08 確認): (1) `trace()` は trace file が開いていて level が trace level 以下のときだけ書く (`src/core/mrtk_trace.c:82-84`). 今の条件のまま sink を足すと, trace file を開かない限り log が届かない. (2) `errmsg` は同じ文を `errbuf` に足し, 続けて trace の level 2 にも出す (`src/pos/mrtk_rtkpos.c:388-394`. `src/pos/mrtk_vrs.c` も同じ). `errbuf` が満杯だと黙って切り捨てる. (3) telnet の `error` は command の開始時と表示のたびに `errbuf` を空にする (`apps/rtkrcv/rtkrcv.c:1523-1525`, `:1262-1266`). (4) `trace()` は呼んだ thread の中で動き, 測位の thread は `svr->lock` を持ったまま呼ぶ. A と B の役割: `errbuf` は RTKLIB で user 向けの error / warning の窓口であり (telnet の `error`, RTKNAVI の monitor の Error/Warning), RTK と VRS の選ばれた警告だけを持つ. trace は開発者向けの記録で, level 2 には epoch ごとの詳細と `errmsg` の文の写しが入る. 既定 (sink の level 1) で A を足すのは, RTK / VRS の警告を level 2 の大量の詳細なしに届けるためである.
+  **Fork (2026-10-08, hal1278 の作業 session での回答):**
+  - sink は trace file の有無と trace level とは独立に, 自分の level で受け取る. 既定は level 1 とし, level は設定の key で変え, D-9 のとおり restart で反映する. trace file の level と sink の level は別に持てる. client ごとの level は設けない (D-34). trace file を開かなくても sink に届くようにするのは P4 の core の変更に含める.
+  - `errbuf` の読み手は command layer だけとする. 定期処理で読み切り, log の event として積む. telnet の `error` は command layer の log から表示する (D-17 の `solbuf` と同じ形).
+  - sink の level が 2 以上のときは, `errbuf` の内容を log に積まない (読み切りは続ける). trace の level 2 が同じ文を含むからである.
+  - sink は, message を切り詰めて (D-35 の (4)) から publish lock を取り, ring buffer に直接積む. publish lock の中では copy だけを行う D-22 の規則により, 測位の thread が待つのは copy の時間に限られる. lock の順序は `svr->lock` → publish lock の一方向である (D-22).
+  理由: 既定の状態で, すべての engine の error と RTK / VRS の警告が, level 2 の雑音なしに届く. 開発者が level 2 を選んでも重複しない. 直接積むことで, 専用の buffer, 移す処理, 捨てた件数の扱いが要らない.
+  退けた案: sink を trace file の設定に従わせる (trace file を開かないと log が出ない), sink の level を即時反映にする (D-9 の例外を作る), telnet も `errbuf` を直接読む (取り合いが残る), level 2 以上で `errbuf` と trace の両方を積み出どころを付ける / 重複を許す (client に判断を任せる), sink は専用の上限付き buffer に copy し定期処理で移す (測位の thread は client を一切待たないが, 部品と捨てた件数の扱いが増える).
+  ありうる問題点 (2026-10-08): (1) level 2 では `trace()` の呼び出しが多く, publish lock の取り合いが増える. (2) 将来 publish lock を長く持つ処理を足すと測位の thread が止まる. D-22 の規則を守る. (3) command layer の読み切りが止まると, `errbuf` (4096 byte) が満杯になり `errmsg` の文が黙って切り捨てられる.
 
 - **D-26.** `satellites` の取得. #326 の open question (頻度) である. **Fork (2026-10-07):** satellites は状態として扱い, 取得の method で返す. 求められたときに server から現在の値を copy して返し, snapshot には観測の時刻を付ける. 直前の snapshot が十分新しければ (例: 0.5 秒以内) それを返し, 古ければ `svr->lock` を取って新たに copy する. 取得の間隔は画面の必要を知る client が決める.
   仕組みの補足 (hal1278 の質問への回答): event (解など) は command layer の定期処理が 1 件ずつ seq と GPS 時刻を付けて ring buffer に積み, client は seq 以降をすべて受け取る. 「時刻を指定して最も近い 1 件」ではない. 状態 (satellites) は ring buffer に積まず, 最新の値だけを返す. RTKLIB の server の loop 周期 (`misc-svrcycle`, 既定 10 ms) と衛星の情報が変わる周期 (受信機の epoch) は異なり, snapshot を取る時機は loop 周期に結び付けない.
@@ -482,13 +505,16 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-37 | load と setConfig の失敗時 | 原子的. 失敗なら staged は元のまま, 全 error を返す | Fork |
 | D-38 | 問題のある key と値 | file の load は警告 (知らない key は無視, 不正な値は既定値, 古い path は既存の規則). 構文の誤りと setConfig の誤りは error. 診断は構造化 (P8) | Fork |
 | D-39 | token を持つ client の信頼の範囲 | backend を動かす OS の user と同等. 境界は token, Origin, loopback | Fork |
+| D-40 | 入出力の byte 数の幅 | stream を開いてからの 64 bit. layer が 32 bit の差を足し上げる. core は変えない | Fork |
+| D-41 | solution の event の base の位置 | 読み切る時点の `rtk.rb` を付ける (RTKNAVI と同じ近似) | Fork |
+| D-42 | base の SNR と sky plot | satellites に base の観測の部分 (直近に decode した base の epoch の衛星と C/N0, 観測時刻付き) | Fork |
 | D-15 | 時刻と座標の表現 | GPST と UTC, ECEF と LLH を併記 | Fork |
 | D-15a | GPST と UTC の書式 | 未決 | Open |
 | D-16 | navidata / ssr / 生観測 / monitor 相当 | v1 に含めない. on-demand, 範囲指定, 生 byte 列は別経路という枠を決める | Fork |
 | D-17 | solution の取得 | 契約は server が出力した解の列. layer が solbuf を定期的に読み seq 付き ring buffer に積む (B, D-28). 制約と限界を明記. 条件を満たせば hook (A) | Fork |
 | D-18 | stream 変化の検出遅延 | 仕様として明記 | Fork |
 | D-19 | status に solution status を含めるか | 含めない | Fork |
-| D-20 | log の発生源 | layer の message と `errbuf`, および trace の level 1 (既定) を流す. 文面は契約にしない | Fork |
+| D-20 | log の発生源 | layer の message と `errbuf`, および trace の level 1 (既定) を流す. sink は trace file と独立した level (restart で反映). errbuf は layer だけが読む. level 2 以上では errbuf を積まない. sink は ring buffer に直接積む. 文面は契約にしない | Fork |
 | D-21 | 遅い client | client ごとの queue なし. 消えた範囲は欠落と最古の seq を返す (D-28) | Fork |
 | D-22 | 接続時の初期同期 | 1 つの境界で状態の snapshot と seq を返す. cursor は接続の中だけ有効 (再接続は初期同期から). instance id は v1 になし. ring buffer は start で消し seq は続ける | Fork |
 | D-23 | 長い start の間の他要求 | lifecycle は busy. 取得は並行. 設定変更は staged のみ変え restart 要と返す (D-9 と同じ) | Fork |
@@ -524,6 +550,41 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | token の代わりに OS の仕組みで相手を確かめる (Unix domain socket, Windows の named pipe) | native の client だけの構成で認証を OS に任せたいとき (browser はつなげない) | token は接続時に示すもので (D-25), method の定義に含まれないので, 転送路を足しても method は変わらない | D-25 |
 | 外部 tool (wget, gzip, tar, crx2rnx) を library に置き換える | Windows で tool を用意させたくないとき, 起動を減らしたいとき | 外部 command の起動を platform layer の 1 か所に集める | D-8 |
 | 秘密を外部 command の引数に載せない | 同じ PC を他の user と共有する環境で ftp の password を見せたくないとき | 起動の部品が環境変数と file の付け替えを扱うので, 一時の設定 file などで渡す形を足せる | D-8 |
+| 稼働中の出力と log の stream の変更 | RTKNAVI のように稼働中に出力先を変えたいとき | 稼働中の stream の開け閉めには stream の race の修正が要る ([decisions/0020](decisions/0020-core-fixes-as-separate-prs.md)) . 今は restart で反映する (D-9) | §11 |
+| MADOCA / CLAS に固有の状態 (補正の age, WL だけの fix などの PPP-AR の細かい状態, 電離層の補正の有無, IODSSR, grid の ID, 衛星ごとの SSR の有無) | MRTKLIB の PPP / PPP-RTK の利用者が補正の状態を確かめたいとき | 値が engine のどこにあるかを schema の v1 凍結の前に調べ, status などに minor 版で足せるようにする | §11 |
 | 設定 file に書いた schema の版を持たせる | 警告で版の違いと打ち間違いを見分けたいとき | 警告の文面を補うだけに使い, 版によって挙動を変えない (変えると改名の履歴に比例して作業が増える) | D-38 |
 
 解の記録は, 拡張を待たずに server の既存の出力 stream (solution file, TCP などの出力) で行える (D-22). RPC で記録の欠落をなくすことが必要になったら, 1 行目の拡張で対応する.
+
+## 11. 第一目標の GUI が要る要素と interface の対応
+
+第一目標の RTKNAVI 相当 ([decisions/0007](decisions/0007-gui-suite-composition.md)) が表示・操作する要素と, それに使う interface の項目の対応である (2026-10-08 作成). 要素は RTKLIB 2.4.3 b34 の RTKNAVI (R), MALIB の Windows 版の pre-release の GUI (M. source は非公開で, release の screenshot だけで確かめた), mrtklib-docker-ui の RT tab (W) から集めた ([findings/gui-inventory.md](findings/gui-inventory.md)). CLASLIB には実時間の GUI がなく, MADOCALIB の GUI は後処理用である. (2026-10-08 訂正: 以前は MALIB に GUI がないと書いていた.) 画面の設計そのものは GUI の repository に置く ([decisions/0017](decisions/0017-gui-repository-conventions.md)). この表は interface が満たす要件として持つ.
+
+| 要素 | 出典 | interface の項目 | v1 |
+|---|---|---|---|
+| start / stop | R, W | lifecycle の操作 (D-1 – D-3, D-23) | 提供 |
+| server / 実行の状態 | R, W | status の lifecycle (D-31). 解のない間の NONE の event (D-17) | 提供 |
+| 解の時刻と時刻系の切替 | R, W | solution の event の時刻 (GPST と UTC, D-15. 書式は D-15a で未決). LT と週・秒は client が変換する | 提供 |
+| 解の状態 | R, M, W | solution の event (D-17) と status (D-31). RTK の fix と PPP-AR の fix は測位 mode と組み合わせて区別する (M は PPP-AR の fix を "PPP-FIX" と表示する) | 提供 |
+| 位置 (LLH, ECEF) | R, W | solution の event (D-15) | 提供. ジオイド高は要判断 (e) |
+| ENU の基線, pitch / yaw / 長さ, 基線の plot | R | solution の event と base の位置 (D-41). 計算は client | 提供 |
+| σ, age, ratio, 衛星数 | R, W | solution の event | 提供 |
+| 衛星系ごとの使用 / 可視の数 | W | satellites (D-29) を client が数える | 提供 |
+| rover の SNR (周波数ごと), sky plot | R, W | satellites (D-29) | 提供 (engine ごとの提供表の範囲) |
+| GDOP / DOP | R (GUI が計算) | status の DOP (D-31, 取得時刻付き) か, client が satellites から計算する | 提供 |
+| base の SNR, base の sky plot | R, M | satellites の base の観測の部分 (D-42) | 提供 |
+| 地上の軌跡, 散布図, 地図, 時系列, 解の履歴と閲覧, 解の保存 | R, W | solution の event を client が溜める. 記録は既存の出力 stream でもできる (D-22) | 提供 (client 側) |
+| stream の状態と message | R | streams (D-18, D-33, D-40) | 提供 |
+| process の出力と log | W | log (D-20). GUI は子 process の stderr も読める | 提供 |
+| 測位 mode の表示 | (R, W ともになし) | status の mode (D-31) | 提供 |
+| CPU 時間, 欠落観測数, message 数 | R の monitor 画面 | status (D-31, 取得時刻付き) | 提供 |
+| Mark と稼働中の mode の切替 | R, M | なし | 要判断 (a) |
+| 入力 stream の設定 | R, W | config (D-10 – D-14, D-36 – D-38). 反映は restart (D-9). RTKNAVI も稼働中は変えられない | 提供 |
+| 出力と log の stream の設定 | R (稼働中に即反映), W (次の Start で反映) | config. 反映は restart (D-9). 稼働中の stream の開け閉めは公開しない (§7) | 提供 (restart で反映). 稼働中の変更は §10 (2026-10-08, hal1278 の作業 session での回答) |
+| 処理の option | R, W | config と schema ([decisions/0011](decisions/0011-mrtklib-provides-config-handling.md)) | 提供 |
+| 外部の plotter (RTKPLOT) | R | 既存の monitor port (`mrtk run -m`, `apps/rtkrcv/rtkrcv.c:2016`, `:357-368`). RTKPLOT 相当は solution file か monitor port を読む (P3) | 提供 (既存の経路) |
+| monitor 画面 | R | D-16 | 対象外 |
+| MADOCA / CLAS に固有の状態 (補正の age, WL だけの fix などの PPP-AR の細かい状態, 電離層の補正の有無, IODSSR, grid の ID, 衛星ごとの SSR の有無) | (どの GUI にもない) | なし | 対象外. §10. 値が engine のどこにあるかを schema の v1 凍結の前に調べ, v1 の後に minor 版で足せるようにする (2026-10-08, hal1278 の作業 session での回答) |
+| layout, 表示の切替, tray, preset | R, W | client 側 | interface の対象外 |
+
+要判断の項目: (a) Mark と稼働中の mode の切替, (e) ジオイド高. ((b), (c), (d) は 2026-10-08 に決めた.)

@@ -23,3 +23,4 @@
 | [windows-cross-build.md](windows-cross-build.md) | MinGW-w64 (UCRT) cross build で実際に失敗する箇所 | MRTKLIB `8dc1fc6` |
 | [post-convert-progress.md](post-convert-progress.md) | `mrtk post` / `mrtk convert` の進捗と中止の現状 | MRTKLIB `8dc1fc6` |
 | [external-commands.md](external-commands.md) | 外部 command の起動 (ftp / http の download, 展開, startcmd) と, proxy と password の推論上の問題 | MRTKLIB `8dc1fc6`, RTKLIB 2.4.3 b34 |
+| [gui-inventory.md](gui-inventory.md) | 実時間測位 GUI (RTKNAVI, docker-ui の RT tab) の画面要素と, MALIB / CLASLIB / MADOCALIB の GUI の有無 | RTKLIB 2.4.3 b34, MALIB `d491842`, docker-ui `4fcaf45` |

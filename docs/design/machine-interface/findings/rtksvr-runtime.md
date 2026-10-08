@@ -53,6 +53,7 @@
 - ✔ `int strstat(stream_t*, char* msg)` (SS:3453-3511) は `-1:error, 0:close, 1:wait, 2:connect, 3:active` を返す. 3 は「2 かつ 200 ms (`TINTACT`) 以内に data あり」である (SS:3506-3507). file では `statefile` が open 中ずっと 2 を返し (SS:656), 読み書きの直後は `strstat` が 3 にする. (2026-10-08 訂正: 以前は「file は open 中ずっと 2 である」とし, 行番号を 3504-3506 としていた.)
 - 状態変化は `strread` / `strwrite` の中でしか起きない. 出力の無い stream は次の書き込みまで切断に気付かない.
 - `strsum` (SS:3584-3601) は byte 数と bps を `int` で返す. bps は read / write 時に 1000 ms ごとにしか更新されない.
+  - 同じ数を使う表示 (2026-10-08 追記): RTKLIB 2.4.3 b34 の STRSVR は `strsvrstat` (`src/streamsvr.c:748-765`) で得た `int` を `uint32_t` に戻して `%u` で書く (`app/winapp/strsvr/svrmain.cpp:57-67`). str2str (b34 `app/consapp/str2str/str2str.c:333-334`) と MRTKLIB の `mrtk relay` (`apps/str2str/str2str.c:400`) は `%10d` で書く. **Inference:** `mrtk relay` は 2 GiB を超えると負の byte 数を表示する. 実行での確認はしていない.
 - `msg` は最後に書かれた自由文である (例: `connecting...`, `connect error (%d)`, `timeout`, `disconnected`, `%d clients`, `end`, NTRIP の応答 text). code はない.
 - ✔ serial の実装 (`mrtk_stream.c`) について:
   - `openserial` は port 名の前に `/dev/` を付ける (SS:327). Cygwin では COM3 は `ttyS2` と指定することになる.
