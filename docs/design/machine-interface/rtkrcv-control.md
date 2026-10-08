@@ -149,6 +149,12 @@ file 入力の再生が終わっても server は `running` のままである.
   退けた案: 認証済みの client を信頼してすべて許可する (token の漏洩がそのまま shell の取得になる), RPC だけの起動では startcmd / stopcmd の実行自体を無効にする (起動 option と状態の組み合わせが増える).
   限界: これだけでは RPC の安全は完結しない. 出力 file の path を書き換えた任意 file の上書きや, `file-cmdfile` に任意の file を指定して内容を stream に送ることが残る. 「RPC を操作できるのは起動した GUI だけ」という土台は D-25 で決める.
   **Fork (2026-10-08 更新, hal1278 の作業 session での回答):** 1. を廃止し, setConfig でも `misc-startcmd` と `misc-stopcmd` を受け付ける. 2. は残す. 背景 (2026-10-08 確認): startcmd は start のときに `system()` で shell を通して実行される (`apps/rtkrcv/rtkrcv.c:625`). server は入力 stream で受け取った byte 列をそのまま log stream に複製し (`src/stream/mrtk_rtksvr.c:859`), D-13 により log の path は任意である. よって token を持つ client は, 入力 stream を自分の server への接続にし, log stream で startcmd を含む `.toml` を任意の path に書かせ, それを loadConfig して start すれば shell を得られる (推論. 未実行). 1. は security の境界になっていなかった. 理由: token を持つ client は backend を動かす OS の user と同等に信頼する (D-39) ので, shell に届く key だけを拒否しても守れるものがなく, 規則が 1 つ増えるだけである. 退けた案: 1. を誤操作の防止として残し, security の境界ではないと明記する (GUI の汎用の option 画面からの誤設定は防げるが, 規則が増える). 2. を残す理由は, 設定値を command 文字列に組み込むときの注入を防ぐためであり, 信頼の範囲とは独立している.
+  **Fork (2026-10-08 更新 2, hal1278 の作業 session での回答):** 2. の範囲と制限を決める. 背景は [findings/external-commands.md](findings/external-commands.md) による. 2. の目的は, D-39 により security ではなく, 空白, `"`, `$` などを含む値でも正しく動くことである. 以前の「追加の作業はほとんどない」は根拠を確かめていないので取り下げる.
+  - process の起動の部品 (platform layer, [decisions/0020](decisions/0020-core-fixes-as-separate-prs.md) の P6) は, 実行 file, 引数の配列, 追加の環境変数, stdin / stdout / stderr の file への付け替え, 終了 code の待機を引き受ける. startcmd / stopcmd は user が書いた shell の command なので, その OS の shell (`sh -c` / `cmd /c`) で実行する別の入口とする.
+  - Windows では, platform layer が C 実行時 library の規則で引数を quote して 1 本の command line にし, 起動する対象を実行 file (`.exe`) に限る. `.bat` / `.cmd` は cmd.exe の規則で解釈され quote が効かないので除く (一般知識による).
+  - 制限 (明記する): (1) 外部 tool (wget, gzip, tar, crx2rnx) に依存し, それらが PATH 上に要る. Windows には標準で入っていないものがある (一般知識による). (2) 起動した process の終了を同期的に待つだけで, 中止は持たない. download の打ち切りは wget の timeout (30 秒, `src/stream/mrtk_stream.c:75`) に頼る. 停止がどれだけ待たされるかは未確認である. (3) 値は option の値か scheme 付きの URL として渡し, tool の option と解釈されない形を保つ. (4) ftp の user と password は download の間 wget の引数にあり, Linux / macOS で同じ PC を他の user と共有していると, その間だけ他の user から見える (一般知識による). 要件にはせず, 制限として文書に書く (§10). (5) Windows で C 実行時 library と異なる規則で引数を分割する program では quote が合わない可能性がある.
+  理由: 今の外部 tool の使い方を保ったまま shell を外すのに必要な範囲であり, 依存の追加を伴わない. 引数の秘密は, 漏れうるのが ftp の password だけで, 見えるのは download の数秒間, 同じ PC の他の user に限られ, RTKLIB でも同じ挙動である. 要件にすると wget に password を渡す仕組み (一時の設定 file など) を設計する必要がある.
+  退けた案: 外部 tool を library (zlib, libcurl など) に置き換えて process の中で行う (起動が減り Windows で tool がない問題も解けるが, 依存の追加という別の判断が要る. §10), 秘密を引数に載せないことを要件にする (上の理由. §10), Windows で `cmd /c` を通す (RTKLIB と同じだが cmd.exe の quote の規則に従う必要がある).
 
 ## 4. Configuration
 
@@ -465,7 +471,7 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | D-6 | `shutdown` operation | `stop` と別に持つ | Fork |
 | D-7 | 出力 file の上書き | start / save に方針を渡す. 既定は既存なら失敗 | Fork |
 | D-7a | start / save に渡す上書き方針の形 | 上書きを許す path の一覧 | Fork |
-| D-8 | shell に届く設定 | startcmd / stopcmd も setConfig で受け付ける (D-39). 組み込まれる値は shell を介さない process 起動で解決 | Fork |
+| D-8 | shell に届く設定 | startcmd / stopcmd も setConfig で受け付ける (D-39). 組み込まれる値は shell を介さない process 起動 (引数の配列, 環境変数, redirect, 終了 code. Windows は実行時 library の規則で quote し .exe のみ). 制限を明記 | Fork |
 | D-9 | 稼働中の設定変更 | 即時反映なし. staged / active と key ごとの restart 要否. 応答は key ごとの適用状態 | Fork |
 | D-10 | configuration の key の形 | TOML の木. legacy 名は入力のみ. 値は同梱の設定例と同じ表現で, 型は schema が持つ | Fork |
 | D-11 | saveConfig の意味 | 全 key の canonical TOML (export). 前提として既存 bug を修正. `.toml` 以外の path は error. 文字列は常に escape (P5) | Fork |
@@ -516,6 +522,8 @@ telnet console は凍結する (P7). command layer の抽出は表示を変え�
 | 処理した epoch の衛星の一覧を core が明示的に持つ | `ssat.spt` の意味が変わったとき | contract test で一覧の求め方の破綻を検出する | D-29 |
 | token を親以外に一切見せない受け渡し (継承した file descriptor / handle, stdin) | 同じ OS の user にも token を見せたくないとき | token の渡し方を D-25 の 1 か所に閉じる | D-25 |
 | token の代わりに OS の仕組みで相手を確かめる (Unix domain socket, Windows の named pipe) | native の client だけの構成で認証を OS に任せたいとき (browser はつなげない) | token は接続時に示すもので (D-25), method の定義に含まれないので, 転送路を足しても method は変わらない | D-25 |
+| 外部 tool (wget, gzip, tar, crx2rnx) を library に置き換える | Windows で tool を用意させたくないとき, 起動を減らしたいとき | 外部 command の起動を platform layer の 1 か所に集める | D-8 |
+| 秘密を外部 command の引数に載せない | 同じ PC を他の user と共有する環境で ftp の password を見せたくないとき | 起動の部品が環境変数と file の付け替えを扱うので, 一時の設定 file などで渡す形を足せる | D-8 |
 | 設定 file に書いた schema の版を持たせる | 警告で版の違いと打ち間違いを見分けたいとき | 警告の文面を補うだけに使い, 版によって挙動を変えない (変えると改名の履歴に比例して作業が増える) | D-38 |
 
 解の記録は, 拡張を待たずに server の既存の出力 stream (solution file, TCP などの出力) で行える (D-22). RPC で記録の欠落をなくすことが必要になったら, 1 行目の拡張で対応する.

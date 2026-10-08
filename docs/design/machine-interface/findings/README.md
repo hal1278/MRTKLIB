@@ -22,3 +22,4 @@
 | [windows-route-comparison.md](windows-route-comparison.md) | Windows 対応の経路の比較と Codex のレビュー | 一般知識, Codex, RTKLIB 2.4.3 |
 | [windows-cross-build.md](windows-cross-build.md) | MinGW-w64 (UCRT) cross build で実際に失敗する箇所 | MRTKLIB `8dc1fc6` |
 | [post-convert-progress.md](post-convert-progress.md) | `mrtk post` / `mrtk convert` の進捗と中止の現状 | MRTKLIB `8dc1fc6` |
+| [external-commands.md](external-commands.md) | 外部 command の起動 (ftp / http の download, 展開, startcmd) と, proxy と password の推論上の問題 | MRTKLIB `8dc1fc6`, RTKLIB 2.4.3 b34 |
