@@ -1,0 +1,47 @@
+Parameter
+MRTKLIB version
+rtk server thread
+rtk server state
+processing cycle (ms)
+positioning mode
+frequencies
+accumulated time to run
+cpu time for a cycle (ms)
+missing obs data count
+bytes in input buffer
+# of input1 data
+# of input2 data
+# of input3 data
+# of rtcm1 messages
+# of rtcm2 messages
+# of rtcm3 messages
+solution status
+time of receiver clock rover
+time sys offset (ns)
+solution interval (s)
+age of differential (s)
+ratio for ar validation
+# of satellites rover
+# of satellites base
+# of valid satellites
+GDOP/PDOP/HDOP/VDOP
+# of real estimated states
+# of all estimated states
+pos xyz single (m) rover
+pos llh single (deg,m) rover
+vel enu (m/s) rover
+pos xyz float (m) rover
+pos xyz float std (m) rover
+pos xyz fixed (m) rover
+pos xyz fixed std (m) rover
+pos xyz (m) base
+pos llh (deg,m) base
+# of average single pos base
+ant type rover
+ant delta rover
+ant type base
+ant delta base
+vel enu (m/s) base
+baseline length float (m)
+baseline length fixed (m)
+monitor port

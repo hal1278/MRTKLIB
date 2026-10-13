@@ -1,0 +1,12 @@
+stream path formats
+serial   : port[:bit_rate[:byte[:parity(n|o|e)[:stopb[:fctr(off|on)]]]]][#port*1]
+file     : path[::T[::+offset][::xspeed]]
+tcpsvr   : :port
+tcpcli   : addr:port
+ntripsvr : :passwd@addr:port/mntpnt[:str*2]
+ntripcli : [user[:passwd]]@addr:port/mntpnt
+ntripcas : [user[:passwd]]@:port/mntpnt[:str*2]
+ftp      : user:passwd@addr/path[::T=poff,tint,off,rint]
+http     : addr/path[::T=poff,tint,off,rint]
+udpsvr   : :port
+udpcli   : addr:port
