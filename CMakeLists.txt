@@ -496,8 +496,8 @@ set_tests_properties(rtkrcv_rt PROPERTIES
     RESOURCE_LOCK     rtkrcv_port
 )
 
-# Telnet interface characterization; port 52008 (52009 reserved if a second
-# process is ever needed). Two consoles currently share the same process/port.
+# Telnet interface characterization on port 52008.
+# Two consoles share the same process/port.
 add_test(NAME rtkrcv_console
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_rtkrcv_console.py
         --binary $<TARGET_FILE:mrtk> --root ${CMAKE_SOURCE_DIR} --port 52008

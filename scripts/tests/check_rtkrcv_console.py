@@ -5,7 +5,8 @@ Run after regression_setup has extracted the MALIB data:
     python3 scripts/tests/check_rtkrcv_console.py --binary build/mrtk --root .
 To deliberately regenerate the four interface goldens from the current build,
 add --update-golden, then review the diff. Help retains whitespace and one LF per
-line (excluding its version line); option/status lists contain one name per line.
+line (excluding its version line). Each option line pins its name and optional
+" # (<comment>)", without its value; status lists contain one label per line.
 Numeric replay values are never compared with a reference.
 """
 
@@ -24,7 +25,6 @@ from typing import Any
 PROMPT = "rtkrcv> "
 CLEAR = "\x1b[H\x1b[2J"
 DEADLINE = 5.0
-NUMBER = r"-?\d+\.\d+"
 SAT = r"[GREJCIS]\d{2}"
 DATE = r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"
 VERSION = r"rtkrcv \(MRTKLIB ver\.\S+ git \S+\)"
@@ -391,13 +391,101 @@ def lines(text):
     return [line for line in text.splitlines() if line]
 
 
-def wait_command(console, command, predicate):
+class PrintfRow:
+    """Check printed fields without relying on whitespace to separate them."""
+
+    def __init__(self, console, row):
+        self.console = console
+        self.row = row
+        self.offset = 0
+
+    def literal(self, expected):
+        field = self.row[self.offset : self.offset + len(expected)]
+        self.console.check(
+            field == expected, f"literal {expected!r} at column {self.offset}", self.row
+        )
+        self.offset += len(expected)
+
+    def string(self, width, *, allowed=None, pattern=None, align=">", separator=" ", minimum=False):
+        self.literal(separator)
+        if minimum:
+            candidates = [
+                format(value, f"{align}{width}")
+                for value in allowed
+                if self.row[self.offset :].startswith(format(value, f"{align}{width}"))
+            ]
+            self.console.check(candidates, f"known string field %{width}s", self.row)
+            field = max(candidates, key=len)
+        else:
+            field = self.row[self.offset : self.offset + width]
+        value = field.strip()
+        self.console.check(
+            field == format(value, f"{align}{width}"),
+            f"string field %{('-' if align == '<' else '')}{width}s at column {self.offset}",
+            self.row,
+        )
+        if allowed is not None:
+            self.console.check(value in allowed, f"string field in {allowed!r}", self.row)
+        if pattern is not None:
+            self.console.check(
+                re.fullmatch(pattern, value), f"string field pattern {pattern}", self.row
+            )
+        self.offset += len(field)
+        return value
+
+    def number(self, spec, *, separator=" ", minimum=False):
+        self.literal(separator)
+        precision = re.search(r"\.(\d+)", spec)
+        if spec.endswith("d") or (spec.endswith("f") and precision and precision[1] == "0"):
+            pattern = r" *-?\d+"
+        elif spec.endswith("X"):
+            pattern = r"[0-9A-F]+"
+        else:
+            pattern = rf" *-?\d+\.\d{{{precision[1]}}}"
+            if spec.endswith("E"):
+                pattern += r"E[+-]\d{2,}"
+        if minimum:
+            # With an explicit separator, printf's width is a minimum. Preserve
+            # legitimate overflow (e.g. a negative %6.4f SSR clock coefficient).
+            match = re.match(pattern, self.row[self.offset :])
+            self.console.check(match, f"numeric field %{spec} at column {self.offset}", self.row)
+            field = match[0]
+        else:
+            width = int(re.match(r"\d+", spec)[0])
+            field = self.row[self.offset : self.offset + width]
+            self.console.check(
+                re.fullmatch(pattern, field),
+                f"fixed numeric field %{spec} at column {self.offset}",
+                self.row,
+            )
+        value = (
+            int(field, 16)
+            if spec.endswith("X")
+            else int(field)
+            if spec.endswith("d")
+            else float(field)
+        )
+        self.console.check(
+            field == format(value, spec),
+            f"numeric field equals value reformatted as %{spec} at column {self.offset}",
+            self.row,
+        )
+        self.offset += len(field)
+        return value
+
+    def end(self):
+        self.console.check(
+            self.offset == len(self.row), "no missing or extra printed fields", self.row
+        )
+
+
+def wait_command(console, command, predicate, description="replay data appeared"):
     end = time.monotonic() + DEADLINE
     while True:
         text = console.run(command)
         if predicate(text):
             return text
-        console.check(time.monotonic() < end, "replay data appeared before deadline")
+        console.check(time.monotonic() < end, f"{description} before deadline")
 
 
 def status(console, text, args=None):
@@ -440,35 +528,31 @@ def satellite(console, text, nf, solution_quality, system=None):
         header += [template.format(f) for f in frequencies]
     console.check(table[0].split() == header, "satellite header", text)
     console.check(len(table) > 1, "at least one satellite row", text)
+    structural_prns = set()
     for line in table[1:]:
-        row = line.split()
-        console.check(len(row) == len(header), "satellite row/header token count", text)
-        console.check(
-            re.fullmatch(SAT, row[0]) and row[1] in ("OK", "-"), "satellite ID and C1", text
-        )
-        console.check(
-            all(re.fullmatch(NUMBER, x) for x in row[2:4]), "satellite Az/El floats", text
-        )
-        console.check(all(x in ("OK", "-") for x in row[4 : 4 + nf]), "satellite L flags", text)
-        console.check(
-            all(x in ("FIX", "FLOAT", "HOLD", "-") for x in row[4 + nf : 4 + 2 * nf]),
-            "satellite Fix columns",
-            text,
-        )
-        console.check(
-            all(re.fullmatch(NUMBER, x) for x in row[4 + 2 * nf : 4 + 4 * nf]),
-            "satellite residual floats",
-            text,
-        )
-        console.check(
-            all(re.fullmatch(r"-?\d+", x) for x in row[4 + 4 * nf :]), "satellite counters", text
-        )
+        row = PrintfRow(console, line)
+        prn = row.string(3, pattern=SAT, separator="")
+        structural_prns.add(prn)
+        row.string(2, allowed=("OK", "-"))
+        row.number("5.1f")
+        row.number("4.1f")
+        for _ in range(nf):
+            row.string(2, allowed=("OK", "-"))
+        for _ in range(nf):
+            row.string(5, allowed=("FIX", "FLOAT", "HOLD", "-"))
+        # prsatellite has no separator before/between these residual fields.
+        for spec in ("7.3f", "8.4f"):
+            for _ in range(nf):
+                row.number(spec, separator="")
+        for spec in ("4d", "6d", "3d"):
+            for _ in range(nf):
+                row.number(spec, minimum=True)
+        row.end()
         if system:
-            console.check(row[0].startswith(system), "satellite system filter", text)
+            console.check(prn.startswith(system), "satellite system filter", text)
     raw_decoded = console.raw.decode("utf-8", errors="replace")
     parsed = parse_satellite_output(raw_decoded, solution_quality)
     console.check(bool(parsed), "docker-ui extracts at least one satellite", raw_decoded)
-    structural_prns = {line.split()[0] for line in table[1:]}
     console.check(
         all(sat["prn"] in structural_prns for sat in parsed),
         "every docker-ui satellite PRN appears in the structural parse",
@@ -497,39 +581,21 @@ def observ(console, text, nf):
     console.check(table[0].split() == header, "observ header", text)
     console.check(len(table) > 1, "at least one observation row", text)
     for line in table[1:]:
-        # Blank observation codes occupy three spaces and vanish under split().
-        console.check(
-            re.match(DATE + r"\.\d{2} " + SAT + r" [12]", line),
-            "observ time/satellite/receiver",
-            text,
-        )
-        offset = 28
-        codes = [line[offset + 3 * i : offset + 3 * (i + 1)] for i in range(nf)]
-        console.check(
-            all(re.fullmatch(r"\s*(?:[1-9][A-Z])?", x) for x in codes),
-            "observ nf code fields",
-            text,
-        )
-        offset += 3 * nf
-        numeric = []
-        for width, decimal in ((3, 0), (13, 3), (14, 3), (8, 1)):
+        row = PrintfRow(console, line)
+        row.string(22, pattern=DATE + r"\.\d{2}", separator="")
+        row.string(3, pattern=SAT)
+        row.string(1, allowed=("1", "2"))
+        for _ in range(nf):
+            row.string(3, pattern=r"(?:[1-9][A-Z])?", separator="")
+        # Every numeric group is adjacent, including Doppler. Full-width fields
+        # and blank codes must not be interpreted as missing/merged tokens.
+        for spec in ("3.0f", "13.3f", "14.3f", "8.1f"):
             for _ in range(nf):
-                value = line[offset : offset + width].strip()
-                pattern = r"-?\d+" if decimal == 0 else rf"-?\d+\.\d{{{decimal}}}"
-                console.check(
-                    re.fullmatch(pattern, value), "observ fixed-width numeric column", text
-                )
-                numeric.append(value)
-                offset += width
-        console.check(
-            re.fullmatch(r" [0-9A-F]{" + str(nf) + "}", line[offset:]), "observ nf LLI digits", text
-        )
-        # TIME represents two data tokens; absent codes still occupy header columns.
-        console.check(
-            len(line.split()) + sum(not x.strip() for x in codes) == len(header) + 1,
-            "observ token count against header (blank codes accounted for)",
-            text,
-        )
+                row.number(spec, separator="")
+        row.literal(" ")
+        for _ in range(nf):
+            row.number("1X", separator="")
+        row.end()
     raw_decoded = console.raw.decode("utf-8", errors="replace")
     console.check(
         bool(parse_observ_snr(raw_decoded)),
@@ -545,19 +611,35 @@ def navigation(console, text):
         "navidata header",
         text,
     )
-    stamp = rf"(?:{DATE}|-)"
-    pattern = rf"(?:{SAT}|\d{{3}})\s+(?:OK|-)\s+(?:-?\d+\s+){{4}}[0-9A-F]{{2,3}}\s+{stamp}\s+{stamp}\s+{stamp}\s+\d+\s+\d+"
     rows = table[1:-2]
-    for row in rows:
-        console.check(re.fullmatch(pattern, row), "navidata row layout", text)
-    console.check(
-        re.fullmatch(r"ION:(?:\s+-?\d\.\d{2}E[+-]\d{2}){8}", table[-2]), "navidata ION fields", text
-    )
-    console.check(
-        re.fullmatch(r"UTC:(?:\s+-?\d\.\d{2}E[+-]\d{2}){4}\s+LEAPS: -?\d+", table[-1]),
-        "navidata UTC/LEAPS fields",
-        text,
-    )
+    for line in rows:
+        row = PrintfRow(console, line)
+        prn = row.string(3, pattern=rf"(?:{SAT}|\d{{3}})", separator="")
+        row.string(3, allowed=("OK", "-"))
+        for _ in range(4):
+            row.number("3d", minimum=True)
+        if prn.startswith("R"):
+            row.number("02X", separator="  ", minimum=True)
+        else:
+            row.number("03X", minimum=True)
+        # Date strings contain a space; '-' still occupies the full %19s field.
+        for _ in range(3):
+            row.string(19, pattern=rf"(?:{DATE}|-)")
+        for _ in range(2):
+            row.number("3d", minimum=True)
+        row.end()
+    ion = PrintfRow(console, table[-2])
+    ion.literal("ION:")
+    for _ in range(8):
+        ion.number("9.2E", minimum=True)
+    ion.end()
+    utc = PrintfRow(console, table[-1])
+    utc.literal("UTC:")
+    for _ in range(4):
+        utc.number("9.2E", minimum=True)
+    utc.literal("  LEAPS: ")
+    utc.number(".0f", separator="", minimum=True)
+    utc.end()
     print(f"navidata: {len(rows)} rows")
 
 
@@ -569,19 +651,17 @@ def ssr(console, text):
         "ssr header",
         text,
     )
-    for row in table[1:]:
-        console.check(
-            re.fullmatch(
-                rf"{SAT}\s+(?:OK|-)\s+\d+\s+-?\d+\s+\d+\s+{DATE}(?:\s+{NUMBER}){{10}}", row
-            ),
-            "ssr row structure",
-            text,
-        )
-        console.check(
-            len(row.split()) == len(table[0].split()) + 1,
-            "ssr row/header tokens (T0 has two tokens)",
-            text,
-        )
+    for line in table[1:]:
+        row = PrintfRow(console, line)
+        row.string(3, pattern=SAT, separator="")
+        row.string(3, allowed=("OK", "-"))
+        row.number("3.0f", minimum=True)
+        row.number("3d", minimum=True)
+        row.number("3d", minimum=True)
+        row.string(19, pattern=DATE)
+        for spec in ("6.3f",) * 6 + ("8.3f", "6.3f", "6.4f", "6.3f"):
+            row.number(spec, minimum=True)
+        row.end()
     print(f"ssr: {len(table) - 1} rows")
 
 
@@ -595,42 +675,34 @@ def stream(console, text):
         text,
     )
     console.check(len(table) == 10, "nine stream rows", text)
-    for name, row in zip(expected, table[1:]):
-        console.check(row[:12] == f"{name:12}", "stream row ordering/name column", text)
-        console.check(
-            re.fullmatch(r".{12} .{8} .{5} [-CE] .{10} .{7} .{10} .{7} .{24} .*", row),
-            "stream fixed column layout",
-            text,
+    for name, line in zip(expected, table[1:]):
+        row = PrintfRow(console, line)
+        row.string(12, allowed=(name,), align="<", separator="")
+        row.string(
+            8,
+            align="<",
+            minimum=True,
+            allowed="- serial file tcpsvr tcpcli ntripsvr ntripcli ftp http ntripcas udpsvr udpcli".split(),
         )
-        for start, width, allowed in (
-            (
-                13,
-                8,
-                "- serial file tcpsvr tcpcli ntripsvr ntripcli ftp http ntripcas udpsvr udpcli".split(),
-            ),
-            (
-                22,
-                5,
-                [""]
-                + "- rtcm2 rtcm3 oem4 oem3 ubx ss2 hemis skytreq javad nvs binex rt17 sbf sp3 stat l6e clas llh xyz enu nmea".split(),
-            ),
-        ):
-            field = row[start : start + width]
-            console.check(
-                field.strip() in allowed and field == f"{field.strip():{width}}",
-                "stream type/format values and left alignment",
-                text,
-            )
-        for start, width in ((30, 10), (41, 7), (49, 10), (60, 7)):
-            field = row[start : start + width]
-            console.check(
-                re.fullmatch(r" *-?\d+", field) and field == f"{int(field):{width}d}",
-                "stream right-aligned counter field",
-                text,
-            )
-        console.check(
-            len(row[68:92]) == 24 and row[92:93] == " ", "stream Path exactly 24 characters", text
+        row.string(
+            5,
+            align="<",
+            minimum=True,
+            allowed=[""]
+            + "- rtcm2 rtcm3 oem4 oem3 ubx ss2 hemis skytreq javad nvs binex rt17 sbf sp3 stat l6e clas llh xyz enu nmea".split(),
         )
+        row.string(1, allowed=("-", "C", "E"))
+        for spec in ("10d", "7d", "10d", "7d"):
+            row.number(spec, minimum=True)
+        row.literal(" ")
+        # %-24.24s is exactly 24 characters. Spaces inside Path and the trailing
+        # %s Message are content, so neither is split into whitespace tokens.
+        path = line[row.offset : row.offset + 24]
+        console.check(len(path) == 24, "stream Path exactly 24 characters", text)
+        row.offset += 24
+        row.literal(" ")
+        row.offset = len(line)  # Message may be empty or contain any number of spaces.
+        row.end()
     parsed = [_STREAM_ROW_PATTERN.match(row.rstrip("\r")) for row in table[1:4]]
     console.check(
         all(parsed) and [m[1] for m in parsed] == ["1", "2", "3"],
@@ -641,23 +713,28 @@ def stream(console, text):
 
 
 def options(console, text):
-    names = []
+    entries = []
     for row in lines(text):
         match = re.fullmatch(r"([ *])([\w-]+)( *) =(.*)", row)
         console.check(match, "option marker/name/value layout", text)
         name = match[2]
         console.check(match[2] + match[3] == f"{name:18}", "option name minimum width 18", text)
+        comment = ""
         if " # " in match[4]:
-            console.check(re.search(r" # \(.+\)$", row), "option comment parentheses", text)
+            comment_match = re.search(r" # \((.+)\)$", row)
+            console.check(comment_match, "option comment parentheses", text)
+            comment = comment_match[1]
             before_comment = row[: row.index(" # ")]
             console.check(
                 before_comment == before_comment.rstrip().ljust(31),
                 "option comment padding to column 31 (including marker)",
                 text,
             )
-        names.append(name)
-    console.check(bool(names), "option list nonempty", text)
-    return names
+        # Empty comments are recorded too: loss of a formerly present comment
+        # changes this option's golden entry rather than bypassing the check.
+        entries.append((name, comment))
+    console.check(bool(entries), "option list nonempty", text)
+    return entries
 
 
 def help_checks(args, console):
@@ -716,10 +793,19 @@ def replay_checks(args):
         stream(console, console.run("stream"))
         help_checks(args, console)
         text = console.run("option")
-        names = options(console, text)
-        golden(args, console, "option-names.txt", "\n".join(names) + "\n")
+        entries = options(console, text)
+        golden(
+            args,
+            console,
+            "option-names.txt",
+            "\n".join(name + (f" # ({comment})" if comment else "") for name, comment in entries)
+            + "\n",
+        )
         filtered = options(console, console.run("option console-"))
-        console.check(filtered == [n for n in names if "console-" in n], "option substring filter")
+        console.check(
+            filtered == [entry for entry in entries if "console-" in entry[0]],
+            "option substring filter including comments",
+        )
         console.expect("foo", "unknown command: foo.")
         console.check(console.run("s") == "", "s abbreviation does nothing")
         console.check(console.run("shutd") == "", "shutd does not shut down")
@@ -765,6 +851,53 @@ def replay_checks(args):
         server.shutdown(console)
 
 
+def solution_row(console, text, soltype, timetype, flag):
+    row = PrintfRow(console, text)
+    if timetype == 3:
+        row.literal("  ")
+        row.number("04d", separator="", minimum=True)
+        row.number("9.2f", minimum=True)
+    else:
+        decimals = 1 if timetype == 0 else 2
+        row.string(20 + decimals, pattern=DATE + rf"\.\d{{{decimals}}}", separator="")
+    row.literal(" (")
+    row.string(
+        6,
+        allowed=("------", "FIX", "FLOAT", "SBAS", "DGPS", "SINGLE", "PPP", ""),
+        align="<",
+        separator="",
+    )
+    row.literal(")")
+    if soltype in (0, 1):
+        for hemisphere, spec in (("NS", "2.0f"), ("EW", "3.0f")):
+            row.string(1, allowed=hemisphere)
+            row.literal(":")
+            if soltype == 0:
+                row.number(spec, separator="", minimum=True)
+                row.number("02.0f", minimum=True)
+                row.number("07.4f", minimum=True)
+            else:
+                row.number("11.8f" if hemisphere == "NS" else "12.8f", separator="", minimum=True)
+        row.literal(" H:")
+        row.number("8.3f", separator="", minimum=True)
+    else:
+        for label in {2: "XYZ", 3: "ENU", 4: "PYL"}[soltype]:
+            row.literal(f" {label}:")
+            row.number("12.3f", separator="", minimum=True)
+    if flag & 1:
+        labels = "NEU" if soltype == 0 else "XYZ" if soltype == 2 else "ENU"
+        row.literal(" (")
+        for i, label in enumerate(labels):
+            row.literal((" " if i else "") + label + ":")
+            row.number("6.3f", separator="", minimum=True)
+        row.literal("m)" if soltype == 1 else ")")
+    if flag & 2:
+        for label, spec in (("A", "4.1f"), ("R", "5.1f"), ("N", "2d")):
+            row.literal(f" {label}:")
+            row.number(spec, separator="", minimum=True)
+    row.end()
+
+
 def solution_checks(console):
     for soltype in range(5):
         console.expect(f"set console-soltype {soltype}", "option console-soltype changed.")
@@ -775,30 +908,8 @@ def solution_checks(console):
                 # D-17: each one-shot read drains the process-wide solution buffer.
                 # Retry through complete prompts until a fresh replay solution exists.
                 text = wait_command(console, "solution", lambda s: bool(s.strip()))
-                stamp = DATE + (r"\.\d" if timetype == 0 else r"\.\d{2}")
-                if timetype == 3:
-                    stamp = r"  \d{4} +\d+\.\d{2}"
-                if soltype == 0:
-                    position = rf" [NS]: *\d+ \d{{2}} \d{{2}}\.\d{{4}} [EW]: *\d+ \d{{2}} \d{{2}}\.\d{{4}} H: *{NUMBER}"
-                    std = rf" \(N: *{NUMBER} E: *{NUMBER} U: *{NUMBER}\)"
-                elif soltype == 1:
-                    position = rf" [NS]: *\d+\.\d{{8}} [EW]: *\d+\.\d{{8}} H: *{NUMBER}"
-                    std = rf" \(E: *{NUMBER} N: *{NUMBER} U: *{NUMBER}m\)"
-                else:
-                    labels = {2: "XYZ", 3: "ENU", 4: "PYL"}[soltype]
-                    position = "".join(rf" {label}: *{NUMBER}" for label in labels)
-                    labels = "XYZ" if soltype == 2 else "ENU"
-                    std = " \\(" + " ".join(rf"{label}: *{NUMBER}" for label in labels) + r"\)"
-                suffix = std if flag & 1 else ""
-                if flag & 2:
-                    suffix += rf" A: *{NUMBER} R: *{NUMBER} N: *\d+"
-                pattern = stamp + r" \((?:FIX|FLOAT|SBAS|DGPS|SINGLE|PPP) *\)" + position + suffix
                 for row in lines(text):
-                    console.check(
-                        re.fullmatch(pattern, row),
-                        f"solution soltype={soltype}, timetype={timetype}, solflag={flag} layout",
-                        text,
-                    )
+                    solution_row(console, row, soltype, timetype, flag)
 
 
 def overwrite(console, command, path, answer):
@@ -844,8 +955,12 @@ def mutation_checks(args):
         )
         text = console.run("start")
         console.check(text.endswith("rtk server start\n"), "start response", text)
-        text = console.run("status")
-        console.check(_STATE_PATTERN.search(text)[1] == "run", "state run after start", text)
+        wait_command(
+            console,
+            "status",
+            lambda s: _STATE_PATTERN.search(s)[1] == "run",
+            "state run after start",
+        )
         console.expect("set pos1-elmask 15", "option pos1-elmask changed. restart to enable it")
         solution_checks(console)
         clock = _TIME_PATTERN.search(console.run("status"))[1]
@@ -868,8 +983,11 @@ def mutation_checks(args):
         output = (server.directory / "solution.pos").as_posix()
         text = overwrite(console, "restart", output, "y")
         console.check(text.endswith("rtk server restart\n"), "restart response", text)
-        console.check(
-            _STATE_PATTERN.search(console.run("status"))[1] == "run", "state run after restart"
+        wait_command(
+            console,
+            "status",
+            lambda s: _STATE_PATTERN.search(s)[1] == "run",
+            "state run after restart",
         )
         console.run("stop")
         for path in ("saved.conf", "saved.toml"):
@@ -925,16 +1043,16 @@ def password_checks(args):
         console.sock.sendall(b"wrong-password\r")
         text = console.read_until(lambda s: s.endswith("password: "), "retry password prompt")
         console.check(
-            "wrong-password" not in text and "invalid password\npassword: " in text,
-            "blind wrong password/retry",
+            text == "*" * len("wrong-password") + "\n\ninvalid password\npassword: ",
+            "exact masked wrong password echo and retry response",
         )
         console.command = "<correct password>"
         console.raw = b""
         console.sock.sendall(b"console-secret\r")
         text = console.read_until(lambda s: s.endswith(PROMPT), "authenticated command prompt")
         console.check(
-            "console-secret" not in text and "invalid password" not in text,
-            "blind correct password",
+            text == "*" * len("console-secret") + "\n" + PROMPT,
+            "exact masked correct password echo and command prompt",
         )
         server.shutdown(console)
 
