@@ -340,8 +340,10 @@ solutions and log messages are not. `after` greater than the last published
   normal operation. Events are lost when a client stops polling for long
   (a frozen GUI, a sleeping computer) or when level-2 log messages flood the
   buffer.
-- The buffer is cleared when a run starts. Events of a run, including the
-  final solutions, stay available until the next start.
+- Events stay in the buffer until newer events push them out; starting or
+  stopping a run does not clear it. The final solutions of a run are
+  published before its `stopped` event, so a client that keeps polling
+  receives them even when the next run starts at once (as in a restart).
 - A cursor is valid only on its connection. After reconnecting, start again
   with `sync`.
 - To record solutions without gaps, use the server's output streams (solution
