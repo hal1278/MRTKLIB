@@ -812,17 +812,13 @@ def replay_checks(args):
         periodic(console, "status 0.05", "Parameter")
         periodic(console, "satellite 0.05", "Fix1")
         # D-20: error clears the shared buffer on entry and on each running read.
+        # ctrl-C is sent right behind the command line, so error's first break check
+        # (vt_chkbrk) reads it. Had error returned at once, its prompt would come
+        # before ^C; the exact response shows that it ran until ctrl-C, without timing.
         console.begin("error")
-        console.read_until(lambda s: s.startswith("error\n"), "error command echo")
-        # There need not be an error to signal entry; a bounded socket observation
-        # window checks the streaming command remains active before interruption.
-        console.sock.settimeout(0.12)
-        try:
-            console.raw += console.sock.recv(65536)
-        except socket.timeout:
-            pass
-        console.check(PROMPT not in clean(console.raw), "error stays active until ctrl-C")
-        console.interrupt()
+        console.sock.sendall(b"\x03")
+        text = console.response()
+        console.check(text == "^C\n\n", "error runs until ctrl-C", text)
         other = server.connect()
         status(other, other.run("status"))
         status(console, console.run("status"))
