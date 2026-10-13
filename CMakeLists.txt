@@ -2233,7 +2233,7 @@ set_tests_properties(has_ppp_check PROPERTIES
 # ── JSON-RPC contract self-check (docs/rpc/openrpc.json) ──────────────────────
 # Examples match their schemas and every rule rejects its counter-example
 # (scripts/tests/check_openrpc.py). Needs the Python package jsonschema; the
-# test is not registered without it.
+# test is not registered without it (CI does not install jsonschema yet).
 execute_process(
     COMMAND ${Python3_EXECUTABLE} -c "import jsonschema, referencing"
     RESULT_VARIABLE _HAS_JSONSCHEMA

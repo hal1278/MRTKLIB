@@ -864,11 +864,11 @@
           },
           "age": {
             "type": "number",
-            "description": "Age of differential corrections (s); 0 when not applicable."
+            "description": "Age of differential corrections (s), as the engine reports it. A mode that does not compute it leaves 0. Its exact meaning depends on the positioning mode."
           },
           "ratio": {
             "type": "number",
-            "description": "Ambiguity validation ratio; 0 when not applicable."
+            "description": "Ambiguity validation ratio (second-best to best candidate). 0 is also used when no ambiguity resolution was done for the epoch."
           },
           "base": {
             "$ref": "#/components/schemas/Position",
@@ -948,7 +948,7 @@
               1,
               2
             ],
-            "description": "1: errors (default). 2: warnings and details (selected in the configuration)."
+            "description": "The lowest selected log level at which the message is delivered. 1 (the default): errors from all positioning engines and warnings from the RTK and VRS engines. 2: also detailed diagnostics."
           },
           "text": {
             "type": "string",

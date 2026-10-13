@@ -177,8 +177,12 @@ in status, events or log messages.
   parameters, `params` may be omitted or `{}`.
 - Requests on one connection may be processed concurrently, so responses can
   arrive in a different order than the requests. Match them by `id`.
-- Binary frames close the connection (WebSocket status 1003). When the
-  process exits, connections close with status 1001.
+- Binary frames close the connection with WebSocket status 1003, which
+  RFC 6455 defines for an endpoint that receives a type of data it cannot
+  accept (such as binary data at a text-only endpoint). When the process
+  exits, connections close with status 1001 ("going away", defined for a
+  server going down), so a client can tell this from a broken connection,
+  which ends without a close frame.
 
 ## 4. Versioning
 
@@ -311,7 +315,8 @@ all events up to and including `seq` and none after it. Fetching
 `getEvents(after = seq)` then yields exactly the later events — nothing is
 missed and nothing is applied twice. `sync` returns `{seq, status}`; later
 versions add the other state objects (`streams`, `satellites`) next to
-`status`. In 0.1 it therefore has the same shape as `getStatus`.
+`status`. In 0.1, where `status` is the only state object, it has the same
+shape as `getStatus`.
 
 `getEvents(after, limit)` returns events with a `seq` greater than `after`, in
 ascending order:
@@ -367,8 +372,8 @@ contain fewer solutions.
 | `covariance` | Position covariance (m²): `ecef` `{xx, yy, zz, xy, yz, zx}` and `enu` `{ee, nn, uu, en, nu, ue}` at the solution position |
 | `geoid` | `{model, separation}`: the geoid model in use (`output.geoid_model`: `internal`, `egm96`, `egm08_2.5`, `egm08_1`, `gsi2000`) and the geoid height above the ellipsoid (m). `separation` is absent when the model gives no value |
 | `validSatellites` | Number of valid satellites in the solution |
-| `age` | Age of differential corrections (s); 0 when not applicable |
-| `ratio` | Ambiguity validation ratio; 0 when not applicable |
+| `age` | Age of differential corrections (s), as the engine reports it (the solution file shows the same value). A mode that does not compute it leaves 0, so 0 is not necessarily an age. Its exact meaning depends on the positioning mode |
+| `ratio` | Ambiguity validation ratio (second-best to best candidate). 0 is also used when no ambiguity resolution was done for the epoch |
 | `base` | Base station position (`ecef`, `llh`) used for the solution. Absent when the mode uses no base station or its position is not known yet |
 
 A `none` solution has only `time`, `leapSeconds` and `status`; every other
@@ -422,9 +427,11 @@ time cannot represent `23:59:60` either.
 `logMessage` is `{level, text}`.
 
 - **Level 1** (default): errors from all positioning engines and warnings
-  from the RTK and VRS engines. **Level 2** adds detailed diagnostics and
-  can be selected while running (configuration key documented with the
-  configuration methods). Level 2 can be frequent.
+  from the RTK and VRS engines. **Level 2** adds detailed diagnostics; it
+  can be selected while running with a configuration key, which is defined
+  together with the configuration methods (not in 0.1). Level 2 can be
+  frequent. The `level` of a message is the lowest selected level at which it
+  is delivered.
 - `text` is English text for display. It is not part of the contract: show
   it, do not parse it. Long messages are truncated. Secrets (passwords in
   stream paths, the token) never appear.
@@ -469,8 +476,8 @@ Planned for later versions:
   observations, input message counts, uptime, estimated states, baseline
   length;
 - velocity in solutions;
-- the geoid separation for file-based geoid models (until then `geoid` is
-  present only with the `internal` model);
+- the geoid separation for file-based geoid models (until then
+  `geoid.separation` is present only with the `internal` model);
 - `lastError.reason` values more specific than `startFailed`.
 
 Possible later additions, without changing what is defined here: push
