@@ -2229,3 +2229,25 @@ set_tests_properties(has_ppp_check PROPERTIES
     FIXTURES_REQUIRED has_data
     LABELS            "regression;has;ppp"
 )
+
+# ── JSON-RPC contract self-check (docs/rpc/openrpc.json) ──────────────────────
+# Examples match their schemas and every rule rejects its counter-example
+# (scripts/tests/check_openrpc.py). Needs the Python package jsonschema; the
+# test is not registered without it.
+execute_process(
+    COMMAND ${Python3_EXECUTABLE} -c "import jsonschema, referencing"
+    RESULT_VARIABLE _HAS_JSONSCHEMA
+    OUTPUT_QUIET ERROR_QUIET
+)
+if(_HAS_JSONSCHEMA EQUAL 0)
+    add_test(NAME rpc_openrpc_schema
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_openrpc.py
+            ${CMAKE_SOURCE_DIR}/docs/rpc/openrpc.json
+    )
+    set_tests_properties(rpc_openrpc_schema PROPERTIES
+        TIMEOUT 30
+        LABELS  "rpc"
+    )
+else()
+    message(STATUS "jsonschema not found: rpc_openrpc_schema test not registered")
+endif()
