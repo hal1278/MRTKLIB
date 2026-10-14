@@ -767,9 +767,16 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
         if (start) {
             pthread_mutex_lock(&cmd->config_lock);
             cmd->run_settings = cmd->settings;
-            rcvcmd_clear_modified(cmd);
             pthread_mutex_unlock(&cmd->config_lock);
             error = start_server(cmd, io);
+        }
+        if (start && error == RCVCMD_START_ERROR_NONE) {
+            /* Marks mean "not in effect yet". Changes are refused while starting
+             * (only console-* is accepted, never marked), so these are the marks
+             * of the copy that is now running. */
+            pthread_mutex_lock(&cmd->config_lock);
+            rcvcmd_clear_modified(cmd);
+            pthread_mutex_unlock(&cmd->config_lock);
         }
 
         pthread_mutex_lock(&cmd->publish_lock);

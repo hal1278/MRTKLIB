@@ -984,11 +984,19 @@ def mutation_checks(args):
         second.close_command("exit")
         print(f"shared solution buffer drained after stop: {len(lines(first))} buffered rows")
         output = (server.directory / "solution.pos").as_posix()
+        console.expect("set pos1-elmask 15", "option pos1-elmask changed. restart to enable it")
         text = overwrite(console, "start", output, "n")
         console.check(text.endswith("n\n"), "overwrite refusal releases start claim", text)
+        # Modified marks mean "not in effect yet": a failed start keeps them.
+        console.check(
+            console.run("option pos1-elmask").startswith("*"), "failed start keeps modified mark"
+        )
         console.expect("stop", "rtk server stop")
         text = overwrite(console, "restart", output, "y")
         console.check(text.endswith("rtk server restart\n"), "restart response", text)
+        console.check(
+            console.run("option pos1-elmask").startswith(" "), "successful start clears mark"
+        )
         wait_command(
             console,
             "status",
