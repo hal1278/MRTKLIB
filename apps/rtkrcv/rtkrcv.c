@@ -101,10 +101,11 @@
 
 /* type defintions -----------------------------------------------------------*/
 
-typedef struct {      /* console type */
-    int state;        /* state (0:stop,1:run) */
-    vt_t* vt;         /* virtual terminal */
-    pthread_t thread; /* console thread */
+typedef struct {              /* console type */
+    int state;                /* state (0:stop,1:run) */
+    vt_t* vt;                 /* virtual terminal */
+    pthread_t thread;         /* console thread */
+    uint64_t solution_cursor; /* last solution read boundary */
 } con_t;
 
 /* function prototypes -------------------------------------------------------*/
@@ -862,7 +863,7 @@ static void prnavidata(vt_t* vt, int sys) {
     free(data);
 }
 /* print error/warning messages ----------------------------------------------*/
-static void prerror(vt_t* vt) {
+static void prerror(vt_t* vt, uint64_t* cursor) {
     rcvcmd_error_t* data;
 
     trace(NULL, 4, "prerror:\n");
@@ -872,7 +873,7 @@ static void prerror(vt_t* vt) {
         return;
     }
 
-    rcvcmd_read_error(cmd, data);
+    rcvcmd_read_errors(cmd, cursor, data);
     if (data->n > 0) {
         vt_puts(vt, data->errbuf);
     }
@@ -1021,8 +1022,9 @@ static void cmd_restart(char** args, int narg, vt_t* vt) {
     vt_printf(vt, "rtk server restart\n");
 }
 /* solution command ----------------------------------------------------------*/
-static void cmd_solution(char** args, int narg, vt_t* vt) {
-    rcvcmd_legacy_solution_t* data;
+static void cmd_solution(char** args, int narg, con_t* con) {
+    vt_t* vt = con->vt;
+    rcvcmd_solution_t* data;
     int i, cycle = 0;
 
     trace(NULL, 3, "cmd_solution:\n");
@@ -1031,19 +1033,20 @@ static void cmd_solution(char** args, int narg, vt_t* vt) {
         cycle = (int)(atof(args[1]) * 1000.0);
     }
 
-    if (!(data = (rcvcmd_legacy_solution_t*)malloc(sizeof(*data)))) {
+    if (!(data = (rcvcmd_solution_t*)malloc(sizeof(*data)))) {
         trace(NULL, 2, "cmd_solution: snapshot allocation failed\n");
         return;
     }
 
     if (cycle > 0) {
-        rcvcmd_clear_solution(cmd);
+        con->solution_cursor = rcvcmd_last_seq(cmd);
     }
 
     while (!vt_chkbrk(vt)) {
-        rcvcmd_read_solution(cmd, data);
+        rcvcmd_read_solutions(cmd, &con->solution_cursor, data);
         for (i = 0; i < data->nsol; i++) {
-            prsolution(vt, &data->solbuf[i], data->rb);
+            rcvevent_solution_t* solution = &data->events[i].data.solution;
+            prsolution(vt, &solution->sol, solution->rb);
         }
         if (cycle > 0) {
             sleepms(cycle);
@@ -1160,12 +1163,11 @@ static void cmd_navidata(char** args, int narg, vt_t* vt) {
 }
 /* error command -------------------------------------------------------------*/
 static void cmd_error(char** args, int narg, vt_t* vt) {
+    uint64_t cursor = rcvcmd_last_seq(cmd);
     trace(NULL, 3, "cmd_error:\n");
 
-    rcvcmd_clear_error(cmd);
-
     while (!vt_chkbrk(vt)) {
-        prerror(vt);
+        prerror(vt, &cursor);
         sleepms(100);
     }
     vt_printf(vt, "\n");
@@ -1474,7 +1476,7 @@ static void* con_thread(void* arg) {
                 cmd_restart(args, narg, con->vt);
                 break;
             case 3:
-                cmd_solution(args, narg, con->vt);
+                cmd_solution(args, narg, con);
                 break;
             case 4:
                 cmd_status(args, narg, con->vt);
@@ -1557,6 +1559,7 @@ static con_t* con_open(int sock, const char* dev) {
         return NULL;
     }
     /* start console thread */
+    con->solution_cursor = rcvcmd_last_seq(cmd);
     con->state = 1;
     if (pthread_create(&con->thread, NULL, con_thread, con)) {
         free(con);
@@ -1681,9 +1684,9 @@ static void accept_sock(int ssock, con_t** con) {
  *       Stop and start RTK server. When stopped, start it.
  *
  *     solution [cycle]
- *       Show solutions. Without option, only one solution is shown. With
- *       option, the soluiton is displayed at intervals of cycle (s). To stop
- *       cyclic display, send break (ctr-C).
+ *       Show up to the newest 256 solutions since this console's previous
+ *       solution command (first time: since connection). With cycle (s),
+ *       show new solutions from now on. To stop, send break (ctrl-C).
  *
  *     status [cycle]
  *       Show RTK status. Use option cycle for cyclic display.
@@ -1703,7 +1706,8 @@ static void accept_sock(int ssock, con_t** con) {
  *       Show stream status. Use option cycle for cyclic display.
  *
  *     error
- *       Show error/warning messages. To stop messages, send break (ctr-C).
+ *       Show new RTK/VRS error/warning messages from now on without consuming
+ *       other consoles' messages. To stop, send break (ctrl-C).
  *
  *     option [opt]
  *       Show the values of processing options. Without option, all options are

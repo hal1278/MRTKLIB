@@ -91,7 +91,6 @@ struct rcvcmd {
     rcvevent_t last_solution;
     int has_solution, previous_none;
     gtime_t none_time;
-    uint64_t legacy_solution_cursor, legacy_error_cursor;
     rtksvr_t* svr;     /* rtk server struct */
     stream_t moni;     /* monitor stream */
     char passwd[1024]; /* login password */
@@ -389,7 +388,6 @@ rcvcmd_t* rcvcmd_create(void) {
         return NULL;
     }
     instance.initialized = instance.collector_started = instance.collector_exit = 0;
-    instance.legacy_solution_cursor = instance.legacy_error_cursor = 0;
     clear_run_solution(&instance);
     memset(&instance.lifecycle, 0, sizeof(instance.lifecycle));
     instance.claimed = instance.readers = instance.shutdown_requested = 0;
@@ -1353,66 +1351,4 @@ int rcvcmd_read_errors(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_error_t* data) {
     n = read_errors_locked(cmd, cursor, data);
     pthread_mutex_unlock(&cmd->publish_lock);
     return n;
-}
-
-/* Compatibility readers retain shared cursors and transition refusals until stage 2. */
-int rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data) {
-    if (!begin_read(cmd)) {
-        memset(data, 0, sizeof(*data));
-        return 0;
-    }
-    pthread_mutex_lock(&cmd->publish_lock);
-    read_errors_locked(cmd, &cmd->legacy_error_cursor, data);
-    pthread_mutex_unlock(&cmd->publish_lock);
-    end_read(cmd);
-    return 1;
-}
-
-int rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_legacy_solution_t* data) {
-    uint64_t seq, first, low;
-    int n = 0;
-    if (!begin_read(cmd)) {
-        memset(data, 0, sizeof(*data));
-        return 0;
-    }
-    pthread_mutex_lock(&cmd->publish_lock);
-    low = rcvevent_oldest(&cmd->events);
-    if (low < cmd->legacy_solution_cursor + 1) low = cmd->legacy_solution_cursor + 1;
-    first = cmd->events.last + 1;
-    for (seq = cmd->events.last; seq >= low && n < MAXSOLBUF; seq--) {
-        if (rcvevent_get(&cmd->events, seq)->kind == RCVEVENT_SOLUTION) {
-            first = seq;
-            n++;
-        }
-    }
-    data->nsol = 0;
-    for (seq = first; seq <= cmd->events.last; seq++) {
-        const rcvevent_t* ev = rcvevent_get(&cmd->events, seq);
-        if (ev->kind == RCVEVENT_SOLUTION) {
-            data->solbuf[data->nsol++] = ev->data.solution.sol;
-            memcpy(data->rb, ev->data.solution.rb, sizeof(data->rb));
-        }
-    }
-    cmd->legacy_solution_cursor = cmd->events.last;
-    pthread_mutex_unlock(&cmd->publish_lock);
-    end_read(cmd);
-    return 1;
-}
-
-int rcvcmd_clear_error(rcvcmd_t* cmd) {
-    if (!begin_read(cmd)) return 0;
-    pthread_mutex_lock(&cmd->publish_lock);
-    cmd->legacy_error_cursor = cmd->events.last;
-    pthread_mutex_unlock(&cmd->publish_lock);
-    end_read(cmd);
-    return 1;
-}
-
-int rcvcmd_clear_solution(rcvcmd_t* cmd) {
-    if (!begin_read(cmd)) return 0;
-    pthread_mutex_lock(&cmd->publish_lock);
-    cmd->legacy_solution_cursor = cmd->events.last;
-    pthread_mutex_unlock(&cmd->publish_lock);
-    end_read(cmd);
-    return 1;
 }

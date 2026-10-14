@@ -816,7 +816,7 @@ def replay_checks(args):
         console.check(console.run("shutd") == "", "shutd does not shut down")
         periodic(console, "status 0.05", "Parameter")
         periodic(console, "satellite 0.05", "Fix1")
-        # D-20: error clears the shared buffer on entry and on each running read.
+        # Error starts a local cursor at the current event boundary.
         # ctrl-C is sent right behind the command line, so error's first break check
         # (vt_chkbrk) reads it. Had error returned at once, its prompt would come
         # before ^C; the exact response shows that it ran until ctrl-C, without timing.
@@ -906,7 +906,7 @@ def solution_checks(console):
             console.expect(f"set console-timetype {timetype}", "option console-timetype changed.")
             for flag in (0, 1, 2, 3) if timetype == 0 else (0,):
                 console.expect(f"set console-solflag {flag}", "option console-solflag changed.")
-                # D-17: each one-shot read drains the process-wide solution buffer.
+                # Each one-shot read advances only this console's solution cursor.
                 # Retry through complete prompts until a fresh replay solution exists.
                 text = wait_command(console, "solution", lambda s: bool(s.strip()))
                 for row in lines(text):
@@ -927,6 +927,7 @@ def overwrite(console, command, path, answer):
 def mutation_checks(args):
     with Server(args) as server:
         console = server.connect()
+        second = server.connect()
         text = console.run("status")
         console.check(_STATE_PATTERN.search(text)[1] == "stop", "initial server state stop", text)
         console.expect("set", "specify option type")
@@ -973,16 +974,30 @@ def mutation_checks(args):
         console.check(
             _STATE_PATTERN.search(console.run("status"))[1] == "stop", "state stop after stop"
         )
-        # D-17: stopping production makes shared-buffer draining deterministic.
-        first = console.run("solution")
-        console.check(bool(first.strip()), "first console consumes buffered solutions", first)
-        second = server.connect()
-        console.check(
-            second.run("solution") == "", "another console sees drained shared solution buffer"
+        # Stop fixes the event boundary, including the final drain, for both cursors.
+        first_rows = lines(console.run("solution"))
+        console.check(first_rows, "solutions remain readable after stop")
+        second_rows = lines(second.run("solution"))
+        second.check(
+            0 < len(second_rows) <= 256, "unread console receives at most the newest 256 rows"
         )
-        console.check(console.run("solution") == "", "same console also sees drained buffer")
+        second.check(
+            second_rows[-len(first_rows) :] == first_rows,
+            "unread console's newest rows end with the first console's remaining rows",
+            "\n".join(second_rows),
+        )
+        console.check(console.run("solution") == "", "first console solution cursor advanced")
+        second.check(second.run("solution") == "", "second console solution cursor advanced")
+        third = server.connect()
+        third.check(
+            third.run("solution") == "", "console connected after stop has no new solutions"
+        )
+        third.close_command("exit")
         second.close_command("exit")
-        print(f"shared solution buffer drained after stop: {len(lines(first))} buffered rows")
+        print(
+            f"independent solution cursors after stop: {len(first_rows)} remaining rows, "
+            f"{len(second_rows)} newest unread rows"
+        )
         output = (server.directory / "solution.pos").as_posix()
         console.expect("set pos1-elmask 15", "option pos1-elmask changed. restart to enable it")
         text = overwrite(console, "start", output, "n")
@@ -1048,8 +1063,76 @@ def mutation_checks(args):
         server.shutdown(console)
 
 
-def transitional_displays(console):
-    """Check refused snapshots keep the existing display structure."""
+def error_checks(args):
+    """Check two error commands independently read deterministic missing-base messages."""
+    pattern = r"\d{2}:\d{2}:\d{2}\.\d{2}: no base station observation data for rtk"
+
+    def in_order(needles, rows):
+        remaining = iter(rows)
+        return all(any(row == needle for row in remaining) for needle in needles)
+
+    def error_rows(console, text):
+        rows = [row for row in lines(text) if row != "^C"]
+        console.check(
+            rows and all(re.fullmatch(pattern, row) for row in rows),
+            "complete RTK error lines",
+            text,
+        )
+        return rows
+
+    with Server(args) as server:
+        first = server.connect()
+        second = server.connect()
+        for option, value in (
+            ("pos1-posmode", "kinematic"),
+            ("pos1-correction", "none"),
+            ("pos1-sateph", "brdc"),
+            ("out-outsingle", "on"),
+            ("inpstr2-type", "off"),
+            ("inpstr3-type", "off"),
+            ("outstr1-type", "off"),
+        ):
+            first.expect(f"set {option} {value}", f"option {option} changed. restart to enable it")
+        first.expect("start", "rtk server start")
+        # Successful SPP proves navigation is ready before opening either error cursor.
+        wait_command(
+            first,
+            "status",
+            lambda s: _SOL_STATUS_PATTERN.search(s)[1] == "single",
+            "rover single-point solution before error display",
+        )
+        first.begin("error")
+        first.read_until(
+            lambda s: bool(re.search(rf"^{pattern}\n", s, re.MULTILINE)), "first RTK error line"
+        )
+        second.begin("error")
+        second.read_until(
+            lambda s: len(re.findall(rf"^{pattern}\n", s, re.MULTILINE)) >= 2,
+            "two complete RTK error lines on second console",
+        )
+        second_rows = error_rows(second, second.interrupt())
+        # Await A's complete coverage before breaking it, independent of polling phase.
+        first.read_until(
+            lambda s: in_order(
+                second_rows,
+                [row.rstrip("\n") for row in re.findall(rf"^{pattern}\n", s, re.MULTILINE)],
+            ),
+            "first console received the second console's error interval",
+        )
+        first_rows = error_rows(first, first.interrupt())
+        first.check(
+            in_order(second_rows, first_rows),
+            "second console's error lines appear in order on first",
+        )
+        first.expect("stop", "stop rtk server\nrtk server stop")
+        print(
+            f"independent error cursors: {len(first_rows)} first rows, {len(second_rows)} second rows"
+        )
+        server.shutdown(first)
+
+
+def transitional_displays(console, event_console=None):
+    """Check refused server snapshots and available event readers during transitions."""
     text = console.run("status")
     status(console, text)
     fields = {line[:28].rstrip(): line[30:] for line in lines(text)}
@@ -1093,10 +1176,15 @@ def transitional_displays(console):
             f"{command} has only its header during transition",
             text,
         )
-    console.check(console.run("solution") == "", "refused solution prints nothing")
-    console.begin("error")
-    console.sock.sendall(b"\x03")
-    console.check(console.response() == "^C\n\n", "refused error has no error rows")
+    event_console = console if event_console is None else event_console
+    event_console.check(
+        event_console.run("solution") == "", "no solutions after this console's event cursor"
+    )
+    event_console.begin("error")
+    event_console.sock.sendall(b"\x03")
+    event_console.check(
+        event_console.response() == "^C\n\n", "error has no new errbuf rows during transition"
+    )
 
 
 def configuration_refusals(console, path, before):
@@ -1208,7 +1296,9 @@ def lifecycle_checks(args):
         def busy(state):
             for command in ("start", "stop", "restart"):
                 second.expect(command, f"rtk server busy ({state})")
-            transitional_displays(second)
+            connected = server.connect()
+            transitional_displays(second, connected)
+            connected.close_command("exit")
             configuration_refusals(second, load_path, before)
 
         try:
@@ -1415,6 +1505,7 @@ def main():
         file_gate_checks()
         replay_checks(args)
         mutation_checks(args)
+        error_checks(args)
         lifecycle_checks(args)
         shutdown_checks(args)
         password_checks(args)

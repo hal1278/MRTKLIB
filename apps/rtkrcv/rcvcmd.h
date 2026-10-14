@@ -28,8 +28,9 @@
  *
  * Each display has one reader filling caller-owned storage. Server values use
  * the existing server lock; stream fields use their own stream locks.
- * Solution/error events are collected once and copied under the publish mutex.
- * Adapters print after unlock; legacy displays share compatibility cursors.
+ * Solution/error readers use caller-owned cursors in every lifecycle state.
+ * Events are collected once and copied under the publish mutex; adapters print
+ * after unlock.
  * Readers allocate no large temporary
  * snapshots; callers keep one copy in their existing display stack frame.
  * Pointer members copied inside rtk_t are not live handles for callers to
@@ -37,8 +38,9 @@
  * only the display fields, with no copied locks or port handles.
  *
  * A publish mutex protects lifecycle state, claims and counted readers.
- * Start/stop/restart exclude readers for the whole transition. Readers accepted
- * while stopped retain the last values; refused reads zero caller storage.
+ * Start/stop/restart exclude server/stream readers for the whole transition.
+ * Those accepted while stopped retain the last values; refused reads zero
+ * caller storage. Event readers remain available during transitions.
  * Never take server/stream locks or call adapters under the publish mutex.
  * A configuration mutex serializes option operations and console settings.
  * Configuration -> publish lock is allowed; never wait for configuration while
@@ -289,12 +291,6 @@ typedef struct {
 } rcvcmd_error_t;
 
 typedef struct {
-    sol_t solbuf[MAXSOLBUF];
-    double rb[3];
-    int nsol;
-} rcvcmd_legacy_solution_t;
-
-typedef struct {
     rcvevent_t events[MAXSOLBUF];
     int nsol;
 } rcvcmd_solution_t;
@@ -313,8 +309,8 @@ int rcvcmd_read_solutions(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_solution_t* da
  */
 int rcvcmd_read_errors(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_error_t* data);
 
-/* Readers/clears return 1 when accepted, 0 during a claim/transition.
- * Refused readers zero all caller storage; refused clears do nothing. */
+/* Server/stream readers below return 1 when accepted, 0 during a claim/transition.
+ * Refused readers zero all caller storage. */
 
 /** @brief Copy status fields and the existing deep copies of vector values.
  * @param[in] cmd The sole command-layer instance.
@@ -347,20 +343,6 @@ int rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
 int rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data);
-/** @brief Read errors with the shared legacy cursor; errbuf is terminated, n is bytes.
- * @param[in] cmd The sole command-layer instance.
- * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
- */
-int rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data);
-/** @brief Read solutions with the shared legacy cursor; rows below nsol and rb are valid.
- * @param[in] cmd The sole command-layer instance.
- * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
- */
-int rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_legacy_solution_t* data);
-/** @brief Advance the shared legacy error cursor at the start of the error command. */
-int rcvcmd_clear_error(rcvcmd_t* cmd);
-/** @brief Advance the shared legacy solution cursor before cyclic display. */
-int rcvcmd_clear_solution(rcvcmd_t* cmd);
 
 #ifdef __cplusplus
 }
