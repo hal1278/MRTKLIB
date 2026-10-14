@@ -41,7 +41,7 @@
  * Start/stop/restart exclude server/stream readers for the whole transition.
  * Those accepted while stopped retain the last values; refused reads zero
  * caller storage. Event readers remain available during transitions.
- * Never take server/stream locks or call adapters under the publish mutex.
+ * Never trace, take server/stream locks or call adapters under the publish mutex.
  * A configuration mutex serializes option operations and console settings.
  * Configuration -> publish lock is allowed; never wait for configuration while
  * holding the publish mutex. Start captures staged settings and clears modified
@@ -185,8 +185,24 @@ int rcvcmd_shutdown_requested(rcvcmd_t* cmd);
  */
 void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
-/** @brief Allocate resources and start the collector; NULL on failure or an existing instance. */
-rcvcmd_t* rcvcmd_create(void);
+/** @brief Allocate resources, register the trace sink, then start the collector.
+ * @param[in] ctx Context already assigned to g_mrtk_ctx, before other tracing threads start.
+ * @return The sole instance, or NULL on failure or an existing instance. After a failure
+ *         that follows the registration, the context keeps a disabled sink; use a new context.
+ */
+rcvcmd_t* rcvcmd_create(mrtk_ctx_t* ctx);
+/** @brief Set the event log level, independently of the trace file level.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[in] level 1 (trace errors and RTK/VRS warnings from errbuf) or 2 (adds trace warnings,
+ *                  which also carry the errbuf texts).
+ * @return 1 on success; 0 with no change for another level or no sink.
+ */
+int rcvcmd_set_log_level(rcvcmd_t* cmd, int level);
+/** @brief Read the current event log level.
+ * @param[in] cmd The sole command-layer instance.
+ * @return 1 or 2, or 0 when built without a trace sink.
+ */
+int rcvcmd_log_level(rcvcmd_t* cmd);
 /** @brief Free the server after the adapter has torn down its runtime context. */
 void rcvcmd_destroy(rcvcmd_t* cmd);
 /** @brief Initialize server/monitor, load startup options, navigation and status output.
@@ -302,7 +318,8 @@ typedef struct {
  * @return Number of solutions copied.
  */
 int rcvcmd_read_solutions(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_solution_t* data);
-/** @brief Copy errbuf-origin texts with newlines in any lifecycle state.
+/** @brief Copy log texts with newlines in any lifecycle state.
+ * At log level 1, select errbuf-origin entries only; at level 2, select all logs.
  * Dropped events are skipped. Stop before a text that will not fit.
  * @param[in,out] cursor Advanced through the last examined event.
  * @param[out] data Caller storage with MAXERRMSG + 1 text bytes.

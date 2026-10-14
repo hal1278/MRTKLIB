@@ -31,8 +31,8 @@ extern "C" {
 
 typedef enum { RCVEVENT_STATUS, RCVEVENT_SOLUTION, RCVEVENT_LOG } rcvevent_kind_t;
 
-/* origin of a log message: the telnet error command shows errbuf ones only */
-typedef enum { RCVEVENT_LOG_LAYER, RCVEVENT_LOG_ERRBUF } rcvevent_log_origin_t;
+/* At log level 1 the telnet error command shows errbuf entries only. */
+typedef enum { RCVEVENT_LOG_TRACE, RCVEVENT_LOG_ERRBUF } rcvevent_log_origin_t;
 
 typedef struct {
     int state;       /* rcvcmd_state_t */
