@@ -334,26 +334,35 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
     (void)c;
     return 77;
 #else
-    char dir[] = "/tmp/mrtk-ftp-XXXXXX", wget[128], errfile[128], *path, *saved;
+    char dir[] = "/tmp/mrtk-ftp-XXXXXX", wget[128], errfile[128], go[128], *path, *saved;
     const char* oldpath = getenv("PATH");
     FILE* fp;
     stream_t stream;
     uint8_t buff[1024];
     uint32_t start;
     pthread_t worker;
-    int done = 0, opened, started = 0;
+    int done = 0, opened, started = 0, released = 0;
     if (!enable(ctx, c, 2)) return 1;
     CHECK(mkdtemp(dir) != NULL, "mkdtemp failed");
     if (fails) return 1;
     snprintf(wget, sizeof(wget), "%s/wget", dir);
     snprintf(errfile, sizeof(errfile), "%s/file.err", dir);
+    snprintf(go, sizeof(go), "%s/go", dir);
     fp = fopen(wget, "w");
     CHECK(fp != NULL, "cannot create fake wget");
     if (!fp) {
         rmdir(dir);
         return 1;
     }
-    CHECK(fputs("#!/bin/sh\nexit 1\n", fp) >= 0, "cannot write fake wget");
+    /* The fake wget fails only once the go file exists (or after 20 s). The
+       test creates it after strread() returned and the capture mutex was
+       released once; the worker's callback takes that mutex before the worker
+       writes the ftp state, which strread() reads without a common lock. */
+    CHECK(fprintf(fp,
+                  "#!/bin/sh\ni=0\nwhile [ ! -e '%s' ] && [ $i -lt 400 ]; do sleep 0.05; i=$((i + 1)); done\n"
+                  "exit 1\n",
+                  go) > 0,
+          "cannot write fake wget");
     CHECK(fclose(fp) == 0, "cannot close fake wget");
     CHECK(chmod(wget, 0700) == 0, "cannot make fake wget executable");
     saved = oldpath ? strdup(oldpath) : NULL;
@@ -382,6 +391,12 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
                 done = c->ftp_done;
                 if (done) worker = c->ftp_thread;
                 pthread_mutex_unlock(&c->lock);
+                if (started && !released) {
+                    fp = fopen(go, "w");
+                    CHECK(fp != NULL, "cannot create go file");
+                    if (fp) fclose(fp);
+                    released = 1;
+                }
                 if (done) break;
                 sleepms(10);
             }
@@ -391,6 +406,7 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
             if (started && !done) {
                 /* Do not close or destroy a context still used by the worker. */
                 remove(errfile);
+                remove(go);
                 remove(wget);
                 rmdir(dir);
                 exit(1);
@@ -408,6 +424,7 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
     free(path);
     free(saved);
     remove(errfile);
+    remove(go);
     CHECK(remove(wget) == 0, "cannot remove fake wget");
     CHECK(rmdir(dir) == 0, "cannot remove FTP directory");
     return 0;
