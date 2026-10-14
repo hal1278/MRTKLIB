@@ -213,6 +213,7 @@ add_executable(mrtk
     apps/rnx2rtkp/rnx2rtkp.c
     apps/rtkrcv/rtkrcv.c
     apps/rtkrcv/rcvcmd.c
+    apps/rtkrcv/rcvevent.c
     apps/rtkrcv/vt.c
     apps/str2str/str2str.c
     apps/convbin/convbin.c
@@ -225,7 +226,7 @@ add_executable(mrtk
     apps/l6extract/l6extract.c
 )
 # The command layer uses C11, as the core does; override the global legacy -ansi flag.
-set_source_files_properties(apps/rtkrcv/rcvcmd.c PROPERTIES
+set_source_files_properties(apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c PROPERTIES
     COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-std=c11>"
 )
 target_include_directories(mrtk PRIVATE apps/rtkrcv)
@@ -366,6 +367,14 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
     set_tests_properties(utest_rtksvr_lifecycle_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
+
+# Event ring of the rtkrcv command layer (apps/rtkrcv/rcvevent.c): seq, lost, more.
+add_executable(utest_rcvevent ${_UTEST_DIR}/utest_rcvevent.c apps/rtkrcv/rcvevent.c)
+target_compile_options(utest_rcvevent PRIVATE -std=c11)
+target_include_directories(utest_rcvevent PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvevent PRIVATE mrtklib)
+add_test(NAME utest_rcvevent COMMAND utest_rcvevent)
+set_tests_properties(utest_rcvevent PROPERTIES LABELS "utest")
 
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)
