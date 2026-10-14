@@ -8,6 +8,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include "mrtklib/mrtk_const.h"
+#include "mrtklib/mrtk_geoid.h"
 #include "mrtklib/mrtk_sys.h"
 #include "rcvcmd.h"
 
@@ -25,6 +27,62 @@ static int start_command_notices, stop_command_notices;
             fails++;                              \
         }                                         \
     } while (0)
+
+#ifdef RCVCMD_TEST_THREADS
+#include <errno.h>
+#include <pthread.h>
+
+static int fail_thread_create, collector_created, collector_joined;
+static pthread_t collector_thread;
+int __real_pthread_create(pthread_t*, const pthread_attr_t*, void* (*)(void*), void*);
+int __real_pthread_join(pthread_t, void**);
+
+int __wrap_pthread_create(pthread_t* thread, const pthread_attr_t* attr, void* (*run)(void*), void* arg) {
+    int result;
+    if (fail_thread_create) return EAGAIN;
+    result = __real_pthread_create(thread, attr, run, arg);
+    if (!result && !collector_created) {
+        collector_thread = *thread;
+        collector_created = 1;
+    }
+    return result;
+}
+
+int __wrap_pthread_join(pthread_t thread, void** result) {
+    int status = __real_pthread_join(thread, result);
+    if (collector_created && pthread_equal(thread, collector_thread)) {
+        CHECK(status == 0, "collector join succeeds");
+        collector_joined++;
+    }
+    return status;
+}
+
+static int resource_case(const char* name) {
+    rcvcmd_t* cmd;
+    int close_first = !strcmp(name, "close_without_initialize");
+    int failure = !strcmp(name, "collector_create_failure");
+    if (!close_first && !failure && strcmp(name, "destroy_without_initialize")) return 1;
+    if (failure) {
+        fail_thread_create = 1;
+        CHECK(rcvcmd_create() == NULL, "collector creation failure rejects command instance");
+        CHECK(!collector_created && !collector_joined, "failed thread creation has no thread to join");
+        fail_thread_create = 0;
+    }
+    cmd = rcvcmd_create();
+    CHECK(cmd != NULL && collector_created, "collector starts at create, including after a failed create");
+    if (!cmd) return 1;
+    if (close_first) {
+        rcvcmd_close(cmd);
+        CHECK(collector_joined == 1, "close without initialize joins collector");
+        rcvcmd_close(cmd);
+        CHECK(collector_joined == 1, "repeated close joins only once");
+    }
+    rcvcmd_destroy(cmd);
+    CHECK(collector_joined == 1, "destroy joins collector exactly once without initialize");
+    printf("%s: %s (%d failures)\n", name, fails ? "FAILED" : "PASSED", fails);
+    return fails ? 1 : 0;
+}
+#endif
 
 static void on_notice(void* arg, const rcvcmd_notice_t* value) {
     rcvcmd_t* cmd = (rcvcmd_t*)arg;
@@ -79,7 +137,7 @@ static void set_option(rcvcmd_t* cmd, const char* name, const char* value) {
     if (found) CHECK(rcvcmd_set_option(cmd, &option, value) == RCVCMD_CONFIG_SUCCESS, "set option");
 }
 
-int main(void) {
+int main(int argc, char** argv) {
     char directory[] = "utest_rcvcmd_events_XXXXXX";
     char config[1024] = "events.conf";
     char* original = getcwd(NULL, 0);
@@ -90,8 +148,17 @@ int main(void) {
     rcvevent_read_t read;
     uint64_t cursor, other, last;
     gtime_t rst = {0};
+    double geoid_pos[2] = {30.0 * D2R, 0.0}, embedded_height;
     int n;
 
+#ifdef RCVCMD_TEST_THREADS
+    if (argc == 2) {
+        free(original);
+        return resource_case(argv[1]);
+    }
+#endif
+    (void)argv;
+    if (argc != 1) return 1;
     if (!original || !mkdtemp(directory) || chdir(directory)) return 1;
     fp = fopen(config, "w");
     if (!fp) return 1;
@@ -106,8 +173,6 @@ int main(void) {
     if (!cmd) return 1;
     CHECK(rcvcmd_create() == NULL, "second instance refused");
     CHECK(rcvcmd_last_seq(cmd) == 0, "empty boundary at create");
-    /* Close before initialize must be harmless. */
-    rcvcmd_close(cmd);
     rcvcmd_initialize(cmd, config, "admin", "", 0, 0, rst);
     io.arg = cmd;
     io.notice = on_notice;
@@ -170,14 +235,29 @@ int main(void) {
     set_option(cmd, "pos1-correction", "none");
     set_option(cmd, "inpstr1-type", "file");
     set_option(cmd, "inpstr1-path", "user:sensitive@part@missing/observations");
+    embedded_height = geoidh(geoid_pos);
+    CHECK(embedded_height != 0.0, "embedded geoid probe is nonzero");
+    fp = fopen("empty-geoid.dat", "w");
+    if (!fp) return 1;
+    if (fclose(fp)) return 1;
+    /* GSI rejects this position before reading the empty file. */
+    CHECK(opengeoid(GEOID_GSI2000_M15, "empty-geoid.dat") && geoidh(geoid_pos) == 0.0,
+          "empty GSI file gives a safe, distinct model probe");
+    closegeoid();
+    set_option(cmd, "out-geoid", "gsi2000");
+    set_option(cmd, "file-geoidfile", "empty-geoid.dat");
     result = rcvcmd_start(cmd, &io);
     CHECK(result.kind == RCVCMD_START_FAILED && result.seq == 12, "stream failure claim seq");
+    CHECK(geoidh(geoid_pos) == embedded_height, "failed server start restores embedded geoid");
     CHECK(read_all(cmd) == 14, "stream failure events");
     CHECK(events[12].kind == RCVEVENT_LOG &&
               strcmp(events[12].data.log.text,
                      "rtk server start error (str1 open error path=user:***@missing/observations)") == 0,
           "password masked using last @ and first colon");
     status_at(13, RCVCMD_STOPPED, RCVCMD_STOP_ERROR, RCVCMD_START_ERROR_SERVER);
+    set_option(cmd, "out-geoid", "internal");
+    set_option(cmd, "file-geoidfile", "");
+    CHECK(unlink("empty-geoid.dat") == 0, "temporary geoid probe cleanup");
     set_option(cmd, "inpstr1-type", "off");
     set_option(cmd, "misc-startcmd", "exit 3 # u11-marker");
     set_option(cmd, "misc-stopcmd", "kill -9 $$");
@@ -220,6 +300,9 @@ int main(void) {
     rcvcmd_close(cmd);
     rcvcmd_close(cmd);
     rcvcmd_destroy(cmd);
+#ifdef RCVCMD_TEST_THREADS
+    CHECK(collector_joined == 1, "initialized collector joins exactly once");
+#endif
     CHECK(unlink(config) == 0 && chdir(original) == 0 && rmdir(directory) == 0, "temporary config cleanup");
     free(original);
     printf("%s (%d failures)\n", fails ? "FAILED" : "PASSED", fails);

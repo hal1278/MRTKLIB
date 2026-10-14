@@ -103,8 +103,9 @@ server first` and `options not loaded: stop rtk server first`. Interactive
 the existing restart notices; apply them with `start` or `restart`. `option`
 and `save` remain available.
 
-`solution` shows solutions since this console's previous `solution` command
-(first time: since it connected), up to the newest 256. `solution <cycle>`
+`solution` shows solutions since this console's previous `solution` in the
+current run (first time: since it connected), up to the newest 256. After a stop,
+that run stays readable until the next start. `solution <cycle>`
 shows new solutions from now on at intervals of cycle seconds. `error` shows
 new RTK/VRS messages from now on every 100 ms; Ctrl-C ends either cyclic display.
 Consoles no longer take solutions or error messages from each other.

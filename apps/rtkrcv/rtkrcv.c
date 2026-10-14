@@ -1685,7 +1685,8 @@ static void accept_sock(int ssock, con_t** con) {
  *
  *     solution [cycle]
  *       Show up to the newest 256 solutions since this console's previous
- *       solution command (first time: since connection). With cycle (s),
+ *       solution command in the current run (first time: since connection).
+ *       The last run stays readable until the next start. With cycle (s),
  *       show new solutions from now on. To stop, send break (ctrl-C).
  *
  *     status [cycle]

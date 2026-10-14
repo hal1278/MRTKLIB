@@ -185,7 +185,7 @@ int rcvcmd_shutdown_requested(rcvcmd_t* cmd);
  */
 void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
-/** @brief Allocate the sole server instance; NULL on allocation failure or an existing instance. */
+/** @brief Allocate resources and start the collector; NULL on failure or an existing instance. */
 rcvcmd_t* rcvcmd_create(void);
 /** @brief Free the server after the adapter has torn down its runtime context. */
 void rcvcmd_destroy(rcvcmd_t* cmd);
@@ -195,7 +195,7 @@ void rcvcmd_destroy(rcvcmd_t* cmd);
  */
 void rcvcmd_initialize(rcvcmd_t* cmd, char* file, const char* password, const char* staname, int moniport, int outstat,
                        gtime_t rst);
-/** @brief Close monitor and solution status before runtime context teardown. */
+/** @brief Join the collector, then close initialized monitor/status before runtime teardown. */
 void rcvcmd_close(rcvcmd_t* cmd);
 /** @brief Save navigation on normal shutdown, before trace/context teardown. */
 void rcvcmd_save_navigation(rcvcmd_t* cmd);
@@ -295,7 +295,8 @@ typedef struct {
     int nsol;
 } rcvcmd_solution_t;
 
-/** @brief Copy newest solutions after cursor, oldest first, in any lifecycle state.
+/** @brief Copy newest solutions of the latest run after cursor, oldest first, in any state.
+ * Solutions before the latest starting event are skipped, including during that start.
  * @param[in,out] cursor Advanced to the last published sequence.
  * @param[out] data Caller storage for at most MAXSOLBUF solution events.
  * @return Number of solutions copied.

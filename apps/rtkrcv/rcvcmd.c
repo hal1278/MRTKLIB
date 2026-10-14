@@ -19,7 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
 #include <sys/wait.h>
+#endif
 
 #include "mrtklib/mrtk_antenna.h"
 #include "mrtklib/mrtk_const.h"
@@ -88,6 +90,7 @@ struct rcvcmd {
     pthread_t collector;
     int collector_started, collector_exit, initialized;
     int run_mode, run_geoid;
+    uint64_t solution_start_seq;
     rcvevent_t last_solution;
     int has_solution, previous_none;
     gtime_t none_time;
@@ -388,9 +391,16 @@ rcvcmd_t* rcvcmd_create(void) {
         return NULL;
     }
     instance.initialized = instance.collector_started = instance.collector_exit = 0;
+    instance.solution_start_seq = 0;
     clear_run_solution(&instance);
     memset(&instance.lifecycle, 0, sizeof(instance.lifecycle));
     instance.claimed = instance.readers = instance.shutdown_requested = 0;
+    if (pthread_create(&instance.collector, NULL, collect_thread, &instance)) {
+        fprintf(stderr, "event collector thread create error\n");
+        rcvcmd_destroy(&instance);
+        return NULL;
+    }
+    instance.collector_started = 1;
     return &instance;
 }
 
@@ -449,15 +459,10 @@ void rcvcmd_initialize(rcvcmd_t* cmd, char* file, const char* password, const ch
     if (cmd->moniport > 0 && !openmoni(cmd, cmd->moniport)) {
         fprintf(stderr, "monitor port open error: %d\n", cmd->moniport);
     }
-    if (pthread_create(&cmd->collector, NULL, collect_thread, cmd)) {
-        fprintf(stderr, "event collector thread create error\n");
-    } else {
-        cmd->collector_started = 1;
-    }
 }
 
 void rcvcmd_close(rcvcmd_t* cmd) {
-    if (!cmd || !cmd->initialized) return;
+    if (!cmd) return;
     pthread_mutex_lock(&cmd->publish_lock);
     cmd->collector_exit = 1;
     pthread_mutex_unlock(&cmd->publish_lock);
@@ -465,6 +470,7 @@ void rcvcmd_close(rcvcmd_t* cmd) {
         pthread_join(cmd->collector, NULL);
         cmd->collector_started = 0;
     }
+    if (!cmd->initialized) return;
     cmd->initialized = 0;
     if (cmd->moniport > 0) {
         closemoni(cmd);
@@ -621,16 +627,21 @@ int rcvcmd_save(rcvcmd_t* cmd, const char* file) {
 }
 
 /* adapter notice ------------------------------------------------------------*/
-/* POSIX system() status decoding; the later platform layer takes this over. */
+/* POSIX wait status / Windows exit code; the later platform layer takes this over. */
 static void command_error(char* text, size_t size, const char* option, int status) {
     if (status == -1) {
         snprintf(text, size, "%s could not be run", option);
+#ifdef _WIN32
+    } else {
+        snprintf(text, size, "%s failed (exit code %d)", option, status);
+#else
     } else if (WIFEXITED(status)) {
         snprintf(text, size, "%s failed (exit code %d)", option, WEXITSTATUS(status));
     } else if (WIFSIGNALED(status)) {
         snprintf(text, size, "%s failed (signal %d)", option, WTERMSIG(status));
     } else {
         snprintf(text, size, "%s failed", option);
+#endif
     }
 }
 
@@ -878,6 +889,9 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
                      &settings->prcopt, settings->solopt, &cmd->moni, settings->rst, errmsg)) {
         trace(NULL, 2, "rtk server start error (%s)\n", errmsg);
         fprintf(stderr, "rtk server start error: %s\n", errmsg);
+        if (settings->solopt[0].geoid > 0) {
+            closegeoid();
+        }
         notice(cmd, io, RCVCMD_NOTICE_SERVER_START_ERROR, NULL, errmsg, 0);
         return RCVCMD_START_ERROR_SERVER;
     }
@@ -990,6 +1004,7 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             cmd->lifecycle.stop_reason = RCVCMD_STOP_REQUEST;
         }
         result.seq = publish_status(cmd);
+        if (!stop) cmd->solution_start_seq = result.seq;
         while (cmd->readers) {
             pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
         }
@@ -1004,7 +1019,7 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
                 publish_status(cmd);
                 cmd->lifecycle.state = RCVCMD_STARTING;
                 clear_run_solution(cmd);
-                publish_status(cmd);
+                cmd->solution_start_seq = publish_status(cmd);
                 pthread_mutex_unlock(&cmd->publish_lock);
             }
         }
@@ -1339,8 +1354,10 @@ int rcvcmd_read_events(rcvcmd_t* cmd, uint64_t after, rcvevent_t* out, int limit
 }
 
 int rcvcmd_read_solutions(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_solution_t* data) {
+    uint64_t after;
     pthread_mutex_lock(&cmd->publish_lock);
-    data->nsol = rcvevent_read_newest(&cmd->events, *cursor, RCVEVENT_SOLUTION, data->events, MAXSOLBUF, cursor);
+    after = *cursor > cmd->solution_start_seq ? *cursor : cmd->solution_start_seq;
+    data->nsol = rcvevent_read_newest(&cmd->events, after, RCVEVENT_SOLUTION, data->events, MAXSOLBUF, cursor);
     pthread_mutex_unlock(&cmd->publish_lock);
     return data->nsol;
 }

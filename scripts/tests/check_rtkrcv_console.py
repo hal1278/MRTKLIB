@@ -1063,6 +1063,53 @@ def mutation_checks(args):
         server.shutdown(console)
 
 
+def solution_run_checks(args):
+    """Keep stopped-run rows readable, then exclude them at the next starting boundary."""
+    with Server(args) as server:
+        control = server.connect()
+        stopped_reader = server.connect()
+        next_reader = server.connect()
+        control.expect("set outstr1-type off", "option outstr1-type changed. restart to enable it")
+        control.expect("start", "rtk server start")
+        wait_command(control, "solution", lambda s: bool(s.strip()), "first run solution published")
+        control.expect("stop", "stop rtk server\nrtk server stop")
+        stopped_reader.check(
+            bool(stopped_reader.run("solution").strip()),
+            "unread console sees the stopped run's solutions",
+        )
+        # The next run has no observations, so it cannot produce a displayed row.
+        for option in ("inpstr1-type", "inpstr2-type", "inpstr3-type"):
+            control.expect(f"set {option} off", f"option {option} changed. restart to enable it")
+        entered = server.directory / "entered-next-run"
+        release = server.directory / "go-next-run"
+        control.begin("set misc-startcmd")
+        control.read_until(lambda s: s.endswith(": "), "interactive command value prompt")
+        control.sock.sendall(file_gate(entered, release).encode("ascii") + b"\r")
+        control.check(
+            control.response().endswith("option misc-startcmd changed. restart to enable it\n"),
+            "next-run file gate configured",
+        )
+        try:
+            control.begin("start")
+            wait_command(
+                next_reader, "status", lambda _: entered.exists(), "next start command marker"
+            )
+            next_reader.check(
+                next_reader.run("solution") == "",
+                "unread previous-run rows are excluded while starting",
+            )
+            release.touch()
+            control.check(control.response() == "rtk server start\n", "held next start succeeds")
+            control.expect("stop", "stop rtk server\nrtk server stop")
+            next_reader.check(
+                next_reader.run("solution") == "",
+                "zero-observation new run exposes no previous-run rows",
+            )
+        finally:
+            release.touch()
+        server.shutdown(control)
+
+
 def error_checks(args):
     """Check two error commands independently read deterministic missing-base messages."""
     pattern = r"\d{2}:\d{2}:\d{2}\.\d{2}: no base station observation data for rtk"
@@ -1505,6 +1552,7 @@ def main():
         file_gate_checks()
         replay_checks(args)
         mutation_checks(args)
+        solution_run_checks(args)
         error_checks(args)
         lifecycle_checks(args)
         shutdown_checks(args)
