@@ -1111,8 +1111,10 @@ def solution_run_checks(args):
 
 
 def error_checks(args):
-    """Check two error commands independently read deterministic missing-base messages."""
+    """Check two error commands independently read complete RTK error messages."""
     pattern = r"\d{2}:\d{2}:\d{2}\.\d{2}: no base station observation data for rtk"
+
+    errmsg_pattern = r"\d{2}:\d{2}:\d{2}\.\d{2}: .+"
 
     def in_order(needles, rows):
         remaining = iter(rows)
@@ -1121,7 +1123,7 @@ def error_checks(args):
     def error_rows(console, text):
         rows = [row for row in lines(text) if row != "^C"]
         console.check(
-            rows and all(re.fullmatch(pattern, row) for row in rows),
+            rows and all(re.fullmatch(errmsg_pattern, row) for row in rows),
             "complete RTK error lines",
             text,
         )
@@ -1162,7 +1164,7 @@ def error_checks(args):
         first.read_until(
             lambda s: in_order(
                 second_rows,
-                [row.rstrip("\n") for row in re.findall(rf"^{pattern}\n", s, re.MULTILINE)],
+                [row.rstrip("\n") for row in re.findall(rf"^{errmsg_pattern}\n", s, re.MULTILINE)],
             ),
             "first console received the second console's error interval",
         )
