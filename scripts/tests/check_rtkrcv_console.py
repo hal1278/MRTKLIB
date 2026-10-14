@@ -14,6 +14,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import shlex
 import signal
 import socket
 import subprocess
@@ -26,6 +27,9 @@ from typing import Any
 PROMPT = "rtkrcv> "
 CLEAR = "\x1b[H\x1b[2J"
 DEADLINE = 5.0
+# Upper bound for a shell gate left behind by a failed test; generous so that a
+# slow machine never releases a transition before the test does.
+GATE_LIMIT = 60.0
 SAT = r"[GREJCIS]\d{2}"
 DATE = r"\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}"
 VERSION = r"rtkrcv \(MRTKLIB ver\.\S+ git \S+\)"
@@ -1104,6 +1108,52 @@ def configuration_refusals(console, path, before):
     console.expect("set pos1-elmask", "option not changed: stop rtk server first")
 
 
+def file_gate(entered, release, timeout=GATE_LIMIT):
+    """Build a file gate that also exits on directory cleanup or bounded polling."""
+    entered_path = shlex.quote(str(entered))
+    release_path = shlex.quote(str(release))
+    directory = shlex.quote(str(entered.parent))
+    polls = max(1, int(timeout / 0.05))
+    script = (
+        f"touch {entered_path}; remaining={polls}; "
+        f'while [ ! -e {release_path} ] && [ -d {directory} ] && [ "$remaining" -gt 0 ]; do '
+        "remaining=$((remaining - 1)); sleep 0.05; done; "
+        f"[ -e {release_path} ]"
+    )
+    return "sh -c " + shlex.quote(script)
+
+
+def file_gate_checks():
+    """Check release, directory removal and timeout each terminate a shell gate."""
+    for outcome in ("release", "cleanup", "timeout"):
+        with tempfile.TemporaryDirectory(prefix="rtkrcv_gate_") as directory:
+            root = Path(directory)
+            entered, release = root / "entered", root / "go"
+            process = subprocess.Popen(
+                file_gate(entered, release, timeout=0.1 if outcome == "timeout" else DEADLINE),
+                shell=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            try:
+                end = time.monotonic() + DEADLINE
+                while not entered.exists():
+                    if process.poll() is not None or time.monotonic() >= end:
+                        raise AssertionError(f"{outcome} file gate did not create its marker")
+                if outcome == "release":
+                    release.touch()
+                elif outcome == "cleanup":
+                    entered.unlink()
+                    root.rmdir()
+                result = process.wait(timeout=DEADLINE / 2 if outcome == "cleanup" else DEADLINE)
+                if result != (0 if outcome == "release" else 1):
+                    raise AssertionError(f"{outcome} file gate returned {result}")
+            finally:
+                if root.exists():
+                    release.touch()
+                process.wait(timeout=DEADLINE)
+
+
 def lifecycle_checks(args):
     """Hold transitions at file gates and check a second console's responses."""
     with Server(args) as server:
@@ -1126,7 +1176,7 @@ def lifecycle_checks(args):
         for phase in ("start", "stop"):
             entered = server.directory / f"entered-{phase}"
             release = server.directory / f"go-{phase}"
-            command = f"sh -c 'touch {entered}; while [ ! -e {release} ]; do sleep 0.05; done'"
+            command = file_gate(entered, release)
             first.begin(f"set misc-{phase}cmd")
             first.read_until(lambda s: s.endswith(": "), "interactive command value prompt")
             first.sock.sendall(command.encode("ascii") + b"\r")
@@ -1247,7 +1297,7 @@ def shutdown_checks(args):
             for option, command in (
                 (
                     "misc-startcmd",
-                    f"sh -c 'touch {entered}; while [ ! -e {release} ]; do sleep 0.05; done'",
+                    file_gate(entered, release),
                 ),
                 ("misc-stopcmd", f"touch {stopped}"),
             ):
@@ -1347,6 +1397,7 @@ def main():
     args.root = args.root.resolve()
     started = time.monotonic()
     try:
+        file_gate_checks()
         replay_checks(args)
         mutation_checks(args)
         lifecycle_checks(args)

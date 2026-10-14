@@ -187,9 +187,10 @@ int rcvcmd_solution_flags(rcvcmd_t* cmd);
 /** @brief Read the requested monitor port. */
 int rcvcmd_monitor_port(rcvcmd_t* cmd);
 
-/** @brief Lock configuration for a complete adapter option listing. */
+/** @brief Lock configuration to format/copy the complete option listing.
+ * Release before adapter output, input, callbacks or external commands. */
 void rcvcmd_lock_options(rcvcmd_t* cmd);
-/** @brief Release configuration after the option listing. */
+/** @brief Release configuration before printing the copied option listing. */
 void rcvcmd_unlock_options(rcvcmd_t* cmd);
 /** @brief Get the ordered option table while the listing lock is held.
  * system=0: receiver, system=1: core system. */

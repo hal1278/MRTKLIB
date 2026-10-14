@@ -753,6 +753,7 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             if (operation == LIFECYCLE_RESTART) {
                 pthread_mutex_lock(&cmd->publish_lock);
                 cmd->lifecycle.state = RCVCMD_STOPPED;
+                /* The later event unit publishes the intermediate stopped event here. */
                 cmd->lifecycle.state = RCVCMD_STARTING;
                 pthread_mutex_unlock(&cmd->publish_lock);
             }

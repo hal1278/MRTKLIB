@@ -1213,45 +1213,44 @@ static void cmd_ssr(char** args, int narg, vt_t* vt) {
 }
 /* option command ------------------------------------------------------------*/
 static void cmd_option(char** args, int narg, vt_t* vt) {
-    const opt_t* rcvopts = rcvcmd_options(cmd, 0);
-    const opt_t* sysopts = rcvcmd_options(cmd, 1);
-    char buff[MAXSTR], *p;
-    int i, n;
+    const opt_t* opts[2];
+    char *listing, *p;
+    size_t size = 1;
+    int i, system;
 
     trace(NULL, 3, "cmd_option:\n");
+    opts[0] = rcvcmd_options(cmd, 0);
+    opts[1] = rcvcmd_options(cmd, 1);
+
+    /* String values fit MAXSTR; enum values also come from the comments. */
+    for (system = 0; system < 2; system++) {
+        for (i = 0; *opts[system][i].name; i++) {
+            size += MAXSTR + strlen(opts[system][i].name) + 2 * strlen(opts[system][i].comment) + 32;
+        }
+    }
+    if (!(listing = (char*)malloc(size))) {
+        trace(NULL, 2, "cmd_option: snapshot allocation failed\n");
+        return;
+    }
 
     rcvcmd_lock_options(cmd);
-    for (i = 0; *rcvopts[i].name; i++) {
-        if (narg >= 2 && !strstr(rcvopts[i].name, args[1])) {
-            continue;
-        }
-        p = buff;
-        p += sprintf(p, "%-18s =", rcvopts[i].name);
-        p += opt2str(rcvopts + i, p);
-        if (*rcvopts[i].comment) {
-            if ((n = (int)(buff + 30 - p)) > 0) {
-                p += sprintf(p, "%*s", n, "");
+    p = listing;
+    *p = '\0';
+    for (system = 0; system < 2; system++) {
+        for (i = 0; *opts[system][i].name; i++) {
+            if (narg >= 2 && !strstr(opts[system][i].name, args[1])) {
+                continue;
             }
-            p += sprintf(p, " # (%s)", rcvopts[i].comment);
+            *p++ = rcvcmd_option_modified(cmd, system, i) ? '*' : ' ';
+            p += opt2buf(opts[system] + i, p);
+            *p++ = '\n';
+            *p = '\0';
         }
-        vt_printf(vt, "%s%s\n", rcvcmd_option_modified(cmd, 0, i) ? "*" : " ", buff);
-    }
-    for (i = 0; *sysopts[i].name; i++) {
-        if (narg >= 2 && !strstr(sysopts[i].name, args[1])) {
-            continue;
-        }
-        p = buff;
-        p += sprintf(p, "%-18s =", sysopts[i].name);
-        p += opt2str(sysopts + i, p);
-        if (*sysopts[i].comment) {
-            if ((n = (int)(buff + 30 - p)) > 0) {
-                p += sprintf(p, "%*s", n, "");
-            }
-            p += sprintf(p, " # (%s)", sysopts[i].comment);
-        }
-        vt_printf(vt, "%s%s\n", rcvcmd_option_modified(cmd, 1, i) ? "*" : " ", buff);
     }
     rcvcmd_unlock_options(cmd);
+
+    vt_puts(vt, listing);
+    free(listing);
 }
 /* set command ---------------------------------------------------------------*/
 static void cmd_set(char** args, int narg, vt_t* vt) {
