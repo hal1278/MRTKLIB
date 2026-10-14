@@ -112,8 +112,9 @@ extern FILE* popen(const char*, const char*);
 extern int pclose(FILE*);
 
 /* global variables ----------------------------------------------------------*/
-static rcvcmd_t* cmd;  /* command layer instance */
-static int intflg = 0; /* interrupt flag (2:shtdown) */
+static rcvcmd_t* cmd; /* command layer instance */
+static volatile sig_atomic_t intflg = 0;
+static volatile sig_atomic_t shut_signal = 0;
 
 /* help text -----------------------------------------------------------------*/
 /* Long-option aliases for the command-line parser. Note rtkrcv historically
@@ -204,7 +205,10 @@ static void printver(void) {
     exit(0);
 }
 /* external stop signal ------------------------------------------------------*/
-static void sigshut(int sig) { intflg = 1; }
+static void sigshut(int sig) {
+    shut_signal = sig;
+    intflg = 1;
+}
 /* SIGSEGV handler (best-effort, async-signal-safe only) ---------------------*/
 /* pre-built sigaction struct for restoring default handler (async-signal-safe:
  * avoids calling sigemptyset() inside the signal handler) */
@@ -323,7 +327,7 @@ static int login(vt_t* vt) {
         return 1;
     }
 
-    while (!(intflg & 2)) {
+    while (1) {
         if (!vt_printf(vt, "password: ", PROGNAME)) {
             return 0;
         }
@@ -1523,7 +1527,6 @@ static void* con_thread(void* arg) {
                     rcvcmd_request_shutdown(cmd);
                     vt_printf(con->vt, "rtk server shutdown ...\n");
                     sleepms(1000);
-                    intflg = 1;
                     con->state = 0;
                 }
                 break;
@@ -1743,7 +1746,7 @@ static void accept_sock(int ssock, con_t** con) {
  *-----------------------------------------------------------------------------*/
 int mrtk_run(int argc, char** argv) {
     con_t* con[MAXCON] = {0};
-    int i, start = 0, port = 0, outstat = 0, trace = 0, sock = 0, moniport = 0;
+    int i, start = 0, port = 0, outstat = 0, trace_level = 0, sock = 0, moniport = 0;
     char *dev = "", file[MAXSTR] = "";
     double ee[] = {2000, 12, 31, 23, 59, 59};
     char staname[32] = "", password[MAXSTR] = "admin";
@@ -1772,7 +1775,7 @@ int mrtk_run(int argc, char** argv) {
         } else if (!strcmp(argv[i], "-r") && i + 1 < argc) {
             outstat = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-t") && i + 1 < argc) {
-            trace = atoi(argv[++i]);
+            trace_level = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "-sta") && i + 1 < argc) {
             strcpy(staname, argv[++i]);
         } else if (!strcmp(argv[i], "-v") || !strcmp(argv[i], "-ver")) {
@@ -1807,9 +1810,9 @@ int mrtk_run(int argc, char** argv) {
         return -1;
     }
 
-    if (trace > 0) {
+    if (trace_level > 0) {
         traceopen(ctx, TRACEFILE);
-        tracelevel(ctx, trace);
+        tracelevel(ctx, trace_level);
     }
     rcvcmd_initialize(cmd, file, password, staname, moniport, outstat, rst);
     if (port) {
@@ -1859,10 +1862,13 @@ int mrtk_run(int argc, char** argv) {
     if (start) {
         rcvcmd_start(cmd, &process_io);
     }
-    while (!intflg) {
+    while (!intflg && !rcvcmd_shutdown_requested(cmd)) {
         /* accept remote console connection */
         accept_sock(sock, con);
         sleepms(100);
+    }
+    if (intflg) {
+        trace(NULL, 3, "sigshut: sig=%d\n", (int)shut_signal);
     }
     /* stop rtk server */
     rcvcmd_request_shutdown(cmd);

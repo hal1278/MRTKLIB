@@ -150,6 +150,11 @@ rcvcmd_result_t rcvcmd_restart(rcvcmd_t* cmd, const rcvcmd_io_t* io);
  * @param[in,out] cmd The sole command-layer instance.
  */
 void rcvcmd_request_shutdown(rcvcmd_t* cmd);
+/** @brief Read the shutdown request under the publish mutex.
+ * @param[in] cmd The sole command-layer instance.
+ * @return 1 if shutdown was requested, 0 otherwise.
+ */
+int rcvcmd_shutdown_requested(rcvcmd_t* cmd);
 /** @brief Wait for any transition, then stop a running server despite the request.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.

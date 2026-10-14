@@ -799,6 +799,14 @@ void rcvcmd_request_shutdown(rcvcmd_t* cmd) {
     pthread_mutex_unlock(&cmd->publish_lock);
 }
 
+int rcvcmd_shutdown_requested(rcvcmd_t* cmd) {
+    int requested;
+    pthread_mutex_lock(&cmd->publish_lock);
+    requested = cmd->shutdown_requested;
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return requested;
+}
+
 void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     pthread_mutex_lock(&cmd->publish_lock);
     while (cmd->claimed) {
