@@ -76,6 +76,7 @@ struct rcvcmd {
     int soltype;       /* sol format (0:dms,1:deg,2:xyz,3:enu,4:pyl) */
     int solflag;       /* sol flag (1:std+2:age/ratio/ns) */
     rcvcmd_settings_t settings;
+    rcvcmd_settings_t run_settings;
     int modflgr[256]; /* modified flags of receiver options */
     int modflgs[256]; /* modified flags of system options */
     int moniport;     /* monitor port */
@@ -322,7 +323,7 @@ static int read_console_setting(rcvcmd_t* cmd, const int* setting) {
 
 int rcvcmd_time_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->timetype); }
 int rcvcmd_solution_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->soltype); }
-int rcvcmd_solution_height(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->settings.solopt[0].height); }
+int rcvcmd_solution_height(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->run_settings.solopt[0].height); }
 int rcvcmd_solution_flags(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->solflag); }
 int rcvcmd_monitor_port(rcvcmd_t* cmd) { return cmd->moniport; }
 
@@ -390,8 +391,10 @@ rcvcmd_config_result_t rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* o
         pthread_mutex_lock(&cmd->config_lock);
     }
     if (str2opt(option->opt, value)) {
-        if (restart) {
+        if (option->system) {
             getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+        }
+        if (restart) {
             if (option->system) {
                 cmd->modflgs[option->index] = 1;
             } else {
@@ -472,7 +475,7 @@ static int readcmd(const char* file, char* cmd, int type) {
 }
 /* read antenna file ---------------------------------------------------------*/
 static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* nav) {
-    rcvcmd_settings_t* settings = &cmd->settings;
+    rcvcmd_settings_t* settings = &cmd->run_settings;
     const pcv_t pcv0 = {0};
     pcvs_t pcvr = {0}, pcvs = {0};
     pcv_t* pcv;
@@ -518,7 +521,7 @@ static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* 
 /* start rtk server ----------------------------------------------------------*/
 static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     rtksvr_t* svr = cmd->svr;
-    rcvcmd_settings_t* settings = &cmd->settings;
+    rcvcmd_settings_t* settings = &cmd->run_settings;
     static sta_t sta[MAXRCV] = {{""}};
     double pos[3], npos[3];
     char s1[3][MAXRCVCMD] = {"", "", ""}, *cmds[] = {NULL, NULL, NULL};
@@ -610,8 +613,6 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
         trace(NULL, 2, "geoid data open error: %s\n", settings->filopt.geoid);
         notice(io, RCVCMD_NOTICE_GEOID_FILE_ERROR, settings->filopt.geoid, NULL, 0);
     }
-    rcvcmd_clear_modified(cmd);
-
     /* set stream options */
     stropt[0] = settings->timeout;
     stropt[1] = settings->reconnect;
@@ -684,7 +685,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
 /* stop rtk server -----------------------------------------------------------*/
 static void stop_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     rtksvr_t* svr = cmd->svr;
-    rcvcmd_settings_t* settings = &cmd->settings;
+    rcvcmd_settings_t* settings = &cmd->run_settings;
     char s[3][MAXRCVCMD] = {"", "", ""}, *cmds[] = {NULL, NULL, NULL};
     int i, ret;
 
@@ -716,7 +717,7 @@ static void stop_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     notice(io, RCVCMD_NOTICE_SERVER_STOPPED, NULL, NULL, 0);
 }
 
-typedef enum { LIFECYCLE_START, LIFECYCLE_STOP, LIFECYCLE_RESTART } lifecycle_operation_t;
+typedef enum { LIFECYCLE_START, LIFECYCLE_STOP, LIFECYCLE_RESTART, LIFECYCLE_SHUTDOWN } lifecycle_operation_t;
 
 void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data) {
     pthread_mutex_lock(&cmd->publish_lock);
@@ -727,16 +728,21 @@ void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data) {
 static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifecycle_operation_t operation) {
     rcvcmd_result_t result = {RCVCMD_SUCCESS, RCVCMD_STOPPED};
     rcvcmd_start_error_t error = RCVCMD_START_ERROR_NONE;
-    int stop;
+    int stop, start = operation == LIFECYCLE_START || operation == LIFECYCLE_RESTART;
 
     pthread_mutex_lock(&cmd->publish_lock);
-    if (cmd->shutdown_requested) {
+    if (operation == LIFECYCLE_SHUTDOWN) {
+        while (cmd->claimed) {
+            pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
+        }
+    }
+    if (cmd->shutdown_requested && operation != LIFECYCLE_SHUTDOWN) {
         result.kind = RCVCMD_SHUTTING_DOWN;
     } else if (cmd->claimed) {
         result.kind = RCVCMD_BUSY;
     } else if (operation == LIFECYCLE_START && cmd->lifecycle.state == RCVCMD_RUNNING) {
         result.kind = RCVCMD_ALREADY_RUNNING;
-    } else if (operation != LIFECYCLE_STOP || cmd->lifecycle.state != RCVCMD_STOPPED) {
+    } else if (start || cmd->lifecycle.state == RCVCMD_RUNNING) {
         stop = cmd->lifecycle.state == RCVCMD_RUNNING && operation != LIFECYCLE_START;
         cmd->claimed = 1;
         cmd->lifecycle.state = stop ? RCVCMD_STOPPING : RCVCMD_STARTING;
@@ -758,14 +764,23 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
                 pthread_mutex_unlock(&cmd->publish_lock);
             }
         }
-        if (operation != LIFECYCLE_STOP) {
+        if (start) {
             pthread_mutex_lock(&cmd->config_lock);
+            cmd->run_settings = cmd->settings;
             pthread_mutex_unlock(&cmd->config_lock);
             error = start_server(cmd, io);
         }
+        if (start && error == RCVCMD_START_ERROR_NONE) {
+            /* Marks mean "not in effect yet". Changes are refused while starting
+             * (only console-* is accepted, never marked), so these are the marks
+             * of the copy that is now running. */
+            pthread_mutex_lock(&cmd->config_lock);
+            rcvcmd_clear_modified(cmd);
+            pthread_mutex_unlock(&cmd->config_lock);
+        }
 
         pthread_mutex_lock(&cmd->publish_lock);
-        if (operation == LIFECYCLE_STOP) {
+        if (!start) {
             cmd->lifecycle.state = RCVCMD_STOPPED;
         } else if (error == RCVCMD_START_ERROR_NONE) {
             cmd->lifecycle.state = RCVCMD_RUNNING;
@@ -798,31 +813,15 @@ void rcvcmd_request_shutdown(rcvcmd_t* cmd) {
     pthread_mutex_unlock(&cmd->publish_lock);
 }
 
-void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
+int rcvcmd_shutdown_requested(rcvcmd_t* cmd) {
+    int requested;
     pthread_mutex_lock(&cmd->publish_lock);
-    while (cmd->claimed) {
-        pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
-    }
-    if (cmd->lifecycle.state != RCVCMD_RUNNING) {
-        pthread_mutex_unlock(&cmd->publish_lock);
-        return;
-    }
-    cmd->claimed = 1;
-    cmd->lifecycle.state = RCVCMD_STOPPING;
-    cmd->lifecycle.stop_reason = RCVCMD_STOP_REQUEST;
-    while (cmd->readers) {
-        pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
-    }
+    requested = cmd->shutdown_requested;
     pthread_mutex_unlock(&cmd->publish_lock);
-
-    stop_server(cmd, io);
-
-    pthread_mutex_lock(&cmd->publish_lock);
-    cmd->lifecycle.state = RCVCMD_STOPPED;
-    cmd->claimed = 0;
-    pthread_cond_broadcast(&cmd->publish_cond);
-    pthread_mutex_unlock(&cmd->publish_lock);
+    return requested;
 }
+
+void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io) { run_lifecycle(cmd, io, LIFECYCLE_SHUTDOWN); }
 
 static int begin_read(rcvcmd_t* cmd) {
     int accepted;
