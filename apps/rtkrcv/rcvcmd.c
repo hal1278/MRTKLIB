@@ -428,6 +428,10 @@ rcvcmd_t* rcvcmd_create(mrtk_ctx_t* ctx) {
 #endif
     if (pthread_create(&instance.collector, NULL, collect_thread, &instance)) {
         fprintf(stderr, "event collector thread create error\n");
+#ifdef TRACE
+        /* A sink cannot be unregistered: disable it before its ring is freed. */
+        tracesinklevel(ctx, 0);
+#endif
         rcvcmd_destroy(&instance);
         return NULL;
     }

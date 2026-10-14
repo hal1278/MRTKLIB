@@ -76,6 +76,8 @@ static int resource_case(const char* name) {
         CHECK(rcvcmd_create(ctx) == NULL, "collector creation failure rejects command instance");
         CHECK(!collector_created && !collector_joined, "failed thread creation has no thread to join");
         CHECK(create_calls == 1, "sink registration creates no thread on failure");
+        /* The freed ring must no longer receive messages (cap 0 would divide by zero). */
+        trace(NULL, 1, "trace after a failed create\n");
         g_mrtk_ctx = NULL;
         mrtk_ctx_destroy(ctx);
         fail_thread_create = 0;
@@ -405,8 +407,10 @@ static void notice_checks(char* config) {
     tracelevel(ctx, 2);
     last = rcvcmd_last_seq(cmd);
     CHECK(rcvcmd_start(cmd, &output).kind == RCVCMD_SUCCESS, "long notice fixture starts");
+    rcvcmd_stop(cmd, &output);
     traceclose(ctx);
-    CHECK(count_logs(cmd, last, "no command file:") == 2, "each long notice produces one ring entry");
+    /* start reads the command file twice (start and periodic commands), stop once */
+    CHECK(count_logs(cmd, last, "no command file:") == 3, "each long notice produces one ring entry");
     fp = fopen("long-notice.trace", "r");
     CHECK(fp != NULL, "read long notice trace");
     if (fp) {
@@ -416,7 +420,6 @@ static void notice_checks(char* config) {
         fclose(fp);
     }
     CHECK(unlink("long-notice.trace") == 0, "remove long notice trace");
-    rcvcmd_stop(cmd, &output);
     set_option(cmd, "file-cmdfile1", "");
     CHECK(rcvcmd_set_log_level(cmd, 2), "enable warning trace events for command tests");
     set_option(cmd, "misc-startcmd", "exit 3 # u13-startsecret");

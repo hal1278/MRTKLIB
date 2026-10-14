@@ -187,7 +187,8 @@ void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
 /** @brief Allocate resources, register the trace sink, then start the collector.
  * @param[in] ctx Context already assigned to g_mrtk_ctx, before other tracing threads start.
- * @return The sole instance, or NULL on failure or an existing instance.
+ * @return The sole instance, or NULL on failure or an existing instance. After a failure
+ *         that follows the registration, the context keeps a disabled sink; use a new context.
  */
 rcvcmd_t* rcvcmd_create(mrtk_ctx_t* ctx);
 /** @brief Set the event log level, independently of the trace file level.
