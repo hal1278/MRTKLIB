@@ -26,18 +26,22 @@
  * inside the layer. rcvcmd_io_t supplies synchronous notices and overwrite
  * confirmation, preserving output and question order without terminal coupling.
  *
- * Each display has one reader filling caller-owned storage under the same lock
- * as before the split. Solution/error reads consume the shared buffers. The
- * adapter prints after the reader unlocks. Readers allocate no large temporary
+ * Each display has one reader filling caller-owned storage. Server values use
+ * the existing server lock; stream fields use their own stream locks.
+ * Solution/error reads consume the shared buffers. Adapters print after unlock.
+ * Readers allocate no large temporary
  * snapshots; callers keep one copy in their existing display stack frame.
- * Pointer/lock members copied inside rtk_t or stream_t are not live handles for
- * callers to dereference or use; displays consume only the copied values.
+ * Pointer members copied inside rtk_t are not live handles for callers to
+ * dereference; displays consume only copied values. Stream snapshots contain
+ * only the display fields, with no copied locks or port handles.
  *
- * Threading is unchanged from before the split. There are no lifecycle states,
- * reader counts, configuration mutex, events, claims, or new serialization.
+ * The lifecycle/configuration threading model is unchanged. There are no
+ * lifecycle states, reader counts, configuration mutex, events, claims, or new
+ * lifecycle serialization.
  * Start/stop can still race with display/configuration operations as before.
- * Stream copies still use the server lock until stage 4. The legacy unlocked
- * cyclic-solution discard is retained until solution-event work (D-17).
+ * Stream formats use the server lock, separately from stream field copies.
+ * The legacy unlocked cyclic-solution discard is retained until solution-event
+ * work (D-17).
  */
 #ifndef RCVCMD_H
 #define RCVCMD_H
@@ -173,6 +177,9 @@ typedef struct {
 } rcvcmd_ssr_t;
 
 typedef struct {
+    /* Only type, state, inb/inr, outb/outr, path and msg are copied. Other
+     * stream_t members are not snapshot data and must not be used. Keeping
+     * this storage type avoids coupling the lock fix to adapter changes. */
     stream_t stream[9];
     int format[9];
 } rcvcmd_stream_t;
@@ -214,7 +221,7 @@ void rcvcmd_read_navidata(rcvcmd_t* cmd, rcvcmd_navidata_t* data);
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
 void rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
-/** @brief Copy streams, monitor and formats under the legacy server lock.
+/** @brief Copy formats under the server lock and displayed fields under each stream lock.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */

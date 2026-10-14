@@ -757,24 +757,40 @@ void rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data) {
     rtksvrunlock(svr);
 }
 
+/* Copy only display fields: even while held, a mutex can be changed by
+ * waiting threads, so copying the whole stream would still read its lock. */
+static void copy_stream(stream_t* stream, stream_t* data) {
+    strlock(stream);
+    data->type = stream->type;
+    data->state = stream->state;
+    data->inb = stream->inb;
+    data->inr = stream->inr;
+    data->outb = stream->outb;
+    data->outr = stream->outr;
+    memcpy(data->path, stream->path, sizeof(data->path));
+    memcpy(data->msg, stream->msg, sizeof(data->msg));
+    strunlock(stream);
+}
+
 void rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data) {
     rtksvr_t* svr = cmd->svr;
     int i;
 
     rtksvrlock(svr);
     memset(data->format, 0, sizeof(data->format));
-    for (i = 0; i < 8; i++) {
-        data->stream[i] = svr->stream[i];
-    }
     for (i = 0; i < 3; i++) {
         data->format[i] = svr->format[i];
     }
     for (i = 3; i < 5; i++) {
         data->format[i] = svr->solopt[i - 3].posf;
     }
-    data->stream[8] = cmd->moni;
     data->format[8] = SOLF_LLH;
     rtksvrunlock(svr);
+
+    for (i = 0; i < 8; i++) {
+        copy_stream(&svr->stream[i], &data->stream[i]);
+    }
+    copy_stream(&cmd->moni, &data->stream[8]);
 }
 
 void rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data) {
