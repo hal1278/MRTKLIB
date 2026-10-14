@@ -41,7 +41,8 @@
  * Never take server/stream locks or call adapters under the publish mutex.
  * A configuration mutex serializes option operations and console settings.
  * Configuration -> publish lock is allowed; never wait for configuration while
- * holding the publish mutex. Start releases configuration before preparation.
+ * holding the publish mutex. Start captures staged settings and clears modified
+ * flags under configuration, then releases it and prepares a separate run copy.
  * Shutdown requests share the publish mutex; an active transition finishes
  * before final shutdown. Events are not implemented yet.
  * Stream formats use the server lock, separately from stream field copies.
@@ -180,7 +181,7 @@ void rcvcmd_password(rcvcmd_t* cmd, char* password, size_t size);
 int rcvcmd_time_type(rcvcmd_t* cmd);
 /** @brief Read the configured console solution format. */
 int rcvcmd_solution_type(rcvcmd_t* cmd);
-/** @brief Read the configured solution height mode at the original formatting points. */
+/** @brief Read the captured run's solution height mode for solution formatting. */
 int rcvcmd_solution_height(rcvcmd_t* cmd);
 /** @brief Read the configured console solution flags. */
 int rcvcmd_solution_flags(rcvcmd_t* cmd);
