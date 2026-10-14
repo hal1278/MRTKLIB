@@ -1798,24 +1798,24 @@ int mrtk_run(int argc, char** argv) {
         }
     }
 
-    if (!(cmd = rcvcmd_create())) {
-        return -1;
-    }
-
     /* Initialize MRTKLIB runtime context */
     ctx = mrtk_ctx_create();
     if (!ctx) {
         fprintf(stderr, "error: MRTKLIB context allocation failed\n");
-        rcvcmd_destroy(cmd);
         return -1;
     }
-    g_mrtk_ctx = ctx;
     g_mrtk_legacy_ctx = mrtk_context_new();
     if (!g_mrtk_legacy_ctx) {
         fprintf(stderr, "error: MRTKLIB legacy context allocation failed\n");
         mrtk_ctx_destroy(ctx);
+        return -1;
+    }
+    g_mrtk_ctx = ctx;
+    if (!(cmd = rcvcmd_create(ctx))) {
+        mrtk_context_free(g_mrtk_legacy_ctx);
+        g_mrtk_legacy_ctx = NULL;
         g_mrtk_ctx = NULL;
-        rcvcmd_destroy(cmd);
+        mrtk_ctx_destroy(ctx);
         return -1;
     }
 
@@ -1896,8 +1896,8 @@ int mrtk_run(int argc, char** argv) {
     rcvcmd_save_navigation(cmd);
     traceclose(ctx);
     mrtk_context_free(g_mrtk_legacy_ctx);
-    g_mrtk_ctx = NULL;
-    mrtk_ctx_destroy(ctx);
-    rcvcmd_destroy(cmd);
+    g_mrtk_legacy_ctx = NULL;
+    /* Keep the context, sink and ring reachable for console/download threads
+     * that may still trace; destroy them once all such threads are joined. */
     return 0;
 }

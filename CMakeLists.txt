@@ -376,6 +376,11 @@ target_include_directories(utest_rcvcmd_events PRIVATE apps/rtkrcv)
 target_link_libraries(utest_rcvcmd_events PRIVATE mrtklib pthread)
 add_test(NAME utest_rcvcmd_events COMMAND utest_rcvcmd_events)
 set_tests_properties(utest_rcvcmd_events PROPERTIES LABELS "utest" TIMEOUT 30)
+add_test(NAME utest_rcvcmd_events_errbuf COMMAND utest_rcvcmd_events errbuf
+    ${CMAKE_SOURCE_DIR}/tests/data/malib/MALIB_OSS_data_obsnav_240822-1100.sbf)
+set_tests_properties(utest_rcvcmd_events_errbuf PROPERTIES
+    LABELS "utest" TIMEOUT 40 FIXTURES_REQUIRED regression_data)
+
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_definitions(utest_rcvcmd_events PRIVATE RCVCMD_TEST_THREADS)
     target_link_options(utest_rcvcmd_events PRIVATE -Wl,--wrap=pthread_create -Wl,--wrap=pthread_join)
