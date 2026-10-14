@@ -204,11 +204,7 @@ static void printver(void) {
     exit(0);
 }
 /* external stop signal ------------------------------------------------------*/
-static void sigshut(int sig) {
-    trace(NULL, 3, "sigshut: sig=%d\n", sig);
-
-    intflg = 1;
-}
+static void sigshut(int sig) { intflg = 1; }
 /* SIGSEGV handler (best-effort, async-signal-safe only) ---------------------*/
 /* pre-built sigaction struct for restoring default handler (async-signal-safe:
  * avoids calling sigemptyset() inside the signal handler) */
@@ -977,7 +973,9 @@ static int parse_sysopt(const char* arg) {
 }
 /* lifecycle result ----------------------------------------------------------*/
 static int lifecycle_result(vt_t* vt, rcvcmd_result_t result) {
-    if (result.kind == RCVCMD_BUSY) {
+    if (result.kind == RCVCMD_SHUTTING_DOWN) {
+        vt_printf(vt, "rtk server shutting down\n");
+    } else if (result.kind == RCVCMD_BUSY) {
         vt_printf(vt, "rtk server busy (%s)\n", result.state == RCVCMD_STARTING ? "starting" : "stopping");
     } else if (result.kind == RCVCMD_ALREADY_RUNNING) {
         vt_printf(vt, "rtk server start error (server already started)\n");
@@ -1523,6 +1521,7 @@ static void* con_thread(void* arg) {
                 break;
             case 19: /* shutdown */
                 if (!strcmp(args[0], "shutdown")) {
+                    rcvcmd_request_shutdown(cmd);
                     vt_printf(con->vt, "rtk server shutdown ...\n");
                     sleepms(1000);
                     intflg = 1;
@@ -1673,8 +1672,7 @@ static void accept_sock(int ssock, con_t** con) {
  *       Stop RTK server.
  *
  *     restart
- *       Restart RTK server. If the processing options are set, execute the
- *       command to enable the changes.
+ *       Stop and start RTK server. When stopped, start it.
  *
  *     solution [cycle]
  *       Show solutions. Without option, only one solution is shown. With
@@ -1706,13 +1704,13 @@ static void accept_sock(int ssock, con_t** con) {
  *       displayed. With option, only pattern-matched options are displayed.
  *
  *     set opt [val]
- *       Set the value of a processing option to val. With out option val,
- *       prompt message is shown to input the value. The change of the
- *       processing option is not enabled before RTK server is restarted.
+ *       Set an option to val, or prompt for the value if omitted. Stop the
+ *       server first for non-console options; console-* changes are immediate.
+ *       Apply stopped processing-option changes with start or restart.
  *
  *     load [file]
- *       Load processing options from file. Without option, default file
- *       rtkrcv.conf is used. To enable the changes, restart RTK server.
+ *       Load processing options while stopped. Without option, default file
+ *       rtkrcv.conf is used. Apply the changes with start or restart.
  *
  *     save [file]
  *       Save current processing optons to file. Without option, default file
@@ -1730,13 +1728,16 @@ static void accept_sock(int ssock, con_t** con) {
  *       the command.
  *
  *     shutdown
- *       Shutdown RTK server and exit the program.
+ *       Record shutdown immediately, finish any current transition, then stop
+ *       RTK server and exit. Further start/stop/restart commands are refused.
  *
  *     !command [arg...]
  *       Execute command by the operating system shell. Do not use the
  *       interactive command.
  *
  * Notes
+ *     start/stop/restart report busy while a lifecycle transition is in progress.
+ *     Transition displays keep their format with zero values or headers only.
  *     Short form of a command is allowed. In case of the short form, the
  *     command is distinguished according to header characters.
  *
@@ -1865,7 +1866,8 @@ int mrtk_run(int argc, char** argv) {
         sleepms(100);
     }
     /* stop rtk server */
-    rcvcmd_stop(cmd, &process_io);
+    rcvcmd_request_shutdown(cmd);
+    rcvcmd_shutdown(cmd, &process_io);
 
     if (port) {
         /* close socket for remote console */

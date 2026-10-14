@@ -42,7 +42,8 @@
  * A configuration mutex serializes option operations and console settings.
  * Configuration -> publish lock is allowed; never wait for configuration while
  * holding the publish mutex. Start releases configuration before preparation.
- * Events are not implemented yet.
+ * Shutdown requests share the publish mutex; an active transition finishes
+ * before final shutdown. Events are not implemented yet.
  * Stream formats use the server lock, separately from stream field copies.
  * The legacy unlocked cyclic-solution discard is retained until solution-event
  * work (D-17).
@@ -128,21 +129,31 @@ void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data);
 /** @brief Start with synchronous adapter callbacks; return kind and current state.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
- * @return Success, already running, busy or start failed.
+ * @return Success, already running, busy, shutting down or start failed.
  */
 rcvcmd_result_t rcvcmd_start(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 /** @brief Stop; a stopped server succeeds without effect or notice.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
- * @return Success or busy.
+ * @return Success, busy or shutting down.
  */
 rcvcmd_result_t rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 /** @brief Restart under one claim; when stopped, behave like start.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
- * @return Success, busy or start failed.
+ * @return Success, busy, shutting down or start failed.
  */
 rcvcmd_result_t rcvcmd_restart(rcvcmd_t* cmd, const rcvcmd_io_t* io);
+
+/** @brief Record an idempotent shutdown request without waiting.
+ * @param[in,out] cmd The sole command-layer instance.
+ */
+void rcvcmd_request_shutdown(rcvcmd_t* cmd);
+/** @brief Wait for any transition, then stop a running server despite the request.
+ * @param[in,out] cmd The sole command-layer instance.
+ * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
+ */
+void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
 /** @brief Allocate the sole server instance; NULL on allocation failure or an existing instance. */
 rcvcmd_t* rcvcmd_create(void);

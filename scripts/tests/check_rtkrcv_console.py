@@ -14,6 +14,7 @@ import argparse
 import os
 from pathlib import Path
 import re
+import signal
 import socket
 import subprocess
 import sys
@@ -1232,6 +1233,75 @@ def lifecycle_checks(args):
                 release.touch()
 
 
+def shutdown_checks(args):
+    """Shutdown during a file-gated start through telnet and a signal."""
+    for source in ("telnet", "signal"):
+        with Server(args) as server:
+            first = server.connect()
+            second = server.connect()
+            third = server.connect()
+            first.expect("set outstr1-type 0", "option outstr1-type changed. restart to enable it")
+            entered = server.directory / "entered-start"
+            release = server.directory / "go-start"
+            stopped = server.directory / "shutdown-stopped"
+            for option, command in (
+                (
+                    "misc-startcmd",
+                    f"sh -c 'touch {entered}; while [ ! -e {release} ]; do sleep 0.05; done'",
+                ),
+                ("misc-stopcmd", f"touch {stopped}"),
+            ):
+                first.begin(f"set {option}")
+                first.read_until(lambda s: s.endswith(": "), "interactive command value prompt")
+                first.sock.sendall(command.encode("ascii") + b"\r")
+                text = first.response()
+                first.check(
+                    text.endswith(f"option {option} changed. restart to enable it\n"),
+                    "shutdown marker command configured",
+                    text,
+                )
+            try:
+                first.begin("start")
+                wait_command(third, "status", lambda _: entered.exists(), "start command marker")
+                if source == "telnet":
+                    second.begin("shutdown")
+                    text = second.read_until(
+                        lambda s: s.endswith("rtk server shutdown ...\n"),
+                        "shutdown request notice",
+                    )
+                    second.check(
+                        text == "shutdown\nrtk server shutdown ...\n",
+                        "shutdown accepted during start",
+                    )
+                else:
+                    server.process.send_signal(signal.SIGTERM)
+                    wait_command(
+                        third,
+                        "start",
+                        lambda s: s == "rtk server shutting down\n",
+                        "signal shutdown request recorded",
+                    )
+                for command in ("start", "stop", "restart"):
+                    third.expect(command, "rtk server shutting down")
+                transitional_displays(third)
+                third.check(
+                    server.process.poll() is None, "shutdown waits for the start transition"
+                )
+                third.check(not stopped.exists(), "shutdown has not stopped the unfinished start")
+                release.touch()
+                try:
+                    result = server.process.wait(timeout=DEADLINE)
+                except subprocess.TimeoutExpired:
+                    third.check(False, f"{source} shutdown process exit deadline")
+                third.check(result == 0, f"{source} shutdown exit status is 0 (received {result})")
+                third.check(stopped.is_file(), "final shutdown executed the stop command")
+                if source == "telnet":
+                    text = second.read_until(lambda s: False, "shutdown EOF/reset", eof=True)
+                    second.check(text == "shutdown\nrtk server shutdown ...\n", "shutdown response")
+            finally:
+                release.touch()
+
+
 def password_checks(args):
     # Match CLI and config passwords: don't pin the known startup precedence bug.
     with Server(args, password="console-secret") as server:
@@ -1280,6 +1350,7 @@ def main():
         replay_checks(args)
         mutation_checks(args)
         lifecycle_checks(args)
+        shutdown_checks(args)
         password_checks(args)
     except Exception:
         traceback.print_exc()

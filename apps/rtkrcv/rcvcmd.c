@@ -68,6 +68,7 @@ struct rcvcmd {
     rcvcmd_lifecycle_t lifecycle;
     int claimed;
     int readers;
+    int shutdown_requested;
     rtksvr_t* svr;     /* rtk server struct */
     stream_t moni;     /* monitor stream */
     char passwd[1024]; /* login password */
@@ -234,7 +235,7 @@ rcvcmd_t* rcvcmd_create(void) {
         return NULL;
     }
     memset(&instance.lifecycle, 0, sizeof(instance.lifecycle));
-    instance.claimed = instance.readers = 0;
+    instance.claimed = instance.readers = instance.shutdown_requested = 0;
     return &instance;
 }
 
@@ -729,7 +730,9 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
     int stop;
 
     pthread_mutex_lock(&cmd->publish_lock);
-    if (cmd->claimed) {
+    if (cmd->shutdown_requested) {
+        result.kind = RCVCMD_SHUTTING_DOWN;
+    } else if (cmd->claimed) {
         result.kind = RCVCMD_BUSY;
     } else if (operation == LIFECYCLE_START && cmd->lifecycle.state == RCVCMD_RUNNING) {
         result.kind = RCVCMD_ALREADY_RUNNING;
@@ -786,6 +789,38 @@ rcvcmd_result_t rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io) { return run_l
 
 rcvcmd_result_t rcvcmd_restart(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     return run_lifecycle(cmd, io, LIFECYCLE_RESTART);
+}
+
+void rcvcmd_request_shutdown(rcvcmd_t* cmd) {
+    pthread_mutex_lock(&cmd->publish_lock);
+    cmd->shutdown_requested = 1;
+    pthread_mutex_unlock(&cmd->publish_lock);
+}
+
+void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
+    pthread_mutex_lock(&cmd->publish_lock);
+    while (cmd->claimed) {
+        pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
+    }
+    if (cmd->lifecycle.state != RCVCMD_RUNNING) {
+        pthread_mutex_unlock(&cmd->publish_lock);
+        return;
+    }
+    cmd->claimed = 1;
+    cmd->lifecycle.state = RCVCMD_STOPPING;
+    cmd->lifecycle.stop_reason = RCVCMD_STOP_REQUEST;
+    while (cmd->readers) {
+        pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
+    }
+    pthread_mutex_unlock(&cmd->publish_lock);
+
+    stop_server(cmd, io);
+
+    pthread_mutex_lock(&cmd->publish_lock);
+    cmd->lifecycle.state = RCVCMD_STOPPED;
+    cmd->claimed = 0;
+    pthread_cond_broadcast(&cmd->publish_cond);
+    pthread_mutex_unlock(&cmd->publish_lock);
 }
 
 static int begin_read(rcvcmd_t* cmd) {
