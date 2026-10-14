@@ -322,6 +322,7 @@ static int decode_miono_correction(miono_t* mi, miono_region_t* re, int i, int a
 extern int decode_qzss_l6dmsg(mdcl6d_t* mdcl6d) {
     unsigned int preamb, prn, type, alert, vid, mgfid, csid, anme, si;
     l6_header_t hdr;
+    const l6_prn_info_t* info;
     int i = 0, j, imax, n, ibuff, mn, apply, ret, optprn;
     char* str;
     uint8_t mask;
@@ -344,19 +345,13 @@ extern int decode_qzss_l6dmsg(mdcl6d_t* mdcl6d) {
     (void)csid;
     (void)anme; /* suppress unused warnings */
 
-    switch (prn) { /* ref [1] Table 3-1 */
-        case 200:
-            j = 0;
-            break;
-        case 201:
-            j = 1;
-            break;
-        case 197:
-            j = 2;
-            break; /* for test */
-        default:
-            trace(NULL, 3, "decode_qzss_l6dmsg: invalid prn=%d\n", prn);
-            return -1;
+    /* decoder slot from the L6 PRN table (PRN 200/201, ref [1] Table 3-1;
+     * PRN 197 was reassigned to CLAS in IS-QZSS-MDC rev 002) */
+    info = l6_prn_info((int)prn);
+    j = info ? info->iono_slot : -1;
+    if (j < 0) {
+        trace(NULL, 3, "decode_qzss_l6dmsg: invalid prn=%d\n", prn);
+        return -1;
     }
 
     trace(NULL, 3,

@@ -1365,17 +1365,10 @@ static int decode_rxmqzssl6(raw_t* raw, rtcm_t* rtcm) {
     ret = 0;
     if (stat == 1) {
         memcpy(rtcm->buff, p + 14, 250);
-        if (msg == 0) {
-            /* L6D (CLAS): skip MADOCA decoder, route to CLAS via redirect block */
-            ret = 10;
-        } else {
-            /* L6E (MADOCA-PPP): decode SSR corrections. Remap the "SSR decoded"
-             * code (10) to the dedicated MADOCA L6E code (15) so it is not
-             * mistaken for an L6D frame-ready by the rtksvr CLAS redirect or
-             * cssr2rtcm3 (see decode_qzsrawl6 in mrtk_rcv_septentrio.c). */
-            ret = decode_qzss_l6emsg(rtcm);
-            if (ret == 10) ret = 15;
-        }
+        /* route by the L6 header service, not by the L6D/L6E message bit: an
+         * L6D channel may carry MADOCA-PPP iono (PRN 200/201) -> 16, which must
+         * not enter the CLAS demux; L6E carries MADOCA-PPP (15) and QZNMA (17) */
+        ret = decode_qzss_l6frame(rtcm, msg == 0);
     }
     return ret;
 }

@@ -58,6 +58,8 @@ typedef enum {
  */
 typedef void (*mrtk_showmsg_cb_t)(const char* msg);
 
+typedef struct mrtk_trace_sink mrtk_trace_sink_t;
+
 /*============================================================================
  * Context Structure
  *===========================================================================*/
@@ -66,9 +68,9 @@ typedef void (*mrtk_showmsg_cb_t)(const char* msg);
  * @brief Runtime context for MRTKLIB processing.
  *
  * Holds per-session state: runtime control flags, error state, trace
- * configuration, user data, and application callbacks.  All major
- * processing and trace functions accept a pointer to this structure
- * as their first argument.
+ * configuration (file and optional lifetime trace sink), user data, and
+ * application callbacks. All major processing and trace functions accept
+ * a pointer to this structure as their first argument.
  */
 typedef struct {
     /* Runtime control */
@@ -84,6 +86,8 @@ typedef struct {
     FILE* trace_fp;      /**< Trace output stream (NULL = disabled) */
     uint32_t tick_trace; /**< Tick count at traceopen (for elapsed time) */
 
+    mrtk_trace_sink_t* trace_sink; /**< Trace sink (NULL = none; opaque, see tracesink()) */
+
     /* User data and callbacks */
     void* user_data;              /**< Application-specific data pointer */
     mrtk_showmsg_cb_t cb_showmsg; /**< Status message callback (may be NULL) */
@@ -98,7 +102,8 @@ typedef struct {
  *
  * Allocates and zero-initialises a context.  Default settings:
  * - trace_level: 0 (off)
- * - trace_fp: NULL (no trace output)
+ * - trace_fp: NULL (no trace file)
+ * - trace_sink: NULL (no trace sink)
  * - All other members: zero / NULL
  *
  * @return Newly allocated context, or NULL on allocation failure.
@@ -108,7 +113,9 @@ mrtk_ctx_t* mrtk_ctx_create(void);
 /**
  * @brief Destroy a runtime context.
  *
- * Closes the trace file (unless stdout/stderr) and frees memory.
+ * Closes the trace file (unless stdout/stderr), frees the trace sink and
+ * context, but does not free the sink callback argument. All threads using
+ * the context must have stopped before destruction.
  * Safe to call with NULL.
  *
  * @param[in] ctx  Context to destroy, or NULL (no-op)

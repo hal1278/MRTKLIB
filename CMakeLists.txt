@@ -393,6 +393,28 @@ target_link_libraries(utest_rcvevent PRIVATE mrtklib)
 add_test(NAME utest_rcvevent COMMAND utest_rcvevent)
 set_tests_properties(utest_rcvevent PROPERTIES LABELS "utest")
 
+# Trace sink: one process per case, including stream credential checks.
+add_executable(utest_trace_sink ${_UTEST_DIR}/utest_trace_sink.c)
+target_compile_options(utest_trace_sink PRIVATE -std=c11)
+target_link_libraries(utest_trace_sink PRIVATE mrtklib pthread)
+foreach(case levels_without_file levels_with_file level_change register_rules tracet_no_prefix
+             truncation dumps_not_delivered threads ntripc_secret ftp_secret)
+    add_test(NAME utest_trace_sink_${case} COMMAND utest_trace_sink ${case})
+    set_tests_properties(utest_trace_sink_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
+endforeach()
+set_tests_properties(utest_trace_sink_ftp_secret PROPERTIES SKIP_RETURN_CODE 77)
+
+# QZSS L6 frame routing in the UBX/SBF decoders (issue #351 PR-B). Fixtures
+# tests/utest/l6route_*: short real SBF/UBX slices plus re-wrapped real frames
+# (scripts/tests/make_l6_route_fixtures.py).
+add_executable(utest_l6_route ${_UTEST_DIR}/utest_l6_route.c)
+# Override global -ansi (=C90): this test uses C11 (P-01).
+target_compile_options(utest_l6_route PRIVATE -std=c11)
+target_link_libraries(utest_l6_route PRIVATE mrtklib)
+add_test(NAME utest_l6_route COMMAND utest_l6_route
+         WORKING_DIRECTORY ${_UTEST_DIR})
+set_tests_properties(utest_l6_route PROPERTIES LABELS "utest")
+
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)
 # Override global -ansi (=C90) for this target, same as mrtklib target.

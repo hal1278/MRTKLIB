@@ -78,6 +78,25 @@ typedef struct {
     l6_service_t svc;  /**< service classification */
 } l6_header_t;
 
+/**
+ * @brief Auxiliary per-PRN information for one L6 PRN.
+ *
+ * Nominal assignments from the PRN code assignment tables of [2] and [3]
+ * and the CLAS transmit-pattern table of [1] (Table 4.1.1-1). Used for
+ * logging, for consistency warnings and for the MADOCA ionospheric region
+ * slot, never for service classification: assignments change over time
+ * (PRN 197 moved from technology demonstration to CLAS in MDC revision 002)
+ * and L6E PRNs carry both MADOCA-PPP and QZNMA.
+ */
+typedef struct {
+    uint8_t prn;      /**< L6 PRN */
+    const char* sat;  /**< satellite name, e.g. "QZS2" */
+    uint8_t l6e;      /**< 0: L6D PRN, 1: L6E PRN */
+    l6_service_t svc; /**< nominal service (L6E: MADOCA, QZNMA also expected) */
+    int8_t iono_slot; /**< MADOCA iono decoder slot (L6D PRN 200/201), -1 otherwise */
+    uint8_t pair_prn; /**< PRN of the other L6 signal of the same satellite, 0 if none */
+} l6_prn_info_t;
+
 /*============================================================================
  * Functions
  *===========================================================================*/
@@ -100,6 +119,23 @@ int l6_parse_header(const uint8_t* frame, l6_header_t* h);
  * @return 1 if the frame is a null message, 0 otherwise.
  */
 int l6_is_null(const uint8_t* frame);
+
+/**
+ * @brief Look up the auxiliary information of an L6 PRN.
+ * @param[in] prn  L6 PRN (header byte 4).
+ * @return Table entry, or NULL if the PRN has no nominal L6 assignment.
+ */
+const l6_prn_info_t* l6_prn_info(int prn);
+
+/**
+ * @brief Test whether a classified frame matches the nominal assignment of its PRN.
+ *
+ * Null messages always match; on L6E PRNs both MADOCA and QZNMA match.
+ *
+ * @param[in] h  Parsed header.
+ * @return 1 if consistent, 0 if the PRN is unassigned or carries an unexpected service.
+ */
+int l6_service_expected(const l6_header_t* h);
 
 /**
  * @brief Short name of an L6 service, for logs.

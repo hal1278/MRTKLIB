@@ -7,6 +7,22 @@
  *----------------------------------------------------------------------------*/
 #include "mrtklib/mrtk_l6.h"
 
+#include <stddef.h>
+
+/* nominal L6 PRN assignments (see l6_prn_info_t). MADOCA iono regions:
+ * PRN 200 Philippines/Indonesia/western Australia, PRN 201 Japan/eastern
+ * Australia. */
+static const l6_prn_info_t l6_prn_table[] = {
+    {193, "QZS1", 0, L6_SVC_CLAS, -1, 0},         {194, "QZS2", 0, L6_SVC_CLAS, -1, 204},
+    {195, "QZS4", 0, L6_SVC_CLAS, -1, 205},       {196, "QZS1R", 0, L6_SVC_CLAS, -1, 206},
+    {197, "QZS5", 0, L6_SVC_CLAS, -1, 207},       {199, "QZS3", 0, L6_SVC_CLAS, -1, 209},
+    {200, "QZS6", 0, L6_SVC_MADOCA_IONO, 0, 210}, {201, "QZS7", 0, L6_SVC_MADOCA_IONO, 1, 211},
+    {204, "QZS2", 1, L6_SVC_MADOCA, -1, 194},     {205, "QZS4", 1, L6_SVC_MADOCA, -1, 195},
+    {206, "QZS1R", 1, L6_SVC_MADOCA, -1, 196},    {207, "QZS5", 1, L6_SVC_MADOCA, -1, 197},
+    {209, "QZS3", 1, L6_SVC_MADOCA, -1, 199},     {210, "QZS6", 1, L6_SVC_MADOCA, -1, 200},
+    {211, "QZS7", 1, L6_SVC_MADOCA, -1, 201},
+};
+
 extern int l6_is_null(const uint8_t* frame) {
     int i;
 
@@ -50,6 +66,32 @@ extern int l6_parse_header(const uint8_t* frame, l6_header_t* h) {
         h->svc = L6_SVC_UNKNOWN;
     }
     return 1;
+}
+
+extern const l6_prn_info_t* l6_prn_info(int prn) {
+    size_t i;
+
+    for (i = 0; i < sizeof(l6_prn_table) / sizeof(l6_prn_table[0]); i++) {
+        if (l6_prn_table[i].prn == prn) {
+            return l6_prn_table + i;
+        }
+    }
+    return NULL;
+}
+
+extern int l6_service_expected(const l6_header_t* h) {
+    const l6_prn_info_t* info = l6_prn_info(h->prn);
+
+    if (h->svc == L6_SVC_NULL) {
+        return 1;
+    }
+    if (!info) {
+        return 0;
+    }
+    if (info->l6e) {
+        return h->svc == L6_SVC_MADOCA || h->svc == L6_SVC_QZNMA;
+    }
+    return h->svc == info->svc;
 }
 
 extern const char* l6_service_name(l6_service_t svc) {

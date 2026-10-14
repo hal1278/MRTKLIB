@@ -63,14 +63,20 @@ than the threaded default and does **not** change the algorithm — only
 reduction determinism — so reference tolerances may need re-baselining when
 switching providers.
 
-### P-03 — `trace()` is compiled out unless `-DTRACE` is defined
+### P-03 — Trace output needs an enabled destination
 
-The build does not define `TRACE`, so `trace(level, ...)` calls are no-op
-macros. Adding `trace(NULL, 2, "...")` for debugging will produce no output.
+The CMake build defines `TRACE`. `trace()` and `tracet()` write to a trace
+file opened by the program, at the level selected with `tracelevel()`, or to
+an independently enabled sink registered with `tracesink()`. Dump functions
+remain file-only. Without `TRACE`, all trace functions are no-ops.
 
-Use `fprintf(stderr, ...)` for debug print. Always remove the lines before
-committing — leftover stderr prints are noisy in CI logs and may be flagged
-by review.
+For CLI debugging, use `mrtk run --trace 2` (writes
+`rtkrcv_YYYYMMDDhhmm.trace`) or `mrtk relay --trace 2` (writes
+`str2str.trace` by default); see the [CLI guide](../guide/cli.md).
+
+Prefer `trace()` over `fprintf(stderr, ...)` for debug output. Always remove
+temporary stderr prints before committing — leftover stderr prints are noisy
+in CI logs and may be flagged by review.
 
 ---
 

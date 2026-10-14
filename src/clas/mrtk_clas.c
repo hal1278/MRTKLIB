@@ -3099,6 +3099,13 @@ extern int clas_input_cssr(clas_ctx_t* ctx, uint8_t data, int ch) {
     l6->nbyte = 0;
 
     l6_parse_header(l6->fbuff, &hdr);
+    if (hdr.svc != L6_SVC_CLAS && hdr.svc != L6_SVC_NULL) {
+        /* MADOCA-PPP / QZNMA / reserved-vendor frame on a CLAS input: skip it
+         * without touching the subframe assembly or the delivery state (null
+         * messages keep their existing path until #344) */
+        trace(NULL, 3, "clas_input_cssr: skip %s frame prn=%d ch=%d\n", l6_service_name(hdr.svc), hdr.prn, ch);
+        return 0;
+    }
     if (hdr.alert != 0) {
         trace(NULL, 1, "CSSR frame alert!: ch=%d\n", ch);
     }

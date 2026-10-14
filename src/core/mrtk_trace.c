@@ -28,8 +28,52 @@
 #ifdef TRACE
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+struct mrtk_trace_sink {
+    mrtk_trace_sink_cb_t fn;
+    void* arg;
+    int max_level;
+    atomic_int level;
+};
+
+extern int tracesink(mrtk_ctx_t* ctx, mrtk_trace_sink_cb_t fn, void* arg, int max_level) {
+    mrtk_ctx_t* c = CTX(ctx);
+    mrtk_trace_sink_t* sink;
+
+    if (!c || !fn || max_level < 1 || c->trace_sink) {
+        return 0;
+    }
+    if (!(sink = (mrtk_trace_sink_t*)malloc(sizeof(mrtk_trace_sink_t)))) {
+        return 0;
+    }
+    sink->fn = fn;
+    sink->arg = arg;
+    sink->max_level = max_level;
+    atomic_init(&sink->level, 0);
+    c->trace_sink = sink;
+    return 1;
+}
+extern int tracesinklevel(mrtk_ctx_t* ctx, int level) {
+    mrtk_ctx_t* c = CTX(ctx);
+
+    if (!c || !c->trace_sink || level < 0 || level > c->trace_sink->max_level) {
+        return 0;
+    }
+    atomic_store_explicit(&c->trace_sink->level, level, memory_order_relaxed);
+    return 1;
+}
+/* Keep the message buffer off the file-only trace path's stack. */
+static void trace_sink_message(mrtk_trace_sink_t* sink, int level, const char* format, va_list ap) {
+    char msg[MRTK_TRACE_SINK_MSGLEN];
+
+    vsnprintf(msg, sizeof(msg), format, ap);
+    msg[sizeof(msg) - 1] = '\0';
+    sink->fn(sink->arg, level, msg);
+}
 
 extern void traceopen(mrtk_ctx_t* ctx, const char* file) {
     mrtk_ctx_t* c = CTX(ctx);
@@ -77,31 +121,54 @@ extern void tracelevel(mrtk_ctx_t* ctx, int level) {
 }
 extern void trace(mrtk_ctx_t* ctx, int level, const char* format, ...) {
     mrtk_ctx_t* c = CTX(ctx);
+    int file, sink;
     va_list ap;
 
-    if (!c || !c->trace_fp || level < 1 || level > c->trace_level) {
+    if (!c || level < 1) {
         return;
     }
-
-    va_start(ap, format);
-    vfprintf(c->trace_fp, format, ap);
-    va_end(ap);
-    fflush(c->trace_fp);
+    file = c->trace_fp && level <= c->trace_level;
+    sink = c->trace_sink && level <= atomic_load_explicit(&c->trace_sink->level, memory_order_relaxed);
+    if (!file && !sink) {
+        return;
+    }
+    if (file) {
+        va_start(ap, format);
+        vfprintf(c->trace_fp, format, ap);
+        va_end(ap);
+        fflush(c->trace_fp);
+    }
+    if (sink) {
+        va_start(ap, format);
+        trace_sink_message(c->trace_sink, level, format, ap);
+        va_end(ap);
+    }
 }
 extern void tracet(mrtk_ctx_t* ctx, int level, const char* format, ...) {
     mrtk_ctx_t* c = CTX(ctx);
+    int file, sink;
     va_list ap;
 
-    if (!c || !c->trace_fp || level < 1 || level > c->trace_level) {
+    if (!c || level < 1) {
         return;
     }
-
-    fprintf(c->trace_fp, "%d %9.3f: ", level, (tickget() - c->tick_trace) / 1000.0);
-
-    va_start(ap, format);
-    vfprintf(c->trace_fp, format, ap);
-    va_end(ap);
-    fflush(c->trace_fp);
+    file = c->trace_fp && level <= c->trace_level;
+    sink = c->trace_sink && level <= atomic_load_explicit(&c->trace_sink->level, memory_order_relaxed);
+    if (!file && !sink) {
+        return;
+    }
+    if (file) {
+        fprintf(c->trace_fp, "%d %9.3f: ", level, (tickget() - c->tick_trace) / 1000.0);
+        va_start(ap, format);
+        vfprintf(c->trace_fp, format, ap);
+        va_end(ap);
+        fflush(c->trace_fp);
+    }
+    if (sink) {
+        va_start(ap, format);
+        trace_sink_message(c->trace_sink, level, format, ap);
+        va_end(ap);
+    }
 }
 extern void tracemat(mrtk_ctx_t* ctx, int level, const double* A, int n, int m, int p, int q) {
     mrtk_ctx_t* c = CTX(ctx);
@@ -255,6 +322,18 @@ extern void traceb(mrtk_ctx_t* ctx, int level, const uint8_t* p, int n) {
     fflush(c->trace_fp);
 }
 #else
+extern int tracesink(mrtk_ctx_t* ctx, mrtk_trace_sink_cb_t fn, void* arg, int max_level) {
+    (void)ctx;
+    (void)fn;
+    (void)arg;
+    (void)max_level;
+    return 0;
+}
+extern int tracesinklevel(mrtk_ctx_t* ctx, int level) {
+    (void)ctx;
+    (void)level;
+    return 0;
+}
 extern void traceopen(mrtk_ctx_t* ctx, const char* file) {
     (void)ctx;
     (void)file;

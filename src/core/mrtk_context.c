@@ -41,6 +41,7 @@ mrtk_ctx_t* mrtk_ctx_create(void) {
     ctx->trace_level = 0;
     ctx->trace_fp = NULL;
     ctx->tick_trace = 0;
+    ctx->trace_sink = NULL;
     ctx->user_data = NULL;
     ctx->cb_showmsg = NULL;
 
@@ -58,6 +59,7 @@ void mrtk_ctx_destroy(mrtk_ctx_t* ctx) {
         ctx->trace_fp = NULL;
     }
 
+    free(ctx->trace_sink);
     memset(ctx, 0, sizeof(mrtk_ctx_t));
     free(ctx);
 }
