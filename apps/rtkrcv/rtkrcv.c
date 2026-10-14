@@ -1421,7 +1421,7 @@ static void* con_thread(void* arg) {
                           "save",     "log",    "help",    "?",        "exit",   "shutdown",  ""};
     con_t* con = (con_t*)arg;
     int i, j, narg;
-    char buff[MAXCMD], *args[MAXARG], *p;
+    char buff[MAXCMD], *args[MAXARG], *p, *save;
 
     trace(NULL, 3, "console_thread:\n");
 
@@ -1448,9 +1448,9 @@ static void* con_thread(void* arg) {
             cmd_exec(buff + 1, con->vt);
             continue;
         }
-        /* parse command */
+        /* parse command (strtok_r: consoles run in parallel threads) */
         narg = 0;
-        for (p = strtok(buff, " \t\n"); p && narg < MAXARG; p = strtok(NULL, " \t\n")) {
+        for (p = strtok_r(buff, " \t\n", &save); p && narg < MAXARG; p = strtok_r(NULL, " \t\n", &save)) {
             args[narg++] = p;
         }
         if (narg == 0) {
