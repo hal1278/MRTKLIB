@@ -51,7 +51,9 @@ extern "C" {
  * The callback runs in the tracing thread, possibly concurrently and while
  * library locks (server or stream locks, for example) are held. It must be
  * thread-safe, return quickly, and must not call trace functions or acquire
- * locks the library may hold while tracing.
+ * locks the library may hold while tracing. The callback and its argument
+ * must stay valid until every thread that traces with the context has
+ * stopped; setting the level to 0 does not wait for callbacks already running.
  *
  * @param[in] arg    User argument supplied to tracesink()
  * @param[in] level  Trace call level

@@ -221,7 +221,15 @@ static void dumps_not_delivered(mrtk_ctx_t* ctx, capture_t* c) {
     uint8_t b = 1;
     CHECK(nav != NULL, "nav allocation failed");
     if (!nav) return;
-    if (enable(ctx, c, 2)) {
+    /* one record of each kind, so that every dump function has rows to write */
+    nav->eph = (eph_t*)calloc(1, sizeof(eph_t));
+    nav->geph = (geph_t*)calloc(1, sizeof(geph_t));
+    nav->seph = (seph_t*)calloc(1, sizeof(seph_t));
+    nav->peph = (peph_t*)calloc(1, sizeof(peph_t));
+    nav->pclk = (pclk_t*)calloc(1, sizeof(pclk_t));
+    CHECK(nav->eph && nav->geph && nav->seph && nav->peph && nav->pclk, "nav record allocation failed");
+    nav->n = nav->ng = nav->ns = nav->ne = nav->nc = 1;
+    if (!fails && enable(ctx, c, 2)) {
         tracemat(ctx, 1, &a, 1, 1, 8, 2);
         traceobs(ctx, 1, &obs, 1);
         tracenav(ctx, 1, nav);
@@ -232,6 +240,11 @@ static void dumps_not_delivered(mrtk_ctx_t* ctx, capture_t* c) {
         traceb(ctx, 1, &b, 1);
         CHECK(c->count == 0, "dump delivered to sink");
     }
+    free(nav->eph);
+    free(nav->geph);
+    free(nav->seph);
+    free(nav->peph);
+    free(nav->pclk);
     free(nav);
 }
 
