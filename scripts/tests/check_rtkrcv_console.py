@@ -932,7 +932,7 @@ def mutation_checks(args):
             console.run("option console-soltype").startswith(" "),
             "console option has no modified mark",
         )
-        # D-43: non-console set is accepted with restart notice both stopped/running.
+        # Stopped changes retain the existing restart notice and modified mark.
         console.expect("set pos1-elmask 15", "option pos1-elmask changed. restart to enable it")
         console.check(
             console.run("option pos1-elmask").startswith("*"), "non-console option modified mark"
@@ -957,7 +957,9 @@ def mutation_checks(args):
             lambda s: _STATE_PATTERN.search(s)[1] == "run",
             "state run after start",
         )
-        console.expect("set pos1-elmask 15", "option pos1-elmask changed. restart to enable it")
+        before = console.run("option pos1-elmask")
+        console.expect("set pos1-elmask 10", "option not changed: stop rtk server first")
+        console.check(console.run("option pos1-elmask") == before, "running set preserves option")
         solution_checks(console)
         clock = _TIME_PATTERN.search(console.run("status"))[1]
         wait_command(console, "status", lambda s: _TIME_PATTERN.search(s)[1] != clock)
@@ -1084,6 +1086,23 @@ def transitional_displays(console):
     console.check(console.response() == "^C\n\n", "refused error has no error rows")
 
 
+def configuration_refusals(console, path, before):
+    """Check changes are refused while console settings remain available."""
+    console.expect("set pos1-elmask 10", "option not changed: stop rtk server first")
+    console.expect(f"load {path}", "options not loaded: stop rtk server first")
+    console.expect("load absent.conf", "options not loaded: stop rtk server first")
+    text = console.run("option pos1-elmask")
+    console.check(text == before and text.startswith(" "), "refusal preserves value and mark", text)
+    console.expect("set console-soltype 1", "option console-soltype changed.")
+    text = console.run("option console-soltype")
+    console.check(
+        text.startswith(" ") and re.search(r"=\s*deg\b", text),
+        "console change applies without a modified mark",
+        text,
+    )
+    console.expect("set pos1-elmask", "option not changed: stop rtk server first")
+
+
 def lifecycle_checks(args):
     """Hold transitions at file gates and check a second console's responses."""
     with Server(args) as server:
@@ -1099,6 +1118,9 @@ def lifecycle_checks(args):
         first.expect(
             "set pos1-correction qzs-madoca", "option pos1-correction changed. restart to enable it"
         )
+        load_path = server.directory / "stage2.conf"
+        load_path.write_text("pos1-elmask =10\nconsole-soltype =2\n")
+        before = second.run("option pos1-elmask")
         gates = {}
         for phase in ("start", "stop"):
             entered = server.directory / f"entered-{phase}"
@@ -1115,10 +1137,10 @@ def lifecycle_checks(args):
             )
             gates[phase] = (entered, release)
 
-        def reached(phase):
+        def reached(phase, observer=second):
             # Each complete status prompt yields to the server; the file proves arrival.
             wait_command(
-                second,
+                observer,
                 "status",
                 lambda _: gates[phase][0].exists(),
                 f"{phase} command marker",
@@ -1128,11 +1150,19 @@ def lifecycle_checks(args):
             for command in ("start", "stop", "restart"):
                 second.expect(command, f"rtk server busy ({state})")
             transitional_displays(second)
+            configuration_refusals(second, load_path, before)
 
         try:
             first.begin("start")
             reached("start")
             busy("starting")
+            options(second, second.run("option"))
+            second.expect("save starting.conf", "options saved to starting.conf")
+            second.check(
+                (server.directory / "starting.conf").is_file(), "save during start completes"
+            )
+            login_console = server.connect()
+            login_console.close_command("exit")
             gates["start"][1].touch()
             text = first.response()
             first.check(text.endswith("rtk server start\n"), "released start succeeds", text)
@@ -1142,6 +1172,7 @@ def lifecycle_checks(args):
             second.check(
                 _STATE_PATTERN.search(second.run("status"))[1] == "run", "start published run"
             )
+            configuration_refusals(second, load_path, before)
 
             first.begin("stop")
             reached("stop")
@@ -1154,14 +1185,26 @@ def lifecycle_checks(args):
                 _STATE_PATTERN.search(second.run("status"))[1] == "stop", "stop published stop"
             )
 
-            # A stopped restart goes straight to starting.
+            # Recheck application when a start claims during an interactive prompt.
+            second.begin("set pos1-elmask")
+            second.read_until(lambda s: s.endswith(": "), "stopped interactive set prompt")
             gates["start"][1].unlink()
             first.begin("restart")
-            reached("start")
+            observer = server.connect()
+            reached("start", observer)
+            second.sock.sendall(b"10\r")
+            text = second.response()
+            second.check(
+                text.endswith("10\noption not changed: stop rtk server first\n"),
+                "interactive set rechecks after a start claims",
+                text,
+            )
             busy("starting")
             gates["start"][1].touch()
             text = first.response()
             first.check(text.endswith("rtk server restart\n"), "stopped restart succeeds", text)
+            # system() may inherit the observer socket until the shell exits.
+            observer.close_command("exit")
 
             # A running restart owns both stopping and starting without a claim gap.
             for entered, release in gates.values():
@@ -1209,6 +1252,17 @@ def password_checks(args):
             text == "*" * len("console-secret") + "\n" + PROMPT,
             "exact masked correct password echo and command prompt",
         )
+        other = server.connect()
+        console.expect("set console-passwd updated-secret", "option console-passwd changed.")
+        other.command = "<updated password>"
+        other.raw = b""
+        other.sock.sendall(b"updated-secret\r")
+        text = other.read_until(lambda s: s.endswith(PROMPT), "updated password login prompt")
+        other.check(
+            text == "*" * len("updated-secret") + "\n" + PROMPT,
+            "login copies the current password after input",
+        )
+        other.close_command("exit")
         server.shutdown(console)
 
 

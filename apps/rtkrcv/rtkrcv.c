@@ -318,11 +318,12 @@ static const rcvcmd_io_t process_io = {NULL, process_notice, console_confirm_ove
 
 /* login ---------------------------------------------------------------------*/
 static int login(vt_t* vt) {
-    char buff[256];
+    char buff[256], password[1024];
 
-    trace(NULL, 3, "login: passwd=%s type=%d\n", rcvcmd_password(cmd), vt->type);
+    rcvcmd_password(cmd, password, sizeof(password));
+    trace(NULL, 3, "login: passwd=%s type=%d\n", password, vt->type);
 
-    if (!*rcvcmd_password(cmd) || !vt->type) {
+    if (!*password || !vt->type) {
         return 1;
     }
 
@@ -336,7 +337,8 @@ static int login(vt_t* vt) {
             return 0;
         }
         vt->blind = 0;
-        if (!strcmp(buff, rcvcmd_password(cmd))) {
+        rcvcmd_password(cmd, password, sizeof(password));
+        if (!strcmp(buff, password)) {
             break;
         }
         vt_printf(vt, "\ninvalid password\n");
@@ -1220,6 +1222,7 @@ static void cmd_option(char** args, int narg, vt_t* vt) {
 
     trace(NULL, 3, "cmd_option:\n");
 
+    rcvcmd_lock_options(cmd);
     for (i = 0; *rcvopts[i].name; i++) {
         if (narg >= 2 && !strstr(rcvopts[i].name, args[1])) {
             continue;
@@ -1250,11 +1253,13 @@ static void cmd_option(char** args, int narg, vt_t* vt) {
         }
         vt_printf(vt, "%s%s\n", rcvcmd_option_modified(cmd, 1, i) ? "*" : " ", buff);
     }
+    rcvcmd_unlock_options(cmd);
 }
 /* set command ---------------------------------------------------------------*/
 static void cmd_set(char** args, int narg, vt_t* vt) {
     opt_t* opt;
     rcvcmd_option_t option;
+    rcvcmd_config_result_t result;
     char buff[MAXSTR];
 
     trace(NULL, 3, "cmd_set:\n");
@@ -1269,6 +1274,10 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
     }
     opt = option.opt;
     if (narg < 3) {
+        if (!rcvcmd_can_set_option(cmd, &option)) {
+            vt_printf(vt, "option not changed: stop rtk server first\n");
+            return;
+        }
         vt_printf(vt, "%s", opt->name);
         if (*opt->comment) {
             vt_printf(vt, " (%s)", opt->comment);
@@ -1282,13 +1291,18 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
     }
 
     chop(buff);
-    if (!rcvcmd_set_option(cmd, &option, buff)) {
+    result = rcvcmd_set_option(cmd, &option, buff);
+    if (result == RCVCMD_CONFIG_REFUSED) {
+        vt_printf(vt, "option not changed: stop rtk server first\n");
+        return;
+    }
+    if (result == RCVCMD_CONFIG_ERROR) {
         vt_printf(vt, "invalid option value: %s %s\n", opt->name, buff);
         return;
     }
 
     vt_printf(vt, "option %s changed.", opt->name);
-    if (rcvcmd_mark_option_modified(cmd, &option)) {
+    if (rcvcmd_option_requires_restart(&option)) {
         vt_printf(vt, " restart to enable it");
     }
     vt_printf(vt, "\n");
@@ -1296,6 +1310,7 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
 /* load command --------------------------------------------------------------*/
 static void cmd_load(char** args, int narg, vt_t* vt) {
     char file[MAXSTR] = "";
+    rcvcmd_config_result_t result;
 
     trace(NULL, 3, "cmd_load:\n");
 
@@ -1304,7 +1319,12 @@ static void cmd_load(char** args, int narg, vt_t* vt) {
     } else {
         sprintf(file, "%s/%s", OPTSDIR, OPTSFILE);
     }
-    if (!rcvcmd_load(cmd, file)) {
+    result = rcvcmd_load(cmd, file);
+    if (result == RCVCMD_CONFIG_REFUSED) {
+        vt_printf(vt, "options not loaded: stop rtk server first\n");
+        return;
+    }
+    if (result == RCVCMD_CONFIG_ERROR) {
         vt_printf(vt, "no options file: %s\n", file);
         return;
     }

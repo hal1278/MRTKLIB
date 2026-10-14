@@ -39,7 +39,10 @@
  * Start/stop/restart exclude readers for the whole transition. Readers accepted
  * while stopped retain the last values; refused reads zero caller storage.
  * Never take server/stream locks or call adapters under the publish mutex.
- * Configuration serialization and events are not implemented yet.
+ * A configuration mutex serializes option operations and console settings.
+ * Configuration -> publish lock is allowed; never wait for configuration while
+ * holding the publish mutex. Start releases configuration before preparation.
+ * Events are not implemented yet.
  * Stream formats use the server lock, separately from stream field copies.
  * The legacy unlocked cyclic-solution discard is retained until solution-event
  * work (D-17).
@@ -156,8 +159,12 @@ void rcvcmd_close(rcvcmd_t* cmd);
 /** @brief Save navigation on normal shutdown, before trace/context teardown. */
 void rcvcmd_save_navigation(rcvcmd_t* cmd);
 
-/** @brief Read the configured console password. */
-const char* rcvcmd_password(rcvcmd_t* cmd);
+/** @brief Copy the configured console password under the configuration mutex.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] password Caller-owned storage.
+ * @param[in] size Storage size including the terminating byte.
+ */
+void rcvcmd_password(rcvcmd_t* cmd, char* password, size_t size);
 /** @brief Read the configured console time format. */
 int rcvcmd_time_type(rcvcmd_t* cmd);
 /** @brief Read the configured console solution format. */
@@ -169,19 +176,31 @@ int rcvcmd_solution_flags(rcvcmd_t* cmd);
 /** @brief Read the requested monitor port. */
 int rcvcmd_monitor_port(rcvcmd_t* cmd);
 
-/** @brief Get the ordered option table (system=0: receiver, system=1: core system). */
+/** @brief Lock configuration for a complete adapter option listing. */
+void rcvcmd_lock_options(rcvcmd_t* cmd);
+/** @brief Release configuration after the option listing. */
+void rcvcmd_unlock_options(rcvcmd_t* cmd);
+/** @brief Get the ordered option table while the listing lock is held.
+ * system=0: receiver, system=1: core system. */
 const opt_t* rcvcmd_options(rcvcmd_t* cmd, int system);
-/** @brief Read the modified flag for an entry in the selected option table. */
+/** @brief Read a modified flag while the listing lock is held. */
 int rcvcmd_option_modified(rcvcmd_t* cmd, int system, int index);
 /** @brief Find a receiver option first, then a system option; return 1 if found. */
 int rcvcmd_find_option(rcvcmd_t* cmd, const char* name, rcvcmd_option_t* option);
-/** @brief Apply a value and refresh processing/file options; return 0 for an invalid value. */
-int rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option, const char* value);
-/** @brief Mark a non-console option modified; return 1 if restart text is required.
- * Called after the adapter prints the changed-option text to retain the old ordering. */
-int rcvcmd_mark_option_modified(rcvcmd_t* cmd, const rcvcmd_option_t* option);
-/** @brief Load system then receiver options, preserving partial changes on failure. */
-int rcvcmd_load(rcvcmd_t* cmd, const char* file);
+typedef enum { RCVCMD_CONFIG_SUCCESS, RCVCMD_CONFIG_ERROR, RCVCMD_CONFIG_REFUSED } rcvcmd_config_result_t;
+
+/** @brief Return whether the option is non-console and needs the restart notice. */
+int rcvcmd_option_requires_restart(const rcvcmd_option_t* option);
+/** @brief Check whether set may prompt; application rechecks after input. */
+int rcvcmd_can_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option);
+/** @brief Apply and mark a value under configuration exclusion.
+ * @return Success, invalid value or refusal because a non-console change needs stop.
+ */
+rcvcmd_config_result_t rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option, const char* value);
+/** @brief Load options while stopped, preserving partial changes on failure.
+ * @return Success, file error or refusal because changing options needs stop.
+ */
+rcvcmd_config_result_t rcvcmd_load(rcvcmd_t* cmd, const char* file);
 /** @brief Write receiver then system options with the original comment; return 1 on success. */
 int rcvcmd_save(rcvcmd_t* cmd, const char* file);
 

@@ -62,6 +62,7 @@ typedef struct {
 } rcvcmd_settings_t;
 
 struct rcvcmd {
+    pthread_mutex_t config_lock;
     pthread_mutex_t publish_lock;
     pthread_cond_t publish_cond;
     rcvcmd_lifecycle_t lifecycle;
@@ -225,12 +226,20 @@ rcvcmd_t* rcvcmd_create(void) {
         instance.svr = NULL;
         return NULL;
     }
+    if (pthread_mutex_init(&instance.config_lock, NULL)) {
+        pthread_cond_destroy(&instance.publish_cond);
+        pthread_mutex_destroy(&instance.publish_lock);
+        free(instance.svr);
+        instance.svr = NULL;
+        return NULL;
+    }
     memset(&instance.lifecycle, 0, sizeof(instance.lifecycle));
     instance.claimed = instance.readers = 0;
     return &instance;
 }
 
 void rcvcmd_destroy(rcvcmd_t* cmd) {
+    pthread_mutex_destroy(&cmd->config_lock);
     pthread_cond_destroy(&cmd->publish_cond);
     pthread_mutex_destroy(&cmd->publish_lock);
     free(cmd->svr);
@@ -296,12 +305,28 @@ void rcvcmd_save_navigation(rcvcmd_t* cmd) {
     }
 }
 
-const char* rcvcmd_password(rcvcmd_t* cmd) { return cmd->passwd; }
-int rcvcmd_time_type(rcvcmd_t* cmd) { return cmd->timetype; }
-int rcvcmd_solution_type(rcvcmd_t* cmd) { return cmd->soltype; }
-int rcvcmd_solution_height(rcvcmd_t* cmd) { return cmd->settings.solopt[0].height; }
-int rcvcmd_solution_flags(rcvcmd_t* cmd) { return cmd->solflag; }
+void rcvcmd_password(rcvcmd_t* cmd, char* password, size_t size) {
+    pthread_mutex_lock(&cmd->config_lock);
+    snprintf(password, size, "%s", cmd->passwd);
+    pthread_mutex_unlock(&cmd->config_lock);
+}
+
+static int read_console_setting(rcvcmd_t* cmd, const int* setting) {
+    int value;
+    pthread_mutex_lock(&cmd->config_lock);
+    value = *setting;
+    pthread_mutex_unlock(&cmd->config_lock);
+    return value;
+}
+
+int rcvcmd_time_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->timetype); }
+int rcvcmd_solution_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->soltype); }
+int rcvcmd_solution_height(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->settings.solopt[0].height); }
+int rcvcmd_solution_flags(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->solflag); }
 int rcvcmd_monitor_port(rcvcmd_t* cmd) { return cmd->moniport; }
+
+void rcvcmd_lock_options(rcvcmd_t* cmd) { pthread_mutex_lock(&cmd->config_lock); }
+void rcvcmd_unlock_options(rcvcmd_t* cmd) { pthread_mutex_unlock(&cmd->config_lock); }
 
 const opt_t* rcvcmd_options(rcvcmd_t* cmd, int system) { return system ? sysopts : cmd->rcvopts; }
 int rcvcmd_option_modified(rcvcmd_t* cmd, int system, int index) {
@@ -324,21 +349,58 @@ int rcvcmd_find_option(rcvcmd_t* cmd, const char* name, rcvcmd_option_t* option)
     return 1;
 }
 
-int rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option, const char* value) {
-    if (!str2opt(option->opt, value)) {
+static int configuration_stopped(rcvcmd_t* cmd) {
+    int stopped;
+    pthread_mutex_lock(&cmd->publish_lock);
+    stopped = cmd->lifecycle.state == RCVCMD_STOPPED && !cmd->claimed;
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return stopped;
+}
+
+int rcvcmd_option_requires_restart(const rcvcmd_option_t* option) {
+    return strncmp(option->opt->name, "console-", 8) != 0;
+}
+
+int rcvcmd_can_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option) {
+    return !rcvcmd_option_requires_restart(option) || configuration_stopped(cmd);
+}
+
+static int begin_configuration_change(rcvcmd_t* cmd) {
+    if (!configuration_stopped(cmd)) {
         return 0;
     }
-    getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+    pthread_mutex_lock(&cmd->config_lock);
+    if (!configuration_stopped(cmd)) {
+        pthread_mutex_unlock(&cmd->config_lock);
+        return 0;
+    }
     return 1;
 }
 
-int rcvcmd_mark_option_modified(rcvcmd_t* cmd, const rcvcmd_option_t* option) {
-    int* modf = option->system ? cmd->modflgs + option->index : cmd->modflgr + option->index;
-    if (strncmp(option->opt->name, "console", 7)) {
-        *modf = 1;
-        return 1;
+rcvcmd_config_result_t rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option, const char* value) {
+    rcvcmd_config_result_t result = RCVCMD_CONFIG_ERROR;
+    int restart = rcvcmd_option_requires_restart(option);
+
+    if (restart) {
+        if (!begin_configuration_change(cmd)) {
+            return RCVCMD_CONFIG_REFUSED;
+        }
+    } else {
+        pthread_mutex_lock(&cmd->config_lock);
     }
-    return 0;
+    if (str2opt(option->opt, value)) {
+        if (restart) {
+            getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+            if (option->system) {
+                cmd->modflgs[option->index] = 1;
+            } else {
+                cmd->modflgr[option->index] = 1;
+            }
+        }
+        result = RCVCMD_CONFIG_SUCCESS;
+    }
+    pthread_mutex_unlock(&cmd->config_lock);
+    return result;
 }
 
 static void rcvcmd_clear_modified(rcvcmd_t* cmd) {
@@ -351,28 +413,33 @@ static void rcvcmd_clear_modified(rcvcmd_t* cmd) {
     }
 }
 
-int rcvcmd_load(rcvcmd_t* cmd, const char* file) {
-    resetsysopts();
-    if (!loadopts(file, sysopts)) {
-        return 0;
-    }
-    getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+rcvcmd_config_result_t rcvcmd_load(rcvcmd_t* cmd, const char* file) {
+    rcvcmd_config_result_t result = RCVCMD_CONFIG_ERROR;
 
-    if (!loadopts(file, cmd->rcvopts)) {
-        return 0;
+    if (!begin_configuration_change(cmd)) {
+        return RCVCMD_CONFIG_REFUSED;
     }
-    return 1;
+    resetsysopts();
+    if (loadopts(file, sysopts)) {
+        getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+        if (loadopts(file, cmd->rcvopts)) {
+            result = RCVCMD_CONFIG_SUCCESS;
+        }
+    }
+    pthread_mutex_unlock(&cmd->config_lock);
+    return result;
 }
 
 int rcvcmd_save(rcvcmd_t* cmd, const char* file) {
     char comment[256], s[64];
+    int saved;
     time2str(utc2gpst(timeget()), s, 0);
     sprintf(comment, "%s options (%s, %s ver.%s)", PRGNAME, s, MRTKLIB_SOFTNAME, MRTKLIB_VERSION_STRING);
+    pthread_mutex_lock(&cmd->config_lock);
     setsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
-    if (!saveopts(file, "w", comment, cmd->rcvopts) || !saveopts(file, "a", NULL, sysopts)) {
-        return 0;
-    }
-    return 1;
+    saved = saveopts(file, "w", comment, cmd->rcvopts) && saveopts(file, "a", NULL, sysopts);
+    pthread_mutex_unlock(&cmd->config_lock);
+    return saved;
 }
 
 /* adapter notice ------------------------------------------------------------*/
@@ -688,6 +755,8 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             }
         }
         if (operation != LIFECYCLE_STOP) {
+            pthread_mutex_lock(&cmd->config_lock);
+            pthread_mutex_unlock(&cmd->config_lock);
             error = start_server(cmd, io);
         }
 
