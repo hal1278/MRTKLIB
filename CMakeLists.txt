@@ -350,6 +350,17 @@ add_test(NAME utest_l6_header COMMAND utest_l6_header
          WORKING_DIRECTORY ${_UTEST_DIR})
 set_tests_properties(utest_l6_header PROPERTIES LABELS "utest")
 
+# RTK server lifecycle: isolate crashes and hangs to one case per process.
+add_executable(utest_rtksvr_lifecycle ${_UTEST_DIR}/utest_rtksvr_lifecycle.c)
+target_compile_options(utest_rtksvr_lifecycle PRIVATE -std=c11)
+target_link_libraries(utest_rtksvr_lifecycle PRIVATE mrtklib pthread)
+foreach(case start_state stop_after_start start_failure_cleanup stop_without_start double_stop)
+    add_test(NAME utest_rtksvr_lifecycle_${case}
+             COMMAND utest_rtksvr_lifecycle ${case} ${_UTEST_DIR}/l6_frames.bin
+             WORKING_DIRECTORY ${_UTEST_DIR})
+    set_tests_properties(utest_rtksvr_lifecycle_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
+endforeach()
+
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)
 # Override global -ansi (=C90) for this target, same as mrtklib target.
