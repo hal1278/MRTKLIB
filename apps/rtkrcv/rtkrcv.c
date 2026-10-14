@@ -463,27 +463,41 @@ static void prsolution(vt_t* vt, const sol_t* sol, const double* rb) {
 }
 /* print status --------------------------------------------------------------*/
 static void prstatus(vt_t* vt) {
-    rcvcmd_status_t data;
-    rtk_t* rtk = &data.rtk;
+    rcvcmd_status_t* data;
+    rtk_t* rtk;
     const char* svrstate[] = {"stop", "run"};
     const char* sol[] = {"-", "fix", "float", "SBAS", "DGPS", "single", "PPP", ""};
     const char* mode[] = {"single",     "DGPS",      "kinematic", "static",  "moving-base",   "fixed",  "PPP-kinema",
                           "PPP-static", "PPP-fixed", "PPP-RTK",   "SSR2OSR", "SSR2OSR-fixed", "VRS-RTK"};
     const char* freq[] = {"-", "L1", "L1+L2", "L1+L2+L3", "L1+L2+L3+L4", "L1+L2+L3+L4+L5", ""};
-    uint32_t (*nmsg2)[100] = data.nmsg2, (*nmsg3)[400] = data.nmsg3;
+    uint32_t (*nmsg2)[100], (*nmsg3)[400];
     int i, j, n;
-    int* nb = data.nb;
-    int (*nmsg)[10] = data.nmsg;
+    int* nb;
+    int (*nmsg)[10];
     char tstr[64], s[1024], *p, tmp[64];
     double runtime, rt[3] = {0}, dop[4] = {0}, rr[3], bl1 = 0.0, bl2 = 0.0;
     double azel[MAXSAT * 2], pos[3], vel[3], *del;
-    double *x3 = data.x3, *P_diag = data.P_diag, *xa3 = data.xa3, *Pa_diag = data.Pa_diag;
+    double *x3, *P_diag, *xa3, *Pa_diag;
 
     trace(NULL, 4, "prstatus:\n");
 
-    rcvcmd_read_status(cmd, &data);
-    if (data.state) {
-        runtime = data.runtime;
+    if (!(data = (rcvcmd_status_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prstatus: snapshot allocation failed\n");
+        return;
+    }
+    rtk = &data->rtk;
+    nmsg2 = data->nmsg2;
+    nmsg3 = data->nmsg3;
+    nb = data->nb;
+    nmsg = data->nmsg;
+    x3 = data->x3;
+    P_diag = data->P_diag;
+    xa3 = data->xa3;
+    Pa_diag = data->Pa_diag;
+
+    rcvcmd_read_status(cmd, data);
+    if (data->state) {
+        runtime = data->runtime;
         rt[0] = floor(runtime / 3600.0);
         runtime -= rt[0] * 3600.0;
         rt[1] = floor(runtime / 60.0);
@@ -506,16 +520,16 @@ static void prstatus(vt_t* vt) {
     vt_printf(vt, "\n%s%-28s: %s%s\n", ESC_BOLD, "Parameter", "Value", ESC_RESET);
     sprintf(tmp, "%s version", MRTKLIB_SOFTNAME);
     vt_printf(vt, "%-28s: %s (git %s)\n", tmp, MRTKLIB_VERSION_STRING, mrtklib_git_hash_str);
-    vt_printf(vt, "%-28s: %d\n", "rtk server thread", data.thread);
-    vt_printf(vt, "%-28s: %s\n", "rtk server state", svrstate[data.state]);
-    vt_printf(vt, "%-28s: %d\n", "processing cycle (ms)", data.cycle);
+    vt_printf(vt, "%-28s: %d\n", "rtk server thread", data->thread);
+    vt_printf(vt, "%-28s: %s\n", "rtk server state", svrstate[data->state]);
+    vt_printf(vt, "%-28s: %d\n", "processing cycle (ms)", data->cycle);
     vt_printf(vt, "%-28s: %s\n", "positioning mode",
               rtk->opt.mode >= 0 && rtk->opt.mode < (int)(sizeof(mode) / sizeof(mode[0])) ? mode[rtk->opt.mode] : "?");
     vt_printf(vt, "%-28s: %s\n", "frequencies",
               rtk->opt.nf >= 0 && rtk->opt.nf < (int)(sizeof(freq) / sizeof(freq[0])) ? freq[rtk->opt.nf] : "?");
     vt_printf(vt, "%-28s: %02.0f:%02.0f:%04.1f\n", "accumulated time to run", rt[0], rt[1], rt[2]);
-    vt_printf(vt, "%-28s: %d\n", "cpu time for a cycle (ms)", data.cputime);
-    vt_printf(vt, "%-28s: %d\n", "missing obs data count", data.prcout);
+    vt_printf(vt, "%-28s: %d\n", "cpu time for a cycle (ms)", data->cputime);
+    vt_printf(vt, "%-28s: %d\n", "missing obs data count", data->prcout);
     vt_printf(vt, "%-28s: %d,%d\n", "bytes in input buffer", nb[0], nb[1]);
     for (i = 0; i < 3; i++) {
         sprintf(s, "# of input%d data", i + 1);
@@ -547,7 +561,7 @@ static void prstatus(vt_t* vt) {
         sprintf(tmp, "# of rtcm%d messages", i + 1);
         vt_printf(vt, "%-28s: %s\n", tmp, s);
     }
-    vt_printf(vt, "%-28s: %s\n", "solution status", sol[data.rtkstat]);
+    vt_printf(vt, "%-28s: %s\n", "solution status", sol[data->rtkstat]);
     time2str(rtk->sol.time, tstr, 9);
     vt_printf(vt, "%-28s: %s\n", "time of receiver clock rover", rtk->sol.time.time ? tstr : "-");
     vt_printf(vt, "%-28s: %.3f,%.3f,%.3f,%.3f\n", "time sys offset (ns)", rtk->sol.dtr[1] * 1e9, rtk->sol.dtr[2] * 1e9,
@@ -555,8 +569,8 @@ static void prstatus(vt_t* vt) {
     vt_printf(vt, "%-28s: %.3f\n", "solution interval (s)", rtk->tt);
     vt_printf(vt, "%-28s: %.3f\n", "age of differential (s)", rtk->sol.age);
     vt_printf(vt, "%-28s: %.3f\n", "ratio for ar validation", rtk->sol.ratio);
-    vt_printf(vt, "%-28s: %d\n", "# of satellites rover", data.nsat0);
-    vt_printf(vt, "%-28s: %d\n", "# of satellites base", data.nsat1);
+    vt_printf(vt, "%-28s: %d\n", "# of satellites rover", data->nsat0);
+    vt_printf(vt, "%-28s: %d\n", "# of satellites base", data->nsat1);
     vt_printf(vt, "%-28s: %d\n", "# of valid satellites", rtk->sol.ns);
     vt_printf(vt, "%-28s: %.1f,%.1f,%.1f,%.1f\n", "GDOP/PDOP/HDOP/VDOP", dop[0], dop[1], dop[2], dop[3]);
     vt_printf(vt, "%-28s: %d\n", "# of real estimated states", rtk->na);
@@ -571,14 +585,14 @@ static void prstatus(vt_t* vt) {
     vt_printf(vt, "%-28s: %.8f,%.8f,%.3f\n", "pos llh single (deg,m) rover", pos[0] * R2D, pos[1] * R2D, pos[2]);
     ecef2enu(pos, rtk->sol.rr + 3, vel);
     vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "vel enu (m/s) rover", vel[0], vel[1], vel[2]);
-    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz float (m) rover", data.has_x ? x3[0] : 0, data.has_x ? x3[1] : 0,
-              data.has_x ? x3[2] : 0);
-    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz float std (m) rover", data.has_P ? SQRT(P_diag[0]) : 0,
-              data.has_P ? SQRT(P_diag[1]) : 0, data.has_P ? SQRT(P_diag[2]) : 0);
-    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz fixed (m) rover", data.has_xa ? xa3[0] : 0,
-              data.has_xa ? xa3[1] : 0, data.has_xa ? xa3[2] : 0);
-    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz fixed std (m) rover", data.has_Pa ? SQRT(Pa_diag[0]) : 0,
-              data.has_Pa ? SQRT(Pa_diag[1]) : 0, data.has_Pa ? SQRT(Pa_diag[2]) : 0);
+    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz float (m) rover", data->has_x ? x3[0] : 0,
+              data->has_x ? x3[1] : 0, data->has_x ? x3[2] : 0);
+    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz float std (m) rover", data->has_P ? SQRT(P_diag[0]) : 0,
+              data->has_P ? SQRT(P_diag[1]) : 0, data->has_P ? SQRT(P_diag[2]) : 0);
+    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz fixed (m) rover", data->has_xa ? xa3[0] : 0,
+              data->has_xa ? xa3[1] : 0, data->has_xa ? xa3[2] : 0);
+    vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz fixed std (m) rover", data->has_Pa ? SQRT(Pa_diag[0]) : 0,
+              data->has_Pa ? SQRT(Pa_diag[1]) : 0, data->has_Pa ? SQRT(Pa_diag[2]) : 0);
     vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "pos xyz (m) base", rtk->rb[0], rtk->rb[1], rtk->rb[2]);
     if (norm(rtk->rb, 3) > 0.0) {
         ecef2pos(rtk->rb, pos);
@@ -586,7 +600,7 @@ static void prstatus(vt_t* vt) {
         pos[0] = pos[1] = pos[2] = 0.0;
     }
     vt_printf(vt, "%-28s: %.8f,%.8f,%.3f\n", "pos llh (deg,m) base", pos[0] * R2D, pos[1] * R2D, pos[2]);
-    vt_printf(vt, "%-28s: %d\n", "# of average single pos base", data.nave);
+    vt_printf(vt, "%-28s: %d\n", "# of average single pos base", data->nave);
     vt_printf(vt, "%-28s: %s\n", "ant type rover", rtk->opt.pcvr[0].type);
     del = rtk->opt.antdel[0];
     vt_printf(vt, "%-28s: %.3f %.3f %.3f\n", "ant delta rover", del[0], del[1], del[2]);
@@ -595,13 +609,13 @@ static void prstatus(vt_t* vt) {
     vt_printf(vt, "%-28s: %.3f %.3f %.3f\n", "ant delta base", del[0], del[1], del[2]);
     ecef2enu(pos, rtk->rb + 3, vel);
     vt_printf(vt, "%-28s: %.3f,%.3f,%.3f\n", "vel enu (m/s) base", vel[0], vel[1], vel[2]);
-    if (rtk->opt.mode > 0 && data.has_x && norm(x3, 3) > 0.0) {
+    if (rtk->opt.mode > 0 && data->has_x && norm(x3, 3) > 0.0) {
         for (i = 0; i < 3; i++) {
             rr[i] = x3[i] - rtk->rb[i];
         }
         bl1 = norm(rr, 3);
     }
-    if (rtk->opt.mode > 0 && data.has_xa && norm(xa3, 3) > 0.0) {
+    if (rtk->opt.mode > 0 && data->has_xa && norm(xa3, 3) > 0.0) {
         for (i = 0; i < 3; i++) {
             rr[i] = xa3[i] - rtk->rb[i];
         }
@@ -610,18 +624,25 @@ static void prstatus(vt_t* vt) {
     vt_printf(vt, "%-28s: %.3f\n", "baseline length float (m)", bl1);
     vt_printf(vt, "%-28s: %.3f\n", "baseline length fixed (m)", bl2);
     vt_printf(vt, "%-28s: %d\n", "monitor port", rcvcmd_monitor_port(cmd));
+    free(data);
 }
 /* print satellite -----------------------------------------------------------*/
 static void prsatellite(vt_t* vt, int sys, int nf) {
-    rcvcmd_satellite_t data;
-    const rtk_t* rtk = &data.rtk;
+    rcvcmd_satellite_t* data;
+    const rtk_t* rtk;
     double az, el;
     char id[32];
     int i, j, fix, frq[] = {1, 2, 5, 7, 8, 6};
 
     trace(NULL, 4, "prsatellite:\n");
 
-    rcvcmd_read_satellite(cmd, &data);
+    if (!(data = (rcvcmd_satellite_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prsatellite: snapshot allocation failed\n");
+        return;
+    }
+    rtk = &data->rtk;
+
+    rcvcmd_read_satellite(cmd, data);
     if (nf <= 0 || nf > NFREQ) {
         nf = NFREQ;
     }
@@ -695,18 +716,25 @@ static void prsatellite(vt_t* vt, int sys, int nf) {
         }
         vt_printf(vt, "\n");
     }
+    free(data);
 }
 /* print observation data ----------------------------------------------------*/
 static void probserv(vt_t* vt, int sys, int nf) {
-    rcvcmd_observ_t data;
-    const obsd_t* obs = data.obs;
+    rcvcmd_observ_t* data;
+    const obsd_t* obs;
     char tstr[64], id[32];
     int i, j, n = 0;
 
     trace(NULL, 4, "probserv:\n");
 
-    rcvcmd_read_observ(cmd, sys, &data);
-    n = data.n;
+    if (!(data = (rcvcmd_observ_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "probserv: snapshot allocation failed\n");
+        return;
+    }
+    obs = data->obs;
+
+    rcvcmd_read_observ(cmd, sys, data);
+    n = data->n;
 
     if (nf <= 0 || nf > NFREQ) {
         nf = NFREQ;
@@ -753,21 +781,31 @@ static void probserv(vt_t* vt, int sys, int nf) {
         }
         vt_printf(vt, "\n");
     }
+    free(data);
 }
 /* print navigation data -----------------------------------------------------*/
 static void prnavidata(vt_t* vt, int sys) {
-    rcvcmd_navidata_t data;
-    const eph_t* eph = data.eph;
-    const geph_t* geph = data.geph;
-    const double *ion = data.ion, *utc = data.utc;
+    rcvcmd_navidata_t* data;
+    const eph_t* eph;
+    const geph_t* geph;
+    const double *ion, *utc;
     gtime_t time;
     char id[32], s1[64], s2[64], s3[64];
     int i, valid, prn;
 
     trace(NULL, 4, "prnavidata:\n");
 
-    rcvcmd_read_navidata(cmd, &data);
-    time = data.time;
+    if (!(data = (rcvcmd_navidata_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prnavidata: snapshot allocation failed\n");
+        return;
+    }
+    eph = data->eph;
+    geph = data->geph;
+    ion = data->ion;
+    utc = data->utc;
+
+    rcvcmd_read_navidata(cmd, data);
+    time = data->time;
 
     vt_printf(vt, "\n%s%3s %3s %3s %3s %3s %3s %3s %19s %19s %19s %3s %3s%s\n", ESC_BOLD, "SAT", "S", "IOD", "IOC",
               "FRQ", "A/A", "SVH", "Toe", "Toc", "Ttr/Tof", "L2C", "L2P", ESC_RESET);
@@ -818,21 +856,28 @@ static void prnavidata(vt_t* vt, int sys) {
     vt_printf(vt, "ION: %9.2E %9.2E %9.2E %9.2E %9.2E %9.2E %9.2E %9.2E\n", ion[0], ion[1], ion[2], ion[3], ion[4],
               ion[5], ion[6], ion[7]);
     vt_printf(vt, "UTC: %9.2E %9.2E %9.2E %9.2E  LEAPS: %.0f\n", utc[0], utc[1], utc[2], utc[3], utc[4]);
+    free(data);
 }
 /* print error/warning messages ----------------------------------------------*/
 static void prerror(vt_t* vt) {
-    rcvcmd_error_t data;
+    rcvcmd_error_t* data;
 
     trace(NULL, 4, "prerror:\n");
 
-    rcvcmd_read_error(cmd, &data);
-    if (data.n > 0) {
-        vt_puts(vt, data.errbuf);
+    if (!(data = (rcvcmd_error_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prerror: snapshot allocation failed\n");
+        return;
     }
+
+    rcvcmd_read_error(cmd, data);
+    if (data->n > 0) {
+        vt_puts(vt, data->errbuf);
+    }
+    free(data);
 }
 /* print stream --------------------------------------------------------------*/
 static void prstream(vt_t* vt) {
-    rcvcmd_stream_t data;
+    rcvcmd_stream_t* data;
     const char* ch[] = {"input1", "input2", "input3", "output1", "output2", "log1", "log2", "log3", "monitor"};
     const char* type[] = {"-",   "serial", "file",     "tcpsvr", "tcpcli", "ntripsvr", "ntripcli",
                           "ftp", "http",   "ntripcas", "udpsvr", "udpcli", ""};
@@ -840,13 +885,20 @@ static void prstream(vt_t* vt) {
                          "javad", "nvs",   "binex", "rt17", "sbf",  "",    "sp3",   "",
                          "",      "",      "",      "",     "stat", "l6e", "clas"};
     const char* sol[] = {"llh", "xyz", "enu", "nmea", "stat", "-"};
-    const stream_t* stream = data.stream;
-    const int* format = data.format;
+    const stream_t* stream;
+    const int* format;
     int i;
 
     trace(NULL, 4, "prstream:\n");
 
-    rcvcmd_read_stream(cmd, &data);
+    if (!(data = (rcvcmd_stream_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prstream: snapshot allocation failed\n");
+        return;
+    }
+    stream = data->stream;
+    format = data->format;
+
+    rcvcmd_read_stream(cmd, data);
 
     vt_printf(vt, "\n%s%-12s %-8s %-5s %s %10s %7s %10s %7s %-24s %s%s\n", ESC_BOLD, "Stream", "Type", "Fmt", "S",
               "In-byte", "In-bps", "Out-byte", "Out-bps", "Path", "Message", ESC_RESET);
@@ -856,17 +908,24 @@ static void prstream(vt_t* vt) {
                   stream[i].state < 0 ? "E" : (stream[i].state ? "C" : "-"), stream[i].inb, stream[i].inr,
                   stream[i].outb, stream[i].outr, stream[i].path, stream[i].msg);
     }
+    free(data);
 }
 /* print ssr correction ------------------------------------------------------*/
 static void prssr(vt_t* vt) {
-    rcvcmd_ssr_t data;
+    rcvcmd_ssr_t* data;
     gtime_t time;
-    const ssr_t* ssr = data.ssr;
+    const ssr_t* ssr;
     int i, valid;
     char tstr[64], id[32];
 
-    rcvcmd_read_ssr(cmd, &data);
-    time = data.time;
+    if (!(data = (rcvcmd_ssr_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "prssr: snapshot allocation failed\n");
+        return;
+    }
+    ssr = data->ssr;
+
+    rcvcmd_read_ssr(cmd, data);
+    time = data->time;
 
     /* Match the old vt_puts abort at the first failed write. */
     if (!vt_printf(vt,
@@ -874,6 +933,7 @@ static void prssr(vt_t* vt) {
                    "%6s %6s %6s%s\n",
                    ESC_BOLD, "SAT", "S", "UDI", "IOD", "URA", "T0", "D0-A", "D0-C", "D0-R", "D1-A", "D1-C", "D1-R",
                    "C0", "C1", "C2", "C-HR", ESC_RESET)) {
+        free(data);
         return;
     }
     for (i = 0; i < MAXSAT; i++) {
@@ -890,9 +950,11 @@ static void prssr(vt_t* vt) {
                        ssr[i].deph[1], ssr[i].deph[2], ssr[i].ddeph[0] * 1E3, ssr[i].ddeph[1] * 1E3,
                        ssr[i].ddeph[2] * 1E3, ssr[i].dclk[0], ssr[i].dclk[1] * 1E3, ssr[i].dclk[2] * 1E3,
                        ssr[i].hrclk)) {
+            free(data);
             return;
         }
     }
+    free(data);
 }
 /* parse system option -------------------------------------------------------*/
 static int parse_sysopt(const char* arg) {
@@ -945,7 +1007,7 @@ static void cmd_restart(char** args, int narg, vt_t* vt) {
 }
 /* solution command ----------------------------------------------------------*/
 static void cmd_solution(char** args, int narg, vt_t* vt) {
-    rcvcmd_solution_t data;
+    rcvcmd_solution_t* data;
     int i, cycle = 0;
 
     trace(NULL, 3, "cmd_solution:\n");
@@ -954,21 +1016,27 @@ static void cmd_solution(char** args, int narg, vt_t* vt) {
         cycle = (int)(atof(args[1]) * 1000.0);
     }
 
+    if (!(data = (rcvcmd_solution_t*)malloc(sizeof(*data)))) {
+        trace(NULL, 2, "cmd_solution: snapshot allocation failed\n");
+        return;
+    }
+
     if (cycle > 0) {
         rcvcmd_clear_solution(cmd);
     }
 
     while (!vt_chkbrk(vt)) {
-        rcvcmd_read_solution(cmd, &data);
-        for (i = 0; i < data.nsol; i++) {
-            prsolution(vt, &data.solbuf[i], data.rb);
+        rcvcmd_read_solution(cmd, data);
+        for (i = 0; i < data->nsol; i++) {
+            prsolution(vt, &data->solbuf[i], data->rb);
         }
         if (cycle > 0) {
             sleepms(cycle);
         } else {
-            return;
+            break;
         }
     }
+    free(data);
 }
 /* status command ------------------------------------------------------------*/
 static void cmd_status(char** args, int narg, vt_t* vt) {
