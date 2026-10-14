@@ -211,6 +211,7 @@ add_executable(mrtk
     apps/mrtk/mrtk_main.c
     apps/rnx2rtkp/rnx2rtkp.c
     apps/rtkrcv/rtkrcv.c
+    apps/rtkrcv/rcvcmd.c
     apps/rtkrcv/vt.c
     apps/str2str/str2str.c
     apps/convbin/convbin.c
@@ -221,6 +222,10 @@ add_executable(mrtk
     apps/dumpcssr/cssr_parse.c
     apps/cssr2rtcm3/cssr2rtcm3.c
     apps/l6extract/l6extract.c
+)
+# The command layer uses C11, as the core does; override the global legacy -ansi flag.
+set_source_files_properties(apps/rtkrcv/rcvcmd.c PROPERTIES
+    COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-std=c11>"
 )
 target_include_directories(mrtk PRIVATE apps/rtkrcv)
 target_compile_definitions(mrtk PRIVATE SVR_REUSEADDR)
