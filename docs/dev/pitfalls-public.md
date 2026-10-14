@@ -74,6 +74,10 @@ For CLI debugging, use `mrtk run --trace 2` (writes
 `rtkrcv_YYYYMMDDhhmm.trace`) or `mrtk relay --trace 2` (writes
 `str2str.trace` by default); see the [CLI guide](../guide/cli.md).
 
+Prefer `trace()` over `fprintf(stderr, ...)` for debug output. Always remove
+temporary stderr prints before committing — leftover stderr prints are noisy
+in CI logs and may be flagged by review.
+
 ---
 
 ## Memory & Allocation
