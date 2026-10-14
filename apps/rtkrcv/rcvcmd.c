@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 
 #include "mrtklib/mrtk_antenna.h"
 #include "mrtklib/mrtk_const.h"
@@ -622,6 +623,19 @@ int rcvcmd_save(rcvcmd_t* cmd, const char* file) {
 }
 
 /* adapter notice ------------------------------------------------------------*/
+/* POSIX system() status decoding; the later platform layer takes this over. */
+static void command_error(char* text, size_t size, const char* option, int status) {
+    if (status == -1) {
+        snprintf(text, size, "%s could not be run", option);
+    } else if (WIFEXITED(status)) {
+        snprintf(text, size, "%s failed (exit code %d)", option, WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        snprintf(text, size, "%s failed (signal %d)", option, WTERMSIG(status));
+    } else {
+        snprintf(text, size, "%s failed", option);
+    }
+}
+
 static void notice(rcvcmd_t* cmd, const rcvcmd_io_t* io, rcvcmd_notice_code_t code, const char* path, const char* text,
                    int status) {
     rcvcmd_notice_t value = {code, path, text, status};
@@ -647,8 +661,11 @@ static void notice(rcvcmd_t* cmd, const rcvcmd_io_t* io, rcvcmd_notice_code_t co
         case RCVCMD_NOTICE_GEOID_FILE_ERROR:
             snprintf(line, RCVEVENT_TEXT, "geoid data open error: %s", path);
             break;
-        case RCVCMD_NOTICE_COMMAND_EXEC_ERROR:
-            snprintf(line, RCVEVENT_TEXT, "command exec error (status %d)", status);
+        case RCVCMD_NOTICE_START_COMMAND_ERROR:
+            command_error(line, RCVEVENT_TEXT, "misc-startcmd", status);
+            break;
+        case RCVCMD_NOTICE_STOP_COMMAND_ERROR:
+            command_error(line, RCVEVENT_TEXT, "misc-stopcmd", status);
             break;
         case RCVCMD_NOTICE_SERVER_START_ERROR:
             start = strstr(text, "path=");
@@ -852,7 +869,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     /* execute start command */
     if (*settings->startcmd && (ret = system(settings->startcmd))) {
         trace(NULL, 2, "command exec error: %s (%d)\n", settings->startcmd, ret);
-        notice(cmd, io, RCVCMD_NOTICE_COMMAND_EXEC_ERROR, NULL, settings->startcmd, ret);
+        notice(cmd, io, RCVCMD_NOTICE_START_COMMAND_ERROR, NULL, settings->startcmd, ret);
     }
     settings->solopt[0].posf = settings->strfmt[3];
     settings->solopt[1].posf = settings->strfmt[4];
@@ -932,7 +949,7 @@ static void stop_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     /* execute stop command */
     if (*settings->stopcmd && (ret = system(settings->stopcmd))) {
         trace(NULL, 2, "command exec error: %s (%d)\n", settings->stopcmd, ret);
-        notice(cmd, io, RCVCMD_NOTICE_COMMAND_EXEC_ERROR, NULL, settings->stopcmd, ret);
+        notice(cmd, io, RCVCMD_NOTICE_STOP_COMMAND_ERROR, NULL, settings->stopcmd, ret);
     }
     if (settings->solopt[0].geoid > 0) {
         closegeoid();

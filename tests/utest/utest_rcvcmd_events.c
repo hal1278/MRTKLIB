@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "mrtklib/mrtk_sys.h"
@@ -15,6 +16,7 @@ static rcvevent_t events[64];
 static rcvcmd_solution_t solutions;
 static rcvcmd_error_t errors;
 static rcvcmd_io_t io;
+static int start_command_notices, stop_command_notices;
 
 #define CHECK(cond, msg)                          \
     do {                                          \
@@ -28,7 +30,16 @@ static void on_notice(void* arg, const rcvcmd_notice_t* value) {
     rcvcmd_t* cmd = (rcvcmd_t*)arg;
     rcvcmd_snapshot_t snapshot;
     rcvcmd_result_t result;
-    (void)value;
+    if (value->code == RCVCMD_NOTICE_START_COMMAND_ERROR) {
+        start_command_notices++;
+        CHECK(strcmp(value->text, "exit 3 # u11-marker") == 0 && WIFEXITED(value->status) &&
+                  WEXITSTATUS(value->status) == 3 && value->status != 3,
+              "start command notice retains command text and raw wait status");
+    } else if (value->code == RCVCMD_NOTICE_STOP_COMMAND_ERROR) {
+        stop_command_notices++;
+        CHECK(strcmp(value->text, "kill -9 $$") == 0 && WIFSIGNALED(value->status) && WTERMSIG(value->status) == 9,
+              "stop command notice retains command text and raw wait status");
+    }
     /* Reentrant snapshot proves that notices run outside the publish mutex. */
     rcvcmd_snapshot(cmd, &snapshot);
     CHECK(snapshot.seq == rcvcmd_last_seq(cmd), "notice sees published boundary");
@@ -168,21 +179,44 @@ int main(void) {
           "password masked using last @ and first colon");
     status_at(13, RCVCMD_STOPPED, RCVCMD_STOP_ERROR, RCVCMD_START_ERROR_SERVER);
     set_option(cmd, "inpstr1-type", "off");
+    set_option(cmd, "misc-startcmd", "exit 3 # u11-marker");
+    set_option(cmd, "misc-stopcmd", "kill -9 $$");
     result = rcvcmd_start(cmd, &io);
-    CHECK(result.kind == RCVCMD_SUCCESS && result.seq == 15, "recover after start failure");
+    CHECK(result.kind == RCVCMD_SUCCESS && result.state == RCVCMD_RUNNING && result.seq == 15,
+          "recover after start failure despite failed start command");
     n = read_all(cmd);
-    CHECK(n == 16, "recovery events");
+    CHECK(n == 17, "recovery events include failed start command log");
     status_at(14, RCVCMD_STARTING, RCVCMD_STOP_ERROR, RCVCMD_START_ERROR_SERVER);
-    status_at(15, RCVCMD_RUNNING, RCVCMD_STOP_ERROR, RCVCMD_START_ERROR_NONE);
+    CHECK(events[15].kind == RCVEVENT_LOG && events[15].data.log.level == 1 &&
+              events[15].data.log.origin == RCVEVENT_LOG_LAYER &&
+              strcmp(events[15].data.log.text, "misc-startcmd failed (exit code 3)") == 0 &&
+              strstr(events[15].data.log.text, "u11-marker") == NULL && start_command_notices == 1,
+          "start command log names option and decoded exit code without command text");
+    status_at(16, RCVCMD_RUNNING, RCVCMD_STOP_ERROR, RCVCMD_START_ERROR_NONE);
+    result = rcvcmd_stop(cmd, &io);
+    CHECK(result.kind == RCVCMD_SUCCESS && result.state == RCVCMD_STOPPED && result.seq == 18,
+          "stop succeeds despite signaled stop command");
+    CHECK(read_all(cmd) == 20, "stop events include signaled stop command log");
+    status_at(17, RCVCMD_STOPPING, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
+    CHECK(events[18].kind == RCVEVENT_LOG && events[18].data.log.level == 1 &&
+              events[18].data.log.origin == RCVEVENT_LOG_LAYER &&
+              strcmp(events[18].data.log.text, "misc-stopcmd failed (signal 9)") == 0 && stop_command_notices == 1,
+          "stop command log names option and decoded signal without command text");
+    status_at(19, RCVCMD_STOPPED, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
+    set_option(cmd, "misc-startcmd", "");
+    set_option(cmd, "misc-stopcmd", "");
+    result = rcvcmd_start(cmd, &io);
+    CHECK(result.kind == RCVCMD_SUCCESS && result.seq == 21 && read_all(cmd) == 22,
+          "start again with external commands cleared");
     rcvcmd_request_shutdown(cmd);
     last = rcvcmd_last_seq(cmd);
     result = rcvcmd_restart(cmd, &io);
     CHECK(result.kind == RCVCMD_SHUTTING_DOWN && result.seq == last && rcvcmd_last_seq(cmd) == last,
           "shutdown refusal publishes nothing");
     rcvcmd_shutdown(cmd, &io);
-    CHECK(read_all(cmd) == 18, "shutdown uses stop events");
-    status_at(16, RCVCMD_STOPPING, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
-    status_at(17, RCVCMD_STOPPED, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
+    CHECK(read_all(cmd) == 24, "shutdown uses stop events");
+    status_at(22, RCVCMD_STOPPING, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
+    status_at(23, RCVCMD_STOPPED, RCVCMD_STOP_REQUEST, RCVCMD_START_ERROR_NONE);
     rcvcmd_close(cmd);
     rcvcmd_close(cmd);
     rcvcmd_destroy(cmd);

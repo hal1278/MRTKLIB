@@ -290,7 +290,8 @@ static void console_notice(void* arg, const rcvcmd_notice_t* notice) {
         case RCVCMD_NOTICE_GEOID_FILE_ERROR:
             vt_printf(vt, "geoid data open error: %s\n", notice->path);
             break;
-        case RCVCMD_NOTICE_COMMAND_EXEC_ERROR:
+        case RCVCMD_NOTICE_START_COMMAND_ERROR:
+        case RCVCMD_NOTICE_STOP_COMMAND_ERROR:
             vt_printf(vt, "command exec error: %s (%d)\n", notice->text, notice->status);
             break;
         case RCVCMD_NOTICE_SERVER_START_ERROR:
