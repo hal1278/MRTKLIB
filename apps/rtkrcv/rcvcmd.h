@@ -35,10 +35,11 @@
  * dereference; displays consume only copied values. Stream snapshots contain
  * only the display fields, with no copied locks or port handles.
  *
- * The lifecycle/configuration threading model is unchanged. There are no
- * lifecycle states, reader counts, configuration mutex, events, claims, or new
- * lifecycle serialization.
- * Start/stop can still race with display/configuration operations as before.
+ * A publish mutex protects lifecycle state, claims and counted readers.
+ * Start/stop/restart exclude readers for the whole transition. Readers accepted
+ * while stopped retain the last values; refused reads zero caller storage.
+ * Never take server/stream locks or call adapters under the publish mutex.
+ * Configuration serialization and events are not implemented yet.
  * Stream formats use the server lock, separately from stream field copies.
  * The legacy unlocked cyclic-solution discard is retained until solution-event
  * work (D-17).
@@ -89,17 +90,56 @@ typedef struct {
     int (*confirm_overwrite)(void* arg, const char* path); /* 1: overwrite / no file, 0: abort */
 } rcvcmd_io_t;
 
-/** @brief Start the server using synchronous adapter callbacks.
+typedef enum { RCVCMD_STOPPED, RCVCMD_STARTING, RCVCMD_RUNNING, RCVCMD_STOPPING } rcvcmd_state_t;
+
+typedef enum { RCVCMD_STOP_NONE, RCVCMD_STOP_REQUEST, RCVCMD_STOP_ERROR } rcvcmd_stop_reason_t;
+
+typedef enum {
+    RCVCMD_START_ERROR_NONE,
+    RCVCMD_START_ERROR_CORRECTION,
+    RCVCMD_START_ERROR_OVERWRITE,
+    RCVCMD_START_ERROR_SERVER
+} rcvcmd_start_error_t;
+
+typedef struct {
+    rcvcmd_state_t state;
+    rcvcmd_stop_reason_t stop_reason;
+    rcvcmd_start_error_t last_error;
+} rcvcmd_lifecycle_t;
+
+typedef enum {
+    RCVCMD_SUCCESS,
+    RCVCMD_ALREADY_RUNNING,
+    RCVCMD_BUSY,
+    RCVCMD_SHUTTING_DOWN,
+    RCVCMD_START_FAILED
+} rcvcmd_result_kind_t;
+
+typedef struct {
+    rcvcmd_result_kind_t kind;
+    rcvcmd_state_t state; /* current state, including the transition for busy */
+} rcvcmd_result_t;
+
+/** @brief Copy lifecycle state, stop reason and structured last start error. */
+void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data);
+/** @brief Start with synchronous adapter callbacks; return kind and current state.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
- * @return 1 on success, 0 on failure or overwrite refusal.
+ * @return Success, already running, busy or start failed.
  */
-int rcvcmd_start(rcvcmd_t* cmd, const rcvcmd_io_t* io);
-/** @brief Stop a running server; a stopped server emits no notice.
+rcvcmd_result_t rcvcmd_start(rcvcmd_t* cmd, const rcvcmd_io_t* io);
+/** @brief Stop; a stopped server succeeds without effect or notice.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
+ * @return Success or busy.
  */
-void rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io);
+rcvcmd_result_t rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io);
+/** @brief Restart under one claim; when stopped, behave like start.
+ * @param[in,out] cmd The sole command-layer instance.
+ * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
+ * @return Success, busy or start failed.
+ */
+rcvcmd_result_t rcvcmd_restart(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
 /** @brief Allocate the sole server instance; NULL on allocation failure or an existing instance. */
 rcvcmd_t* rcvcmd_create(void);
@@ -195,51 +235,54 @@ typedef struct {
     int nsol;
 } rcvcmd_solution_t;
 
+/* Readers/clears return 1 when accepted, 0 during a claim/transition.
+ * Refused readers zero all caller storage; refused clears do nothing. */
+
 /** @brief Copy status fields and the existing deep copies of vector values.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_status(rcvcmd_t* cmd, rcvcmd_status_t* data);
+int rcvcmd_read_status(rcvcmd_t* cmd, rcvcmd_status_t* data);
 /** @brief Copy the satellite display's RTK values.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_satellite(rcvcmd_t* cmd, rcvcmd_satellite_t* data);
+int rcvcmd_read_satellite(rcvcmd_t* cmd, rcvcmd_satellite_t* data);
 /** @brief Copy rover then base observations matching sys, with the existing cap.
  * @param[in] cmd The sole command-layer instance.
  * @param[in] sys Satellite-system mask, with the original observation filtering.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_observ(rcvcmd_t* cmd, int sys, rcvcmd_observ_t* data);
+int rcvcmd_read_observ(rcvcmd_t* cmd, int sys, rcvcmd_observ_t* data);
 /** @brief Copy navigation time, ephemerides, GPS ionosphere and UTC parameters.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_navidata(rcvcmd_t* cmd, rcvcmd_navidata_t* data);
+int rcvcmd_read_navidata(rcvcmd_t* cmd, rcvcmd_navidata_t* data);
 /** @brief Copy solution time and channel-zero SSR values.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
+int rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
 /** @brief Copy formats under the server lock and displayed fields under each stream lock.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data);
+int rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data);
 /** @brief Copy and clear pending errors; errbuf is terminated, n retains the byte count.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data);
+int rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data);
 /** @brief Copy and clear pending solutions; only rows below nsol and their rb are valid.
  * @param[in] cmd The sole command-layer instance.
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
-void rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data);
+int rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data);
 /** @brief Discard errors under the server lock at the start of the error command. */
-void rcvcmd_clear_error(rcvcmd_t* cmd);
+int rcvcmd_clear_error(rcvcmd_t* cmd);
 /** @brief Preserve the unlocked discard before cyclic solution display until D-17. */
-void rcvcmd_clear_solution(rcvcmd_t* cmd);
+int rcvcmd_clear_solution(rcvcmd_t* cmd);
 
 #ifdef __cplusplus
 }

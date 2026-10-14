@@ -887,7 +887,7 @@ static void prstream(vt_t* vt) {
     const char* sol[] = {"llh", "xyz", "enu", "nmea", "stat", "-"};
     const stream_t* stream;
     const int* format;
-    int i;
+    int i, read;
 
     trace(NULL, 4, "prstream:\n");
 
@@ -898,11 +898,11 @@ static void prstream(vt_t* vt) {
     stream = data->stream;
     format = data->format;
 
-    rcvcmd_read_stream(cmd, data);
+    read = rcvcmd_read_stream(cmd, data);
 
     vt_printf(vt, "\n%s%-12s %-8s %-5s %s %10s %7s %10s %7s %-24s %s%s\n", ESC_BOLD, "Stream", "Type", "Fmt", "S",
               "In-byte", "In-bps", "Out-byte", "Out-bps", "Path", "Message", ESC_RESET);
-    for (i = 0; i < 9; i++) {
+    for (i = 0; read && i < 9; i++) {
         vt_printf(vt, "%-12s %-8s %-5s %s %10d %7d %10d %7d %-24.24s %s\n", ch[i], type[stream[i].type],
                   i < 3 ? fmt[format[i]] : (i < 5 || i == 8 ? sol[format[i]] : "-"),
                   stream[i].state < 0 ? "E" : (stream[i].state ? "C" : "-"), stream[i].inb, stream[i].inr,
@@ -973,13 +973,22 @@ static int parse_sysopt(const char* arg) {
     }
     return sys;
 }
+/* lifecycle result ----------------------------------------------------------*/
+static int lifecycle_result(vt_t* vt, rcvcmd_result_t result) {
+    if (result.kind == RCVCMD_BUSY) {
+        vt_printf(vt, "rtk server busy (%s)\n", result.state == RCVCMD_STARTING ? "starting" : "stopping");
+    } else if (result.kind == RCVCMD_ALREADY_RUNNING) {
+        vt_printf(vt, "rtk server start error (server already started)\n");
+    }
+    return result.kind == RCVCMD_SUCCESS;
+}
 /* start command -------------------------------------------------------------*/
 static void cmd_start(char** args, int narg, vt_t* vt) {
     rcvcmd_io_t io = {NULL, console_notice, console_confirm_overwrite};
     trace(NULL, 3, "cmd_start:\n");
     io.arg = vt;
 
-    if (!rcvcmd_start(cmd, &io)) {
+    if (!lifecycle_result(vt, rcvcmd_start(cmd, &io))) {
         return;
     }
     vt_printf(vt, "rtk server start\n");
@@ -990,7 +999,9 @@ static void cmd_stop(char** args, int narg, vt_t* vt) {
     trace(NULL, 3, "cmd_stop:\n");
     io.arg = vt;
 
-    rcvcmd_stop(cmd, &io);
+    if (!lifecycle_result(vt, rcvcmd_stop(cmd, &io))) {
+        return;
+    }
     vt_printf(vt, "rtk server stop\n");
 }
 /* restart command -----------------------------------------------------------*/
@@ -999,8 +1010,7 @@ static void cmd_restart(char** args, int narg, vt_t* vt) {
     trace(NULL, 3, "cmd_restart:\n");
     io.arg = vt;
 
-    rcvcmd_stop(cmd, &io);
-    if (!rcvcmd_start(cmd, &io)) {
+    if (!lifecycle_result(vt, rcvcmd_restart(cmd, &io))) {
         return;
     }
     vt_printf(vt, "rtk server restart\n");

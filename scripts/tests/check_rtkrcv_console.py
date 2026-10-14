@@ -977,6 +977,9 @@ def mutation_checks(args):
         second.close_command("exit")
         print(f"shared solution buffer drained after stop: {len(lines(first))} buffered rows")
         output = (server.directory / "solution.pos").as_posix()
+        text = overwrite(console, "start", output, "n")
+        console.check(text.endswith("n\n"), "overwrite refusal releases start claim", text)
+        console.expect("stop", "rtk server stop")
         text = overwrite(console, "restart", output, "y")
         console.check(text.endswith("rtk server restart\n"), "restart response", text)
         wait_command(
@@ -1030,6 +1033,162 @@ def mutation_checks(args):
         server.shutdown(console)
 
 
+def transitional_displays(console):
+    """Check refused snapshots keep the existing display structure."""
+    text = console.run("status")
+    status(console, text)
+    fields = {line[:28].rstrip(): line[30:] for line in lines(text)}
+    console.check(fields["rtk server state"] == "stop", "transitional status state", text)
+    expected_labels = (
+        Path(__file__).resolve().parents[2] / "tests/data/rtkrcv_console/status-labels.txt"
+    )
+    console.check(
+        list(fields) == expected_labels.read_text().splitlines(), "status labels intact", text
+    )
+    for label in (
+        "rtk server thread",
+        "processing cycle (ms)",
+        "cpu time for a cycle (ms)",
+        "missing obs data count",
+        "# of satellites rover",
+        "# of satellites base",
+        "# of valid satellites",
+        "# of real estimated states",
+        "# of all estimated states",
+    ):
+        console.check(fields[label] == "0", f"zero {label} during transition", text)
+    for _, counts in _INPUT_DATA_PATTERN.findall(text):
+        console.check(
+            all(int(value) == 0 for _, value in _INPUT_COUNT_PATTERN.findall(counts)),
+            "zero input counters during transition",
+            text,
+        )
+    console.check(fields["bytes in input buffer"] == "0,0", "zero input buffers", text)
+    console.check(fields["pos xyz float (m) rover"] == "0.000,0.000,0.000", "zero vector", text)
+    console.check(fields["time of receiver clock rover"] == "-", "zero receiver time", text)
+    for command, header in (
+        ("satellite -1", "SAT C1 Az El L1 Fix1 P1Res L1Res Sl1 Lock1 Rj1"),
+        ("stream", "Stream Type Fmt S In-byte In-bps Out-byte Out-bps Path Message"),
+        ("observ -1", "TIME(GPST) SAT R C1 S1 P1(m) L1(cyc) D1(Hz) LLI"),
+        ("ssr", "SAT S UDI IOD URA T0 D0-A D0-C D0-R D1-A D1-C D1-R C0 C1 C2 C-HR"),
+    ):
+        text = console.run(command)
+        console.check(
+            len(lines(text)) == 1 and lines(text)[0].split() == header.split(),
+            f"{command} has only its header during transition",
+            text,
+        )
+    console.check(console.run("solution") == "", "refused solution prints nothing")
+    console.begin("error")
+    console.sock.sendall(b"\x03")
+    console.check(console.response() == "^C\n\n", "refused error has no error rows")
+
+
+def lifecycle_checks(args):
+    """Hold transitions at file gates and check a second console's responses."""
+    with Server(args) as server:
+        first = server.connect()
+        second = server.connect()
+        first.expect("stop", "rtk server stop")
+        first.expect("set outstr1-type 0", "option outstr1-type changed. restart to enable it")
+        first.expect(
+            "set pos1-correction bds-b2b", "option pos1-correction changed. restart to enable it"
+        )
+        first.expect("start", "error: correction source not implemented yet (correction=bds-b2b)")
+        second.expect("stop", "rtk server stop")
+        first.expect(
+            "set pos1-correction qzs-madoca", "option pos1-correction changed. restart to enable it"
+        )
+        gates = {}
+        for phase in ("start", "stop"):
+            entered = server.directory / f"entered-{phase}"
+            release = server.directory / f"go-{phase}"
+            command = f"sh -c 'touch {entered}; while [ ! -e {release} ]; do sleep 0.05; done'"
+            first.begin(f"set misc-{phase}cmd")
+            first.read_until(lambda s: s.endswith(": "), "interactive command value prompt")
+            first.sock.sendall(command.encode("ascii") + b"\r")
+            text = first.response()
+            first.check(
+                text.endswith(f"option misc-{phase}cmd changed. restart to enable it\n"),
+                "file gate command configured",
+                text,
+            )
+            gates[phase] = (entered, release)
+
+        def reached(phase):
+            # Each complete status prompt yields to the server; the file proves arrival.
+            wait_command(
+                second,
+                "status",
+                lambda _: gates[phase][0].exists(),
+                f"{phase} command marker",
+            )
+
+        def busy(state):
+            for command in ("start", "stop", "restart"):
+                second.expect(command, f"rtk server busy ({state})")
+            transitional_displays(second)
+
+        try:
+            first.begin("start")
+            reached("start")
+            busy("starting")
+            gates["start"][1].touch()
+            text = first.response()
+            first.check(text.endswith("rtk server start\n"), "released start succeeds", text)
+            gates["start"][0].unlink()
+            second.expect("start", "rtk server start error (server already started)")
+            second.check(not gates["start"][0].exists(), "double start skips start preparation")
+            second.check(
+                _STATE_PATTERN.search(second.run("status"))[1] == "run", "start published run"
+            )
+
+            first.begin("stop")
+            reached("stop")
+            busy("stopping")
+            gates["stop"][1].touch()
+            text = first.response()
+            first.check(text == "stop rtk server\nrtk server stop\n", "released stop notices", text)
+            second.expect("stop", "rtk server stop")
+            second.check(
+                _STATE_PATTERN.search(second.run("status"))[1] == "stop", "stop published stop"
+            )
+
+            # A stopped restart goes straight to starting.
+            gates["start"][1].unlink()
+            first.begin("restart")
+            reached("start")
+            busy("starting")
+            gates["start"][1].touch()
+            text = first.response()
+            first.check(text.endswith("rtk server restart\n"), "stopped restart succeeds", text)
+
+            # A running restart owns both stopping and starting without a claim gap.
+            for entered, release in gates.values():
+                entered.unlink()
+                release.unlink()
+            first.begin("restart")
+            reached("stop")
+            busy("stopping")
+            gates["stop"][1].touch()
+            reached("start")
+            busy("starting")
+            gates["start"][1].touch()
+            text = first.response()
+            first.check(
+                text.endswith("stop rtk server\nrtk server restart\n"),
+                "running restart keeps stop and restart notices",
+                text,
+            )
+            second.expect("start", "rtk server start error (server already started)")
+            first.run("stop")
+            second.expect("stop", "rtk server stop")
+            server.shutdown(first)
+        finally:
+            for _, release in gates.values():
+                release.touch()
+
+
 def password_checks(args):
     # Match CLI and config passwords: don't pin the known startup precedence bug.
     with Server(args, password="console-secret") as server:
@@ -1066,6 +1225,7 @@ def main():
     try:
         replay_checks(args)
         mutation_checks(args)
+        lifecycle_checks(args)
         password_checks(args)
     except Exception:
         traceback.print_exc()
