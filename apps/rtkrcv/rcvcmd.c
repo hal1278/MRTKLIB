@@ -19,11 +19,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
 
 #include "mrtklib/mrtk_antenna.h"
 #include "mrtklib/mrtk_const.h"
 #include "mrtklib/mrtk_coords.h"
 #include "mrtklib/mrtk_geoid.h"
+#include "mrtklib/mrtk_mat.h"
 #include "mrtklib/mrtk_station.h"
 #include "mrtklib/mrtk_sys.h"
 #include "mrtklib/mrtk_trace.h"
@@ -36,6 +40,18 @@
 #define OPTSDIR "."                       /* default config directory */
 #define OPTSFILE "rtkrcv.conf"            /* default config file */
 #define MAXSTR 1024                       /* max length of a stream */
+
+/* >= 10 * MAXSOLBUF plus interleaved logs; measure in the later trace-sink unit (D-35). */
+#define RCVCMD_EVENT_CAPACITY 4096
+#define RCVCMD_COLLECT_MS 100
+
+typedef struct {
+    sol_t solutions[MAXSOLBUF];
+    rcvevent_t events[MAXSOLBUF];
+    double rb[3];
+    char errors[MAXERRMSG];
+    int nsol, neb;
+} rcvcmd_staging_t;
 
 typedef struct {
     int strtype[8];        /* stream types */
@@ -69,6 +85,15 @@ struct rcvcmd {
     int claimed;
     int readers;
     int shutdown_requested;
+    rcvevent_ring_t events;
+    rcvcmd_staging_t* staging;
+    pthread_t collector;
+    int collector_started, collector_exit, initialized;
+    int run_mode, run_geoid;
+    uint64_t solution_start_seq;
+    rcvevent_t last_solution;
+    int has_solution, previous_none;
+    gtime_t none_time;
     rtksvr_t* svr;     /* rtk server struct */
     stream_t moni;     /* monitor stream */
     char passwd[1024]; /* login password */
@@ -165,6 +190,125 @@ static rcvcmd_t instance = {
 
                 {"", 0, NULL, ""}},
 };
+/* These helpers publish only copies while the publish mutex is held. */
+static uint64_t publish_status(rcvcmd_t* cmd) {
+    rcvevent_t ev = {0};
+    ev.kind = RCVEVENT_STATUS;
+    ev.data.status.state = cmd->lifecycle.state;
+    ev.data.status.stop_reason = cmd->lifecycle.stop_reason;
+    ev.data.status.last_error = cmd->lifecycle.last_error;
+    return rcvevent_publish(&cmd->events, &ev);
+}
+
+static void clear_run_solution(rcvcmd_t* cmd) {
+    cmd->has_solution = cmd->previous_none = 0;
+    memset(&cmd->last_solution, 0, sizeof(cmd->last_solution));
+    memset(&cmd->none_time, 0, sizeof(cmd->none_time));
+}
+
+/* The counted collector or the transition claim exclusively owns staging. */
+static void collect_events(rcvcmd_t* cmd) {
+    rcvcmd_staging_t* stage = cmd->staging;
+    rtksvr_t* svr = cmd->svr;
+    int i, mode, geoid, uses_base;
+    double pos[3];
+
+    pthread_mutex_lock(&cmd->publish_lock);
+    mode = cmd->run_mode;
+    geoid = cmd->run_geoid;
+    pthread_mutex_unlock(&cmd->publish_lock);
+    uses_base = mode == PMODE_DGPS || mode == PMODE_KINEMA || mode == PMODE_STATIC || mode == PMODE_MOVEB ||
+                mode == PMODE_FIXED || mode == PMODE_VRS_RTK;
+
+    rtksvrlock(svr);
+    stage->nsol = svr->nsol;
+    memcpy(stage->solutions, svr->solbuf, stage->nsol * sizeof(sol_t));
+    memcpy(stage->rb, svr->rtk.rb, sizeof(stage->rb));
+    stage->neb = svr->rtk.neb;
+    memcpy(stage->errors, svr->rtk.errbuf, stage->neb);
+    svr->nsol = svr->rtk.neb = 0;
+    rtksvrunlock(svr);
+
+    for (i = 0; i < stage->nsol; i++) {
+        rcvevent_t* ev = &stage->events[i];
+        rcvevent_solution_t* solution = &ev->data.solution;
+        sol_t* sol = &stage->solutions[i];
+        memset(ev, 0, sizeof(*ev));
+        ev->kind = RCVEVENT_SOLUTION;
+        solution->leap = timediff(sol->time, gpst2utc(sol->time));
+        if (sol->stat == SOLQ_NONE) {
+            solution->sol.time = sol->time;
+            solution->sol.stat = sol->stat;
+            continue;
+        }
+        solution->sol = *sol;
+        memcpy(solution->rb, stage->rb, sizeof(solution->rb));
+        solution->has_base = uses_base && norm(stage->rb, 3) > 0.0;
+        solution->geoid_model = geoid;
+        if (geoid == 0) {
+            ecef2pos(sol->rr, pos);
+            solution->separation = geoidh(pos);
+            solution->has_separation = solution->separation != 0.0;
+        }
+    }
+}
+
+static void publish_collected(rcvcmd_t* cmd) {
+    rcvcmd_staging_t* stage = cmd->staging;
+    int i, first;
+    for (i = 0; i < stage->nsol; i++) {
+        rcvevent_t* ev = &stage->events[i];
+        gtime_t time = ev->data.solution.sol.time;
+        int none = ev->data.solution.sol.stat == SOLQ_NONE;
+        if (none && (time.time == 0 ||
+                     (cmd->previous_none && time.time == cmd->none_time.time && time.sec == cmd->none_time.sec))) {
+            continue;
+        }
+        ev->seq = rcvevent_publish(&cmd->events, ev);
+        cmd->last_solution = *ev;
+        cmd->has_solution = 1;
+        cmd->previous_none = none;
+        cmd->none_time = time;
+    }
+    for (first = 0; first < stage->neb; first = i + 1) {
+        rcvevent_t ev = {0};
+        size_t n;
+        for (i = first; i < stage->neb && stage->errors[i] != '\n'; i++) {
+        }
+        if (i == first) continue;
+        n = (size_t)(i - first);
+        if (n >= RCVEVENT_TEXT) n = RCVEVENT_TEXT - 1;
+        ev.kind = RCVEVENT_LOG;
+        ev.data.log.level = 1;
+        ev.data.log.origin = RCVEVENT_LOG_ERRBUF;
+        memcpy(ev.data.log.text, stage->errors + first, n);
+        rcvevent_publish(&cmd->events, &ev);
+    }
+}
+
+static void* collect_thread(void* arg) {
+    rcvcmd_t* cmd = (rcvcmd_t*)arg;
+    for (;;) {
+        sleepms(RCVCMD_COLLECT_MS);
+        pthread_mutex_lock(&cmd->publish_lock);
+        if (cmd->collector_exit) {
+            pthread_mutex_unlock(&cmd->publish_lock);
+            return NULL;
+        }
+        if (cmd->claimed || cmd->lifecycle.state != RCVCMD_RUNNING) {
+            pthread_mutex_unlock(&cmd->publish_lock);
+            continue;
+        }
+        cmd->readers++;
+        pthread_mutex_unlock(&cmd->publish_lock);
+        collect_events(cmd);
+        pthread_mutex_lock(&cmd->publish_lock);
+        publish_collected(cmd);
+        if (--cmd->readers == 0) pthread_cond_broadcast(&cmd->publish_cond);
+        pthread_mutex_unlock(&cmd->publish_lock);
+    }
+}
+
 /* thread to send keep alive for monitor port --------------------------------*/
 static void* sendkeepalive(void* arg) {
     rcvcmd_t* cmd = (rcvcmd_t*)arg;
@@ -235,12 +379,37 @@ rcvcmd_t* rcvcmd_create(void) {
         instance.svr = NULL;
         return NULL;
     }
+    instance.staging = (rcvcmd_staging_t*)calloc(1, sizeof(rcvcmd_staging_t));
+    if (!instance.staging || !rcvevent_init(&instance.events, RCVCMD_EVENT_CAPACITY)) {
+        free(instance.staging);
+        instance.staging = NULL;
+        pthread_mutex_destroy(&instance.config_lock);
+        pthread_cond_destroy(&instance.publish_cond);
+        pthread_mutex_destroy(&instance.publish_lock);
+        free(instance.svr);
+        instance.svr = NULL;
+        return NULL;
+    }
+    instance.initialized = instance.collector_started = instance.collector_exit = 0;
+    instance.solution_start_seq = 0;
+    clear_run_solution(&instance);
     memset(&instance.lifecycle, 0, sizeof(instance.lifecycle));
     instance.claimed = instance.readers = instance.shutdown_requested = 0;
+    if (pthread_create(&instance.collector, NULL, collect_thread, &instance)) {
+        fprintf(stderr, "event collector thread create error\n");
+        rcvcmd_destroy(&instance);
+        return NULL;
+    }
+    instance.collector_started = 1;
     return &instance;
 }
 
 void rcvcmd_destroy(rcvcmd_t* cmd) {
+    if (!cmd) return;
+    rcvcmd_close(cmd);
+    rcvevent_free(&cmd->events);
+    free(cmd->staging);
+    cmd->staging = NULL;
     pthread_mutex_destroy(&cmd->config_lock);
     pthread_cond_destroy(&cmd->publish_cond);
     pthread_mutex_destroy(&cmd->publish_lock);
@@ -257,6 +426,7 @@ void rcvcmd_initialize(rcvcmd_t* cmd, char* file, const char* password, const ch
     /* initialize rtk server and monitor port */
     rtksvrinit(cmd->svr);
     strinit(&cmd->moni);
+    cmd->initialized = 1;
 
     /* load options file */
     if (!*file) {
@@ -292,6 +462,16 @@ void rcvcmd_initialize(rcvcmd_t* cmd, char* file, const char* password, const ch
 }
 
 void rcvcmd_close(rcvcmd_t* cmd) {
+    if (!cmd) return;
+    pthread_mutex_lock(&cmd->publish_lock);
+    cmd->collector_exit = 1;
+    pthread_mutex_unlock(&cmd->publish_lock);
+    if (cmd->collector_started) {
+        pthread_join(cmd->collector, NULL);
+        cmd->collector_started = 0;
+    }
+    if (!cmd->initialized) return;
+    cmd->initialized = 0;
     if (cmd->moniport > 0) {
         closemoni(cmd);
     }
@@ -447,8 +627,74 @@ int rcvcmd_save(rcvcmd_t* cmd, const char* file) {
 }
 
 /* adapter notice ------------------------------------------------------------*/
-static void notice(const rcvcmd_io_t* io, rcvcmd_notice_code_t code, const char* path, const char* text, int status) {
+/* POSIX wait status / Windows exit code; the later platform layer takes this over. */
+static void command_error(char* text, size_t size, const char* option, int status) {
+    if (status == -1) {
+        snprintf(text, size, "%s could not be run", option);
+#ifdef _WIN32
+    } else {
+        snprintf(text, size, "%s failed (exit code %d)", option, status);
+#else
+    } else if (WIFEXITED(status)) {
+        snprintf(text, size, "%s failed (exit code %d)", option, WEXITSTATUS(status));
+    } else if (WIFSIGNALED(status)) {
+        snprintf(text, size, "%s failed (signal %d)", option, WTERMSIG(status));
+    } else {
+        snprintf(text, size, "%s failed", option);
+#endif
+    }
+}
+
+static void notice(rcvcmd_t* cmd, const rcvcmd_io_t* io, rcvcmd_notice_code_t code, const char* path, const char* text,
+                   int status) {
     rcvcmd_notice_t value = {code, path, text, status};
+    rcvevent_t ev = {0};
+    const char *start, *at, *colon;
+    char* line = ev.data.log.text;
+    ev.kind = RCVEVENT_LOG;
+    ev.data.log.level = 1;
+    ev.data.log.origin = RCVEVENT_LOG_LAYER;
+    switch (code) {
+        case RCVCMD_NOTICE_CORRECTION_ERROR:
+            snprintf(line, RCVEVENT_TEXT, "start error: %s", text);
+            break;
+        case RCVCMD_NOTICE_NO_COMMAND_FILE:
+            snprintf(line, RCVEVENT_TEXT, "no command file: %s", path);
+            break;
+        case RCVCMD_NOTICE_NO_ANTENNA:
+            snprintf(line, RCVEVENT_TEXT, "no antenna %s in %s", text, path);
+            break;
+        case RCVCMD_NOTICE_ANTENNA_FILE_ERROR:
+            snprintf(line, RCVEVENT_TEXT, "antenna file open error: %s", path);
+            break;
+        case RCVCMD_NOTICE_GEOID_FILE_ERROR:
+            snprintf(line, RCVEVENT_TEXT, "geoid data open error: %s", path);
+            break;
+        case RCVCMD_NOTICE_START_COMMAND_ERROR:
+            command_error(line, RCVEVENT_TEXT, "misc-startcmd", status);
+            break;
+        case RCVCMD_NOTICE_STOP_COMMAND_ERROR:
+            command_error(line, RCVEVENT_TEXT, "misc-stopcmd", status);
+            break;
+        case RCVCMD_NOTICE_SERVER_START_ERROR:
+            start = strstr(text, "path=");
+            start = start ? start + 5 : text;
+            at = strrchr(start, '@');
+            colon = strchr(start, ':');
+            if (at && colon && colon < at) {
+                snprintf(line, RCVEVENT_TEXT, "rtk server start error (%.*s***%s)", (int)(colon + 1 - text), text, at);
+            } else {
+                snprintf(line, RCVEVENT_TEXT, "rtk server start error (%s)", text);
+            }
+            break;
+        case RCVCMD_NOTICE_SERVER_STOPPED:
+            break;
+    }
+    if (code != RCVCMD_NOTICE_SERVER_STOPPED) {
+        pthread_mutex_lock(&cmd->publish_lock);
+        rcvevent_publish(&cmd->events, &ev);
+        pthread_mutex_unlock(&cmd->publish_lock);
+    }
     io->notice(io->arg, &value);
 }
 /* read receiver commands ----------------------------------------------------*/
@@ -495,13 +741,13 @@ static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* 
                 continue;
             }
             if (!(pcv = searchpcv(0, opt->anttype[i], time, &pcvr))) {
-                notice(io, RCVCMD_NOTICE_NO_ANTENNA, settings->filopt.rcvantp, opt->anttype[i], 0);
+                notice(cmd, io, RCVCMD_NOTICE_NO_ANTENNA, settings->filopt.rcvantp, opt->anttype[i], 0);
                 continue;
             }
             opt->pcvr[i] = *pcv;
         }
     } else {
-        notice(io, RCVCMD_NOTICE_ANTENNA_FILE_ERROR, settings->filopt.rcvantp, NULL, 0);
+        notice(cmd, io, RCVCMD_NOTICE_ANTENNA_FILE_ERROR, settings->filopt.rcvantp, NULL, 0);
     }
 
     if (readpcv(settings->filopt.satantp, &pcvs)) {
@@ -512,7 +758,7 @@ static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* 
             nav->pcvs[i] = *pcv;
         }
     } else {
-        notice(io, RCVCMD_NOTICE_ANTENNA_FILE_ERROR, settings->filopt.satantp, NULL, 0);
+        notice(cmd, io, RCVCMD_NOTICE_ANTENNA_FILE_ERROR, settings->filopt.satantp, NULL, 0);
     }
 
     free(pcvr.pcv);
@@ -541,7 +787,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
         char cmsg[256] = "";
         if (!resolve_correction(&settings->prcopt, cmsg, sizeof(cmsg))) {
             trace(NULL, 1, "startsvr: %s\n", cmsg);
-            notice(io, RCVCMD_NOTICE_CORRECTION_ERROR, NULL, cmsg, 0);
+            notice(cmd, io, RCVCMD_NOTICE_CORRECTION_ERROR, NULL, cmsg, 0);
             return RCVCMD_START_ERROR_CORRECTION;
         }
     }
@@ -574,12 +820,12 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
             continue;
         }
         if (!readcmd(settings->rcvcmds[i], s1[i], 0)) {
-            notice(io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
+            notice(cmd, io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
         } else {
             cmds[i] = s1[i];
         }
         if (!readcmd(settings->rcvcmds[i], s2[i], 2)) {
-            notice(io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
+            notice(cmd, io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
         } else {
             cmds_periodic[i] = s2[i];
         }
@@ -611,7 +857,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     /* open geoid data file */
     if (settings->solopt[0].geoid > 0 && !opengeoid(settings->solopt[0].geoid, settings->filopt.geoid)) {
         trace(NULL, 2, "geoid data open error: %s\n", settings->filopt.geoid);
-        notice(io, RCVCMD_NOTICE_GEOID_FILE_ERROR, settings->filopt.geoid, NULL, 0);
+        notice(cmd, io, RCVCMD_NOTICE_GEOID_FILE_ERROR, settings->filopt.geoid, NULL, 0);
     }
     /* set stream options */
     stropt[0] = settings->timeout;
@@ -632,7 +878,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     /* execute start command */
     if (*settings->startcmd && (ret = system(settings->startcmd))) {
         trace(NULL, 2, "command exec error: %s (%d)\n", settings->startcmd, ret);
-        notice(io, RCVCMD_NOTICE_COMMAND_EXEC_ERROR, NULL, settings->startcmd, ret);
+        notice(cmd, io, RCVCMD_NOTICE_START_COMMAND_ERROR, NULL, settings->startcmd, ret);
     }
     settings->solopt[0].posf = settings->strfmt[3];
     settings->solopt[1].posf = settings->strfmt[4];
@@ -643,7 +889,10 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
                      &settings->prcopt, settings->solopt, &cmd->moni, settings->rst, errmsg)) {
         trace(NULL, 2, "rtk server start error (%s)\n", errmsg);
         fprintf(stderr, "rtk server start error: %s\n", errmsg);
-        notice(io, RCVCMD_NOTICE_SERVER_START_ERROR, NULL, errmsg, 0);
+        if (settings->solopt[0].geoid > 0) {
+            closegeoid();
+        }
+        notice(cmd, io, RCVCMD_NOTICE_SERVER_START_ERROR, NULL, errmsg, 0);
         return RCVCMD_START_ERROR_SERVER;
     }
     /* load CLAS auxiliary files after server start.
@@ -697,24 +946,28 @@ static void stop_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
             continue;
         }
         if (!readcmd(settings->rcvcmds[i], s[i], 1)) {
-            notice(io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
+            notice(cmd, io, RCVCMD_NOTICE_NO_COMMAND_FILE, settings->rcvcmds[i], NULL, 0);
         } else {
             cmds[i] = s[i];
         }
     }
     /* stop rtk server */
     rtksvrstop(svr, cmds);
+    collect_events(cmd);
+    pthread_mutex_lock(&cmd->publish_lock);
+    publish_collected(cmd);
+    pthread_mutex_unlock(&cmd->publish_lock);
 
     /* execute stop command */
     if (*settings->stopcmd && (ret = system(settings->stopcmd))) {
         trace(NULL, 2, "command exec error: %s (%d)\n", settings->stopcmd, ret);
-        notice(io, RCVCMD_NOTICE_COMMAND_EXEC_ERROR, NULL, settings->stopcmd, ret);
+        notice(cmd, io, RCVCMD_NOTICE_STOP_COMMAND_ERROR, NULL, settings->stopcmd, ret);
     }
     if (settings->solopt[0].geoid > 0) {
         closegeoid();
     }
 
-    notice(io, RCVCMD_NOTICE_SERVER_STOPPED, NULL, NULL, 0);
+    notice(cmd, io, RCVCMD_NOTICE_SERVER_STOPPED, NULL, NULL, 0);
 }
 
 typedef enum { LIFECYCLE_START, LIFECYCLE_STOP, LIFECYCLE_RESTART, LIFECYCLE_SHUTDOWN } lifecycle_operation_t;
@@ -726,7 +979,7 @@ void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data) {
 }
 
 static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifecycle_operation_t operation) {
-    rcvcmd_result_t result = {RCVCMD_SUCCESS, RCVCMD_STOPPED};
+    rcvcmd_result_t result = {RCVCMD_SUCCESS, RCVCMD_STOPPED, 0};
     rcvcmd_start_error_t error = RCVCMD_START_ERROR_NONE;
     int stop, start = operation == LIFECYCLE_START || operation == LIFECYCLE_RESTART;
 
@@ -736,6 +989,7 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
         }
     }
+    result.seq = cmd->events.last;
     if (cmd->shutdown_requested && operation != LIFECYCLE_SHUTDOWN) {
         result.kind = RCVCMD_SHUTTING_DOWN;
     } else if (cmd->claimed) {
@@ -749,9 +1003,12 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
         if (stop) {
             cmd->lifecycle.stop_reason = RCVCMD_STOP_REQUEST;
         }
+        result.seq = publish_status(cmd);
+        if (!stop) cmd->solution_start_seq = result.seq;
         while (cmd->readers) {
             pthread_cond_wait(&cmd->publish_cond, &cmd->publish_lock);
         }
+        if (!stop) clear_run_solution(cmd);
         pthread_mutex_unlock(&cmd->publish_lock);
 
         if (stop) {
@@ -759,8 +1016,10 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             if (operation == LIFECYCLE_RESTART) {
                 pthread_mutex_lock(&cmd->publish_lock);
                 cmd->lifecycle.state = RCVCMD_STOPPED;
-                /* The later event unit publishes the intermediate stopped event here. */
+                publish_status(cmd);
                 cmd->lifecycle.state = RCVCMD_STARTING;
+                clear_run_solution(cmd);
+                cmd->solution_start_seq = publish_status(cmd);
                 pthread_mutex_unlock(&cmd->publish_lock);
             }
         }
@@ -784,6 +1043,8 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             cmd->lifecycle.state = RCVCMD_STOPPED;
         } else if (error == RCVCMD_START_ERROR_NONE) {
             cmd->lifecycle.state = RCVCMD_RUNNING;
+            cmd->run_mode = cmd->run_settings.prcopt.mode;
+            cmd->run_geoid = cmd->run_settings.solopt[0].geoid;
             cmd->lifecycle.last_error = RCVCMD_START_ERROR_NONE;
         } else {
             cmd->lifecycle.state = RCVCMD_STOPPED;
@@ -791,6 +1052,7 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
             cmd->lifecycle.last_error = error;
             result.kind = RCVCMD_START_FAILED;
         }
+        publish_status(cmd);
         cmd->claimed = 0;
         pthread_cond_broadcast(&cmd->publish_cond);
     }
@@ -1039,72 +1301,71 @@ int rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data) {
     return 1;
 }
 
-int rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data) {
-    rtksvr_t* svr = cmd->svr;
-    int n;
-
-    if (!begin_read(cmd)) {
-        memset(data, 0, sizeof(*data));
+static int read_errors_locked(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_error_t* data) {
+    uint64_t seq, first = rcvevent_oldest(&cmd->events);
+    data->n = 0;
+    if (*cursor >= cmd->events.last) {
+        data->errbuf[0] = '\0';
         return 0;
     }
-    rtksvrlock(svr);
-    data->n = n = svr->rtk.neb;
-    data->errbuf[0] = '\0';
-    if (n > 0) {
-        svr->rtk.errbuf[n] = '\0';
-        memcpy(data->errbuf, svr->rtk.errbuf, n);
-        data->errbuf[n] = '\0';
-        svr->rtk.neb = 0;
-    }
-    rtksvrunlock(svr);
-    end_read(cmd);
-    return 1;
-}
-
-int rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data) {
-    rtksvr_t* svr = cmd->svr;
-    int i;
-
-    if (!begin_read(cmd)) {
-        memset(data, 0, sizeof(*data));
-        return 0;
-    }
-    rtksvrlock(svr);
-    data->nsol = svr->nsol;
-    for (i = 0; i < svr->nsol; i++) {
-        data->solbuf[i] = svr->solbuf[i];
-    }
-    if (data->nsol > 0) {
-        for (i = 0; i < 3; i++) {
-            data->rb[i] = svr->rtk.rb[i];
+    if (first < *cursor + 1) first = *cursor + 1;
+    for (seq = first; seq <= cmd->events.last; seq++) {
+        const rcvevent_t* ev = rcvevent_get(&cmd->events, seq);
+        if (ev->kind == RCVEVENT_LOG && ev->data.log.origin == RCVEVENT_LOG_ERRBUF) {
+            size_t n = strlen(ev->data.log.text);
+            if (n + 1 > (size_t)(MAXERRMSG - data->n)) break;
+            memcpy(data->errbuf + data->n, ev->data.log.text, n);
+            data->n += (int)n;
+            data->errbuf[data->n++] = '\n';
         }
+        *cursor = seq;
     }
-    svr->nsol = 0;
-    rtksvrunlock(svr);
-    end_read(cmd);
-    return 1;
+    data->errbuf[data->n] = '\0';
+    return data->n;
 }
 
-int rcvcmd_clear_error(rcvcmd_t* cmd) {
-    rtksvr_t* svr = cmd->svr;
-    if (!begin_read(cmd)) {
-        return 0;
-    }
-    rtksvrlock(svr);
-    svr->rtk.neb = 0;
-    rtksvrunlock(svr);
-    end_read(cmd);
-    return 1;
+uint64_t rcvcmd_last_seq(rcvcmd_t* cmd) {
+    uint64_t seq;
+    pthread_mutex_lock(&cmd->publish_lock);
+    seq = cmd->events.last;
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return seq;
 }
 
-int rcvcmd_clear_solution(rcvcmd_t* cmd) {
-    rtksvr_t* svr = cmd->svr;
-    if (!begin_read(cmd)) {
-        return 0;
+void rcvcmd_snapshot(rcvcmd_t* cmd, rcvcmd_snapshot_t* data) {
+    pthread_mutex_lock(&cmd->publish_lock);
+    memset(data, 0, sizeof(*data));
+    data->seq = cmd->events.last;
+    data->lifecycle = cmd->lifecycle;
+    if (cmd->lifecycle.state == RCVCMD_RUNNING) {
+        data->mode = cmd->run_mode;
+        data->has_solution = cmd->has_solution;
+        if (cmd->has_solution) data->solution = cmd->last_solution;
     }
-    /* Keep the legacy unlocked discard before cyclic solution display until
-     * the solution-event work (D-17). */
-    svr->nsol = 0;
-    end_read(cmd);
-    return 1;
+    pthread_mutex_unlock(&cmd->publish_lock);
+}
+
+int rcvcmd_read_events(rcvcmd_t* cmd, uint64_t after, rcvevent_t* out, int limit, rcvevent_read_t* res) {
+    int result;
+    pthread_mutex_lock(&cmd->publish_lock);
+    result = rcvevent_read(&cmd->events, after, out, limit, res);
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return result;
+}
+
+int rcvcmd_read_solutions(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_solution_t* data) {
+    uint64_t after;
+    pthread_mutex_lock(&cmd->publish_lock);
+    after = *cursor > cmd->solution_start_seq ? *cursor : cmd->solution_start_seq;
+    data->nsol = rcvevent_read_newest(&cmd->events, after, RCVEVENT_SOLUTION, data->events, MAXSOLBUF, cursor);
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return data->nsol;
+}
+
+int rcvcmd_read_errors(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_error_t* data) {
+    int n;
+    pthread_mutex_lock(&cmd->publish_lock);
+    n = read_errors_locked(cmd, cursor, data);
+    pthread_mutex_unlock(&cmd->publish_lock);
+    return n;
 }

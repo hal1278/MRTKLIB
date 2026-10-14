@@ -213,6 +213,7 @@ add_executable(mrtk
     apps/rnx2rtkp/rnx2rtkp.c
     apps/rtkrcv/rtkrcv.c
     apps/rtkrcv/rcvcmd.c
+    apps/rtkrcv/rcvevent.c
     apps/rtkrcv/vt.c
     apps/str2str/str2str.c
     apps/convbin/convbin.c
@@ -225,7 +226,7 @@ add_executable(mrtk
     apps/l6extract/l6extract.c
 )
 # The command layer uses C11, as the core does; override the global legacy -ansi flag.
-set_source_files_properties(apps/rtkrcv/rcvcmd.c PROPERTIES
+set_source_files_properties(apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c PROPERTIES
     COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-std=c11>"
 )
 target_include_directories(mrtk PRIVATE apps/rtkrcv)
@@ -366,6 +367,31 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
     set_tests_properties(utest_rtksvr_lifecycle_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
+
+# Command-layer events: sequential cases share its sole process-global instance.
+add_executable(utest_rcvcmd_events ${_UTEST_DIR}/utest_rcvcmd_events.c
+    apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c)
+target_compile_options(utest_rcvcmd_events PRIVATE -std=c11)
+target_include_directories(utest_rcvcmd_events PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvcmd_events PRIVATE mrtklib pthread)
+add_test(NAME utest_rcvcmd_events COMMAND utest_rcvcmd_events)
+set_tests_properties(utest_rcvcmd_events PROPERTIES LABELS "utest" TIMEOUT 30)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_definitions(utest_rcvcmd_events PRIVATE RCVCMD_TEST_THREADS)
+    target_link_options(utest_rcvcmd_events PRIVATE -Wl,--wrap=pthread_create -Wl,--wrap=pthread_join)
+    foreach(case close_without_initialize destroy_without_initialize collector_create_failure)
+        add_test(NAME utest_rcvcmd_events_${case} COMMAND utest_rcvcmd_events ${case})
+        set_tests_properties(utest_rcvcmd_events_${case} PROPERTIES LABELS "utest" TIMEOUT 5)
+    endforeach()
+endif()
+
+# Event ring of the rtkrcv command layer (apps/rtkrcv/rcvevent.c): seq, lost, more.
+add_executable(utest_rcvevent ${_UTEST_DIR}/utest_rcvevent.c apps/rtkrcv/rcvevent.c)
+target_compile_options(utest_rcvevent PRIVATE -std=c11)
+target_include_directories(utest_rcvevent PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvevent PRIVATE mrtklib)
+add_test(NAME utest_rcvevent COMMAND utest_rcvevent)
+set_tests_properties(utest_rcvevent PROPERTIES LABELS "utest")
 
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)

@@ -28,7 +28,9 @@
  *
  * Each display has one reader filling caller-owned storage. Server values use
  * the existing server lock; stream fields use their own stream locks.
- * Solution/error reads consume the shared buffers. Adapters print after unlock.
+ * Solution/error readers use caller-owned cursors in every lifecycle state.
+ * Events are collected once and copied under the publish mutex; adapters print
+ * after unlock.
  * Readers allocate no large temporary
  * snapshots; callers keep one copy in their existing display stack frame.
  * Pointer members copied inside rtk_t are not live handles for callers to
@@ -36,24 +38,25 @@
  * only the display fields, with no copied locks or port handles.
  *
  * A publish mutex protects lifecycle state, claims and counted readers.
- * Start/stop/restart exclude readers for the whole transition. Readers accepted
- * while stopped retain the last values; refused reads zero caller storage.
+ * Start/stop/restart exclude server/stream readers for the whole transition.
+ * Those accepted while stopped retain the last values; refused reads zero
+ * caller storage. Event readers remain available during transitions.
  * Never take server/stream locks or call adapters under the publish mutex.
  * A configuration mutex serializes option operations and console settings.
  * Configuration -> publish lock is allowed; never wait for configuration while
  * holding the publish mutex. Start captures staged settings and clears modified
  * flags under configuration, then releases it and prepares a separate run copy.
  * Shutdown requests share the publish mutex; an active transition finishes
- * before final shutdown. Events are not implemented yet.
+ * before final shutdown. Status, solution and log events share one sequence.
  * Stream formats use the server lock, separately from stream field copies.
- * The legacy unlocked cyclic-solution discard is retained until solution-event
- * work (D-17).
+ * The collector is joined at close, before trace teardown.
  */
 #ifndef RCVCMD_H
 #define RCVCMD_H
 
 #include "mrtklib/mrtk_options.h"
 #include "mrtklib/mrtk_rtksvr.h"
+#include "rcvevent.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -73,7 +76,8 @@ typedef enum {
     RCVCMD_NOTICE_NO_ANTENNA,
     RCVCMD_NOTICE_ANTENNA_FILE_ERROR,
     RCVCMD_NOTICE_GEOID_FILE_ERROR,
-    RCVCMD_NOTICE_COMMAND_EXEC_ERROR,
+    RCVCMD_NOTICE_START_COMMAND_ERROR,
+    RCVCMD_NOTICE_STOP_COMMAND_ERROR,
     RCVCMD_NOTICE_SERVER_START_ERROR,
     RCVCMD_NOTICE_SERVER_STOPPED
 } rcvcmd_notice_code_t;
@@ -123,7 +127,27 @@ typedef enum {
 typedef struct {
     rcvcmd_result_kind_t kind;
     rcvcmd_state_t state; /* current state, including the transition for busy */
+    uint64_t seq;         /* claim event, or current boundary for an unchanged request */
 } rcvcmd_result_t;
+
+typedef struct {
+    uint64_t seq;
+    rcvcmd_lifecycle_t lifecycle;
+    int mode;            /* valid while running */
+    int has_solution;    /* valid while running */
+    rcvevent_t solution; /* last solution event of this run, including NONE */
+} rcvcmd_snapshot_t;
+
+/** @brief Return the last published sequence under the publish mutex. */
+uint64_t rcvcmd_last_seq(rcvcmd_t* cmd);
+/** @brief Copy sync/getStatus and its event boundary atomically. */
+void rcvcmd_snapshot(rcvcmd_t* cmd, rcvcmd_snapshot_t* data);
+/** @brief Copy events after a cursor; return -1 for a cursor beyond the boundary.
+ * @param[out] out Caller storage for at least limit events.
+ * @param[in] limit Maximum events to copy (> 0).
+ * @param[out] res Count, next cursor, more and lost-event information.
+ */
+int rcvcmd_read_events(rcvcmd_t* cmd, uint64_t after, rcvevent_t* out, int limit, rcvevent_read_t* res);
 
 /** @brief Copy lifecycle state, stop reason and structured last start error. */
 void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data);
@@ -161,7 +185,7 @@ int rcvcmd_shutdown_requested(rcvcmd_t* cmd);
  */
 void rcvcmd_shutdown(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
-/** @brief Allocate the sole server instance; NULL on allocation failure or an existing instance. */
+/** @brief Allocate resources and start the collector; NULL on failure or an existing instance. */
 rcvcmd_t* rcvcmd_create(void);
 /** @brief Free the server after the adapter has torn down its runtime context. */
 void rcvcmd_destroy(rcvcmd_t* cmd);
@@ -171,7 +195,7 @@ void rcvcmd_destroy(rcvcmd_t* cmd);
  */
 void rcvcmd_initialize(rcvcmd_t* cmd, char* file, const char* password, const char* staname, int moniport, int outstat,
                        gtime_t rst);
-/** @brief Close monitor and solution status before runtime context teardown. */
+/** @brief Join the collector, then close initialized monitor/status before runtime teardown. */
 void rcvcmd_close(rcvcmd_t* cmd);
 /** @brief Save navigation on normal shutdown, before trace/context teardown. */
 void rcvcmd_save_navigation(rcvcmd_t* cmd);
@@ -267,13 +291,27 @@ typedef struct {
 } rcvcmd_error_t;
 
 typedef struct {
-    sol_t solbuf[MAXSOLBUF];
-    double rb[3];
+    rcvevent_t events[MAXSOLBUF];
     int nsol;
 } rcvcmd_solution_t;
 
-/* Readers/clears return 1 when accepted, 0 during a claim/transition.
- * Refused readers zero all caller storage; refused clears do nothing. */
+/** @brief Copy newest solutions of the latest run after cursor, oldest first, in any state.
+ * Solutions before the latest starting event are skipped, including during that start.
+ * @param[in,out] cursor Advanced to the last published sequence.
+ * @param[out] data Caller storage for at most MAXSOLBUF solution events.
+ * @return Number of solutions copied.
+ */
+int rcvcmd_read_solutions(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_solution_t* data);
+/** @brief Copy errbuf-origin texts with newlines in any lifecycle state.
+ * Dropped events are skipped. Stop before a text that will not fit.
+ * @param[in,out] cursor Advanced through the last examined event.
+ * @param[out] data Caller storage with MAXERRMSG + 1 text bytes.
+ * @return Number of text bytes copied, excluding the terminating NUL.
+ */
+int rcvcmd_read_errors(rcvcmd_t* cmd, uint64_t* cursor, rcvcmd_error_t* data);
+
+/* Server/stream readers below return 1 when accepted, 0 during a claim/transition.
+ * Refused readers zero all caller storage. */
 
 /** @brief Copy status fields and the existing deep copies of vector values.
  * @param[in] cmd The sole command-layer instance.
@@ -306,20 +344,6 @@ int rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
  * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
  */
 int rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data);
-/** @brief Copy and clear pending errors; errbuf is terminated, n retains the byte count.
- * @param[in] cmd The sole command-layer instance.
- * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
- */
-int rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data);
-/** @brief Copy and clear pending solutions; only rows below nsol and their rb are valid.
- * @param[in] cmd The sole command-layer instance.
- * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
- */
-int rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data);
-/** @brief Discard errors under the server lock at the start of the error command. */
-int rcvcmd_clear_error(rcvcmd_t* cmd);
-/** @brief Preserve the unlocked discard before cyclic solution display until D-17. */
-int rcvcmd_clear_solution(rcvcmd_t* cmd);
 
 #ifdef __cplusplus
 }
