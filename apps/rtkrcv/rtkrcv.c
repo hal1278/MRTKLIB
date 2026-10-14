@@ -204,11 +204,7 @@ static void printver(void) {
     exit(0);
 }
 /* external stop signal ------------------------------------------------------*/
-static void sigshut(int sig) {
-    trace(NULL, 3, "sigshut: sig=%d\n", sig);
-
-    intflg = 1;
-}
+static void sigshut(int sig) { intflg = 1; }
 /* SIGSEGV handler (best-effort, async-signal-safe only) ---------------------*/
 /* pre-built sigaction struct for restoring default handler (async-signal-safe:
  * avoids calling sigemptyset() inside the signal handler) */
@@ -318,11 +314,12 @@ static const rcvcmd_io_t process_io = {NULL, process_notice, console_confirm_ove
 
 /* login ---------------------------------------------------------------------*/
 static int login(vt_t* vt) {
-    char buff[256];
+    char buff[256], password[1024];
 
-    trace(NULL, 3, "login: passwd=%s type=%d\n", rcvcmd_password(cmd), vt->type);
+    rcvcmd_password(cmd, password, sizeof(password));
+    trace(NULL, 3, "login: passwd=%s type=%d\n", password, vt->type);
 
-    if (!*rcvcmd_password(cmd) || !vt->type) {
+    if (!*password || !vt->type) {
         return 1;
     }
 
@@ -336,7 +333,8 @@ static int login(vt_t* vt) {
             return 0;
         }
         vt->blind = 0;
-        if (!strcmp(buff, rcvcmd_password(cmd))) {
+        rcvcmd_password(cmd, password, sizeof(password));
+        if (!strcmp(buff, password)) {
             break;
         }
         vt_printf(vt, "\ninvalid password\n");
@@ -887,7 +885,7 @@ static void prstream(vt_t* vt) {
     const char* sol[] = {"llh", "xyz", "enu", "nmea", "stat", "-"};
     const stream_t* stream;
     const int* format;
-    int i;
+    int i, read;
 
     trace(NULL, 4, "prstream:\n");
 
@@ -898,11 +896,11 @@ static void prstream(vt_t* vt) {
     stream = data->stream;
     format = data->format;
 
-    rcvcmd_read_stream(cmd, data);
+    read = rcvcmd_read_stream(cmd, data);
 
     vt_printf(vt, "\n%s%-12s %-8s %-5s %s %10s %7s %10s %7s %-24s %s%s\n", ESC_BOLD, "Stream", "Type", "Fmt", "S",
               "In-byte", "In-bps", "Out-byte", "Out-bps", "Path", "Message", ESC_RESET);
-    for (i = 0; i < 9; i++) {
+    for (i = 0; read && i < 9; i++) {
         vt_printf(vt, "%-12s %-8s %-5s %s %10d %7d %10d %7d %-24.24s %s\n", ch[i], type[stream[i].type],
                   i < 3 ? fmt[format[i]] : (i < 5 || i == 8 ? sol[format[i]] : "-"),
                   stream[i].state < 0 ? "E" : (stream[i].state ? "C" : "-"), stream[i].inb, stream[i].inr,
@@ -973,13 +971,24 @@ static int parse_sysopt(const char* arg) {
     }
     return sys;
 }
+/* lifecycle result ----------------------------------------------------------*/
+static int lifecycle_result(vt_t* vt, rcvcmd_result_t result) {
+    if (result.kind == RCVCMD_SHUTTING_DOWN) {
+        vt_printf(vt, "rtk server shutting down\n");
+    } else if (result.kind == RCVCMD_BUSY) {
+        vt_printf(vt, "rtk server busy (%s)\n", result.state == RCVCMD_STARTING ? "starting" : "stopping");
+    } else if (result.kind == RCVCMD_ALREADY_RUNNING) {
+        vt_printf(vt, "rtk server start error (server already started)\n");
+    }
+    return result.kind == RCVCMD_SUCCESS;
+}
 /* start command -------------------------------------------------------------*/
 static void cmd_start(char** args, int narg, vt_t* vt) {
     rcvcmd_io_t io = {NULL, console_notice, console_confirm_overwrite};
     trace(NULL, 3, "cmd_start:\n");
     io.arg = vt;
 
-    if (!rcvcmd_start(cmd, &io)) {
+    if (!lifecycle_result(vt, rcvcmd_start(cmd, &io))) {
         return;
     }
     vt_printf(vt, "rtk server start\n");
@@ -990,7 +999,9 @@ static void cmd_stop(char** args, int narg, vt_t* vt) {
     trace(NULL, 3, "cmd_stop:\n");
     io.arg = vt;
 
-    rcvcmd_stop(cmd, &io);
+    if (!lifecycle_result(vt, rcvcmd_stop(cmd, &io))) {
+        return;
+    }
     vt_printf(vt, "rtk server stop\n");
 }
 /* restart command -----------------------------------------------------------*/
@@ -999,8 +1010,7 @@ static void cmd_restart(char** args, int narg, vt_t* vt) {
     trace(NULL, 3, "cmd_restart:\n");
     io.arg = vt;
 
-    rcvcmd_stop(cmd, &io);
-    if (!rcvcmd_start(cmd, &io)) {
+    if (!lifecycle_result(vt, rcvcmd_restart(cmd, &io))) {
         return;
     }
     vt_printf(vt, "rtk server restart\n");
@@ -1203,48 +1213,50 @@ static void cmd_ssr(char** args, int narg, vt_t* vt) {
 }
 /* option command ------------------------------------------------------------*/
 static void cmd_option(char** args, int narg, vt_t* vt) {
-    const opt_t* rcvopts = rcvcmd_options(cmd, 0);
-    const opt_t* sysopts = rcvcmd_options(cmd, 1);
-    char buff[MAXSTR], *p;
-    int i, n;
+    const opt_t* opts[2];
+    char *listing, *p;
+    size_t size = 1;
+    int i, system;
 
     trace(NULL, 3, "cmd_option:\n");
+    opts[0] = rcvcmd_options(cmd, 0);
+    opts[1] = rcvcmd_options(cmd, 1);
 
-    for (i = 0; *rcvopts[i].name; i++) {
-        if (narg >= 2 && !strstr(rcvopts[i].name, args[1])) {
-            continue;
+    /* String values fit MAXSTR; enum values also come from the comments. */
+    for (system = 0; system < 2; system++) {
+        for (i = 0; *opts[system][i].name; i++) {
+            size += MAXSTR + strlen(opts[system][i].name) + 2 * strlen(opts[system][i].comment) + 32;
         }
-        p = buff;
-        p += sprintf(p, "%-18s =", rcvopts[i].name);
-        p += opt2str(rcvopts + i, p);
-        if (*rcvopts[i].comment) {
-            if ((n = (int)(buff + 30 - p)) > 0) {
-                p += sprintf(p, "%*s", n, "");
-            }
-            p += sprintf(p, " # (%s)", rcvopts[i].comment);
-        }
-        vt_printf(vt, "%s%s\n", rcvcmd_option_modified(cmd, 0, i) ? "*" : " ", buff);
     }
-    for (i = 0; *sysopts[i].name; i++) {
-        if (narg >= 2 && !strstr(sysopts[i].name, args[1])) {
-            continue;
-        }
-        p = buff;
-        p += sprintf(p, "%-18s =", sysopts[i].name);
-        p += opt2str(sysopts + i, p);
-        if (*sysopts[i].comment) {
-            if ((n = (int)(buff + 30 - p)) > 0) {
-                p += sprintf(p, "%*s", n, "");
-            }
-            p += sprintf(p, " # (%s)", sysopts[i].comment);
-        }
-        vt_printf(vt, "%s%s\n", rcvcmd_option_modified(cmd, 1, i) ? "*" : " ", buff);
+    if (!(listing = (char*)malloc(size))) {
+        trace(NULL, 2, "cmd_option: snapshot allocation failed\n");
+        return;
     }
+
+    rcvcmd_lock_options(cmd);
+    p = listing;
+    *p = '\0';
+    for (system = 0; system < 2; system++) {
+        for (i = 0; *opts[system][i].name; i++) {
+            if (narg >= 2 && !strstr(opts[system][i].name, args[1])) {
+                continue;
+            }
+            *p++ = rcvcmd_option_modified(cmd, system, i) ? '*' : ' ';
+            p += opt2buf(opts[system] + i, p);
+            *p++ = '\n';
+            *p = '\0';
+        }
+    }
+    rcvcmd_unlock_options(cmd);
+
+    vt_puts(vt, listing);
+    free(listing);
 }
 /* set command ---------------------------------------------------------------*/
 static void cmd_set(char** args, int narg, vt_t* vt) {
     opt_t* opt;
     rcvcmd_option_t option;
+    rcvcmd_config_result_t result;
     char buff[MAXSTR];
 
     trace(NULL, 3, "cmd_set:\n");
@@ -1259,6 +1271,10 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
     }
     opt = option.opt;
     if (narg < 3) {
+        if (!rcvcmd_can_set_option(cmd, &option)) {
+            vt_printf(vt, "option not changed: stop rtk server first\n");
+            return;
+        }
         vt_printf(vt, "%s", opt->name);
         if (*opt->comment) {
             vt_printf(vt, " (%s)", opt->comment);
@@ -1272,13 +1288,18 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
     }
 
     chop(buff);
-    if (!rcvcmd_set_option(cmd, &option, buff)) {
+    result = rcvcmd_set_option(cmd, &option, buff);
+    if (result == RCVCMD_CONFIG_REFUSED) {
+        vt_printf(vt, "option not changed: stop rtk server first\n");
+        return;
+    }
+    if (result == RCVCMD_CONFIG_ERROR) {
         vt_printf(vt, "invalid option value: %s %s\n", opt->name, buff);
         return;
     }
 
     vt_printf(vt, "option %s changed.", opt->name);
-    if (rcvcmd_mark_option_modified(cmd, &option)) {
+    if (rcvcmd_option_requires_restart(&option)) {
         vt_printf(vt, " restart to enable it");
     }
     vt_printf(vt, "\n");
@@ -1286,6 +1307,7 @@ static void cmd_set(char** args, int narg, vt_t* vt) {
 /* load command --------------------------------------------------------------*/
 static void cmd_load(char** args, int narg, vt_t* vt) {
     char file[MAXSTR] = "";
+    rcvcmd_config_result_t result;
 
     trace(NULL, 3, "cmd_load:\n");
 
@@ -1294,7 +1316,12 @@ static void cmd_load(char** args, int narg, vt_t* vt) {
     } else {
         sprintf(file, "%s/%s", OPTSDIR, OPTSFILE);
     }
-    if (!rcvcmd_load(cmd, file)) {
+    result = rcvcmd_load(cmd, file);
+    if (result == RCVCMD_CONFIG_REFUSED) {
+        vt_printf(vt, "options not loaded: stop rtk server first\n");
+        return;
+    }
+    if (result == RCVCMD_CONFIG_ERROR) {
         vt_printf(vt, "no options file: %s\n", file);
         return;
     }
@@ -1493,6 +1520,7 @@ static void* con_thread(void* arg) {
                 break;
             case 19: /* shutdown */
                 if (!strcmp(args[0], "shutdown")) {
+                    rcvcmd_request_shutdown(cmd);
                     vt_printf(con->vt, "rtk server shutdown ...\n");
                     sleepms(1000);
                     intflg = 1;
@@ -1643,8 +1671,7 @@ static void accept_sock(int ssock, con_t** con) {
  *       Stop RTK server.
  *
  *     restart
- *       Restart RTK server. If the processing options are set, execute the
- *       command to enable the changes.
+ *       Stop and start RTK server. When stopped, start it.
  *
  *     solution [cycle]
  *       Show solutions. Without option, only one solution is shown. With
@@ -1676,13 +1703,13 @@ static void accept_sock(int ssock, con_t** con) {
  *       displayed. With option, only pattern-matched options are displayed.
  *
  *     set opt [val]
- *       Set the value of a processing option to val. With out option val,
- *       prompt message is shown to input the value. The change of the
- *       processing option is not enabled before RTK server is restarted.
+ *       Set an option to val, or prompt for the value if omitted. Stop the
+ *       server first for non-console options; console-* changes are immediate.
+ *       Apply stopped processing-option changes with start or restart.
  *
  *     load [file]
- *       Load processing options from file. Without option, default file
- *       rtkrcv.conf is used. To enable the changes, restart RTK server.
+ *       Load processing options while stopped. Without option, default file
+ *       rtkrcv.conf is used. Apply the changes with start or restart.
  *
  *     save [file]
  *       Save current processing optons to file. Without option, default file
@@ -1700,13 +1727,16 @@ static void accept_sock(int ssock, con_t** con) {
  *       the command.
  *
  *     shutdown
- *       Shutdown RTK server and exit the program.
+ *       Record shutdown immediately, finish any current transition, then stop
+ *       RTK server and exit. Further start/stop/restart commands are refused.
  *
  *     !command [arg...]
  *       Execute command by the operating system shell. Do not use the
  *       interactive command.
  *
  * Notes
+ *     start/stop/restart report busy while a lifecycle transition is in progress.
+ *     Transition displays keep their format with zero values or headers only.
  *     Short form of a command is allowed. In case of the short form, the
  *     command is distinguished according to header characters.
  *
@@ -1835,7 +1865,8 @@ int mrtk_run(int argc, char** argv) {
         sleepms(100);
     }
     /* stop rtk server */
-    rcvcmd_stop(cmd, &process_io);
+    rcvcmd_request_shutdown(cmd);
+    rcvcmd_shutdown(cmd, &process_io);
 
     if (port) {
         /* close socket for remote console */

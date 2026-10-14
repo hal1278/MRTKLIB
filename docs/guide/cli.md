@@ -87,6 +87,31 @@ mrtk run -s --config conf/claslib/rtkrcv_2ch.toml
 mrtk run -s --config conf/malib/rtkrcv.toml --port 2105
 ```
 
+#### Console commands
+
+`start`, `stop`, and `restart` are serialized across consoles. During a
+transition they reply `rtk server busy (starting)` or `rtk server busy
+(stopping)`. Starting a running server replies `rtk server start error
+(server already started)`. Stopping a stopped server replies `rtk server stop`
+without further effect; restarting a stopped server starts it.
+
+Stop the server before changing a non-`console-*` option with `set`, or loading
+options with `load`. Otherwise the replies are `option not changed: stop rtk
+server first` and `options not loaded: stop rtk server first`. Interactive
+`set` refuses before prompting and checks again when the value is submitted.
+`set console-*` takes effect immediately in any state. Stopped changes retain
+the existing restart notices; apply them with `start` or `restart`. `option`
+and `save` remain available.
+
+During transitions, `status` retains its labels and shows `stop` with zero
+values; `satellite` and `stream` show their headers, and `solution` and `error`
+have no data rows. After a stop, displays retain the last values.
+
+`shutdown` records the request immediately, lets any current transition
+finish, then stops the server and exits. After the request, `start`, `stop`,
+and `restart` reply `rtk server shutting down`. SIGINT, SIGTERM, and SIGUSR2
+also finish the current transition before stopping and exiting.
+
 ---
 
 ## Data & Streaming
