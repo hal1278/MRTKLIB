@@ -23,41 +23,56 @@
 extern "C" {
 #endif
 
-/* Stage 1 owns configuration and process server/monitor resources. Server
- * start/stop and display reads still use temporary accessors below. Threading
+/* The layer owns configuration, server start/stop, and process server/monitor
+ * resources. Display reads still use temporary accessors below. Threading
  * remains the same as before the split; no configuration mutex is added. */
 typedef struct rcvcmd rcvcmd_t;
-
-/* temporary until stage 2 (solution height access until stage 3) */
-typedef struct {
-    int strtype[8];        /* stream types */
-    char strpath[8][1024]; /* stream paths */
-    int strfmt[5];         /* stream formats */
-    int svrcycle;          /* server cycle (ms) */
-    int timeout;           /* timeout time (ms) */
-    int reconnect;         /* reconnect interval (ms) */
-    int nmeacycle;         /* nmea request cycle (ms) */
-    int buffsize;          /* input buffer size (bytes) */
-    int navmsgsel;         /* navigation mesaage select */
-    char proxyaddr[256];   /* http/ntrip proxy */
-    int nmeareq;           /* nmea request type (0:off,1:lat/lon,2:single) */
-    double nmeapos[3];     /* nmea position (lat/lon/height) (deg,m) */
-    char rcvcmds[3][1024]; /* receiver commands files */
-    char startcmd[1024];   /* start command */
-    char stopcmd[1024];    /* stop command */
-    int fswapmargin;       /* file swap margin (s) */
-    char sta_name[256];    /* station name */
-    prcopt_t prcopt;       /* processing options */
-    solopt_t solopt[2];    /* solution options */
-    filopt_t filopt;       /* file options */
-    gtime_t rst;           /* raw/rtcm data start time */
-} rcvcmd_settings_t;
 
 typedef struct {
     opt_t* opt;
     int system;
     int index;
 } rcvcmd_option_t;
+
+typedef enum {
+    RCVCMD_NOTICE_CORRECTION_ERROR,
+    RCVCMD_NOTICE_NO_COMMAND_FILE,
+    RCVCMD_NOTICE_NO_ANTENNA,
+    RCVCMD_NOTICE_ANTENNA_FILE_ERROR,
+    RCVCMD_NOTICE_GEOID_FILE_ERROR,
+    RCVCMD_NOTICE_COMMAND_EXEC_ERROR,
+    RCVCMD_NOTICE_SERVER_START_ERROR,
+    RCVCMD_NOTICE_SERVER_STOPPED
+} rcvcmd_notice_code_t;
+
+/* Fields are borrowed for the synchronous callback only. text contains the
+ * antenna name, command, or core error detail, never a formatted console line.
+ * Raw command/error fields may contain credentials; a later RPC adapter must
+ * construct its errors from the code/status and suitably masked fields. */
+typedef struct {
+    rcvcmd_notice_code_t code;
+    const char* path;
+    const char* text;
+    int status;
+} rcvcmd_notice_t;
+
+typedef struct {
+    void* arg;
+    void (*notice)(void* arg, const rcvcmd_notice_t* notice);
+    int (*confirm_overwrite)(void* arg, const char* path); /* 1: overwrite / no file, 0: abort */
+} rcvcmd_io_t;
+
+/** @brief Start the server using synchronous adapter callbacks.
+ * @param[in,out] cmd The sole command-layer instance.
+ * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
+ * @return 1 on success, 0 on failure or overwrite refusal.
+ */
+int rcvcmd_start(rcvcmd_t* cmd, const rcvcmd_io_t* io);
+/** @brief Stop a running server; a stopped server emits no notice.
+ * @param[in,out] cmd The sole command-layer instance.
+ * @param[in] io Adapter output and overwrite callbacks; both must be supplied.
+ */
+void rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io);
 
 /** @brief Allocate the sole server instance; NULL on allocation failure or an existing instance. */
 rcvcmd_t* rcvcmd_create(void);
@@ -96,8 +111,6 @@ int rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* option, const char* 
 /** @brief Mark a non-console option modified; return 1 if restart text is required.
  * Called after the adapter prints the changed-option text to retain the old ordering. */
 int rcvcmd_mark_option_modified(rcvcmd_t* cmd, const rcvcmd_option_t* option);
-/** @brief Clear modified flags at the existing point in server start. */
-void rcvcmd_clear_modified(rcvcmd_t* cmd);
 /** @brief Load system then receiver options, preserving partial changes on failure. */
 int rcvcmd_load(rcvcmd_t* cmd, const char* file);
 /** @brief Write receiver then system options with the original comment; return 1 on success. */
@@ -106,8 +119,8 @@ int rcvcmd_save(rcvcmd_t* cmd, const char* file);
 /* temporary until stage 3 */
 rtksvr_t* rcvcmd_server(rcvcmd_t* cmd);
 stream_t* rcvcmd_monitor(rcvcmd_t* cmd);
-/* temporary until stage 2 (solution height access until stage 3) */
-rcvcmd_settings_t* rcvcmd_settings(rcvcmd_t* cmd);
+/* temporary until stage 3 */
+int rcvcmd_solution_height(rcvcmd_t* cmd);
 
 #ifdef __cplusplus
 }
