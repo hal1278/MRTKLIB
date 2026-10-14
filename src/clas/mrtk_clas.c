@@ -2978,40 +2978,6 @@ static int decode_qzs_msg(clas_ctx_t* ctx, int ch) {
 }
 
 /*============================================================================
- * L6 Frame Assembly — assemble 5 subframes into bit buffer
- *===========================================================================*/
-
-static void read_qzs_msg_l6(clas_l6buf_t* l6, uint8_t* pbuff) {
-    int i = 0, j, k, jn, jn0 = -1;
-    uint8_t* buff;
-
-    for (j = 0; j < 5; j++) {
-        buff = pbuff + j * BLEN_MSG;
-        if (buff[5] & 0x01) { /* subframe indicator (head) */
-            jn0 = j;
-            break;
-        }
-    }
-    if (jn0 < 0) {
-        memset(l6->buff, 0, sizeof(l6->buff));
-        return;
-    }
-
-    for (j = 0, jn = jn0; j < 5; j++, jn++) {
-        if (jn >= 5) {
-            jn = 0;
-        }
-        buff = pbuff + jn * BLEN_MSG;
-        setbitu(l6->buff, i, 7, buff[6] & 0x7f);
-        i += 7;
-        for (k = 0; k < 211; k++) {
-            setbitu(l6->buff, i, 8, buff[7 + k]);
-            i += 8;
-        }
-    }
-}
-
-/*============================================================================
  * I/O Functions — byte-by-byte and file-based input
  *===========================================================================*/
 
@@ -3107,7 +3073,7 @@ extern int clas_route_l6frame(clas_ctx_t* ctx, int prn, int ptn, int l6mrg, gtim
 
 extern int clas_input_cssr(clas_ctx_t* ctx, uint8_t data, int ch) {
     clas_l6buf_t* l6 = &ctx->l6buf[ch];
-    uint8_t prn, msgid, alert;
+    l6_header_t hdr;
 
     trace(NULL, 5, "clas_input_cssr: data=%02x ch=%d\n", data, ch);
 
@@ -3132,17 +3098,15 @@ extern int clas_input_cssr(clas_ctx_t* ctx, uint8_t data, int ch) {
     }
     l6->nbyte = 0;
 
-    prn = l6->fbuff[4];
-    msgid = l6->fbuff[5];
-    alert = (l6->fbuff[6] >> 7) & 0x1;
-    if (alert != 0) {
+    l6_parse_header(l6->fbuff, &hdr);
+    if (hdr.alert != 0) {
         trace(NULL, 1, "CSSR frame alert!: ch=%d\n", ch);
     }
 
-    ctx->l6delivery[ch] = prn;
-    ctx->l6facility[ch] = clas_get_correct_fac(msgid);
+    ctx->l6delivery[ch] = hdr.prn;
+    ctx->l6facility[ch] = clas_get_correct_fac(hdr.msgid);
 
-    if (msgid & 0x01) { /* subframe indicator */
+    if (hdr.sf_ind) { /* subframe indicator */
         l6->havebit = 0;
         l6->decode_start = 1;
         l6->nbit = 0;

@@ -50,7 +50,7 @@ extern "C" {
  *===========================================================================*/
 
 typedef struct {                      /* RTK server type */
-    int state;                        /* server state (0:stop,1:running) */
+    int state;                        /* server state (0:stop,1:running); read under rtksvrlock */
     int cycle;                        /* processing cycle (ms) */
     int nmeacycle;                    /* NMEA request cycle (ms) (0:no req) */
     int nmeareq;                      /* NMEA request (0:no,1:nmeapos,2:single sol) */
@@ -68,6 +68,7 @@ typedef struct {                      /* RTK server type */
     uint8_t* buff[3];                 /* input buffers {rov,base,corr} */
     uint8_t* sbuf[2];                 /* output buffers {sol1,sol2} */
     uint8_t* pbuf[3];                 /* peek buffers {rov,base,corr} */
+    obsd_t* obsdata;                  /* obs work buffer (MAXOBS*2), allocated by rtksvrstart */
     sol_t solbuf[MAXSOLBUF];          /* solution buffer */
     uint32_t nmsg[3][12];             /* input message counts */
     raw_t raw[3];                     /* receiver raw control {rov,base,corr} */
@@ -115,6 +116,10 @@ void rtksvrfree(rtksvr_t* svr);
 
 /**
  * @brief Start RTK server.
+ * @note Success means the thread is running and an immediate stop is safe.
+ *       Failed setup leaves no stream open or run buffer allocated;
+ *       failed stream diagnostics are retained.
+ *       Serialize start/stop on the same server; read state under rtksvrlock.
  * @param[in,out] svr           RTK server struct
  * @param[in]     cycle         processing cycle (ms)
  * @param[in]     buffsize      input buffer size (bytes)
@@ -141,6 +146,8 @@ int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char** paths,
 
 /**
  * @brief Stop RTK server.
+ * @note No-op when stopped; returns after the thread ends.
+ *       Serialize start/stop on the same server; read state under rtksvrlock.
  * @param[in,out] svr   RTK server struct
  * @param[in]     cmds  shutdown commands (3)
  */

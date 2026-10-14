@@ -83,6 +83,7 @@ add_library(mrtklib STATIC
     src/data/mrtk_fcb.c
     src/data/mrtk_sbas.c
     src/data/mrtk_rcvraw.c
+    src/data/mrtk_l6.c
     src/data/rcv/mrtk_rcv_binex.c
     src/data/rcv/mrtk_rcv_crescent.c
     src/data/rcv/mrtk_rcv_javad.c
@@ -342,6 +343,29 @@ target_link_libraries(utest_msm_bds_b2b PRIVATE mrtklib)
 add_test(NAME utest_msm_bds_b2b COMMAND utest_msm_bds_b2b
          WORKING_DIRECTORY ${_UTEST_DIR})
 set_tests_properties(utest_msm_bds_b2b PROPERTIES LABELS "utest")
+
+# QZSS L6 frame header parsing / service classification (issue #351).
+# l6_frames.bin: one real 218-byte frame per service (CLAS, MADOCA, MADOCA
+# iono, QZNMA) from mosaic-G5 SBF captures (scripts/tests/extract_l6_frames.py).
+add_executable(utest_l6_header ${_UTEST_DIR}/utest_l6_header.c)
+# Override global -ansi (=C90): this test uses C11 (P-01).
+target_compile_options(utest_l6_header PRIVATE -std=c11)
+target_link_libraries(utest_l6_header PRIVATE mrtklib)
+add_test(NAME utest_l6_header COMMAND utest_l6_header
+         WORKING_DIRECTORY ${_UTEST_DIR})
+set_tests_properties(utest_l6_header PROPERTIES LABELS "utest")
+
+# RTK server lifecycle: isolate crashes and hangs to one case per process.
+add_executable(utest_rtksvr_lifecycle ${_UTEST_DIR}/utest_rtksvr_lifecycle.c)
+target_compile_options(utest_rtksvr_lifecycle PRIVATE -std=c11)
+target_link_libraries(utest_rtksvr_lifecycle PRIVATE mrtklib pthread)
+foreach(case start_state stop_after_start start_failure_cleanup stop_without_start double_stop small_buffer)
+    add_test(NAME utest_rtksvr_lifecycle_${case}
+             COMMAND utest_rtksvr_lifecycle ${case} ${_UTEST_DIR}/l6_frames.bin
+             WORKING_DIRECTORY ${_UTEST_DIR})
+    set_tests_properties(utest_rtksvr_lifecycle_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
+endforeach()
+set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
 
 # NTRIP v2 chunked codec test (header-only, no library dependency)
 add_executable(t_ntrip ${_UTEST_DIR}/t_ntrip.c)
