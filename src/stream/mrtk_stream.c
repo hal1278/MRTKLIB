@@ -2150,7 +2150,7 @@ static ntripc_t* openntripc(const char* path, char* msg) {
     decodetcppath(path, NULL, port, ntripc->user, ntripc->passwd, ntripc->mntpnt, ntripc->srctbl);
 
     if (!*ntripc->mntpnt) {
-        tracet(NULL, 2, "openntripc: no mountpoint path=%s\n", path);
+        tracet(NULL, 2, "openntripc: no mountpoint port=%s\n", port);
         free(ntripc);
         return NULL;
     }
@@ -2791,7 +2791,7 @@ static void* ftpthread(void* arg) {
     /* execute download command */
     if ((ret = execcmd(cmd))) {
         remove(local);
-        tracet(NULL, 2, "execcmd error: cmd=%s ret=%d\n", cmd, ret);
+        tracet(NULL, 2, "execcmd error: %s://%s/%s ret=%d\n", ftp->proto ? "http" : "ftp", ftp->addr, remote, ret);
         ftp->error = ret;
         ftp->state = 3;
         return 0;

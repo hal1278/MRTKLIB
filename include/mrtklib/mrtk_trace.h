@@ -39,6 +39,54 @@ extern "C" {
  * Debug Trace Functions
  *===========================================================================*/
 
+/** Maximum sink message size in bytes, including the terminating NUL. */
+#define MRTK_TRACE_SINK_MSGLEN 1024
+
+/**
+ * @brief Receive one formatted trace()/tracet() message and its call level.
+ *
+ * The message includes any newline from the call, but no tracet() time prefix.
+ * It is truncated to MRTK_TRACE_SINK_MSGLEN - 1 bytes, always NUL-terminated,
+ * and valid only during the callback. Dump functions remain file-only.
+ * The callback runs in the tracing thread, possibly concurrently and while
+ * library locks (server or stream locks, for example) are held. It must be
+ * thread-safe, return quickly, and must not call trace functions or acquire
+ * locks the library may hold while tracing.
+ *
+ * @param[in] arg    User argument supplied to tracesink()
+ * @param[in] level  Trace call level
+ * @param[in] msg    Formatted message
+ */
+typedef void (*mrtk_trace_sink_cb_t)(void* arg, int level, const char* msg);
+
+/**
+ * @brief Register a trace sink once for the context's lifetime (no unregister).
+ *
+ * Register before starting other threads that trace with this context.
+ * The initial sink level is 0 (off). The sink receives calls at levels
+ * 1 through its current level, independently of trace file settings.
+ * Levels 3 and above may contain secrets (passwords in commands, stream paths
+ * and NTRIP requests); choose max_level accordingly (2 for low-level logs).
+ * The context owns the sink storage, but never frees arg.
+ *
+ * @param[in] ctx        Runtime context (NULL = use global)
+ * @param[in] fn         Sink callback (must not be NULL)
+ * @param[in] arg        User callback argument
+ * @param[in] max_level  Maximum permitted sink level (at least 1)
+ * @return 1 on success; 0 for no context, invalid arguments, an existing sink,
+ *         allocation failure, or a build without TRACE.
+ */
+int tracesink(mrtk_ctx_t* ctx, mrtk_trace_sink_cb_t fn, void* arg, int max_level);
+
+/**
+ * @brief Set the sink level from any thread, effective for the next trace call.
+ * @param[in] ctx    Runtime context (NULL = use global)
+ * @param[in] level  Sink level (0 = off, up to the registered max_level)
+ * @return 1 on success; 0 with the level unchanged for no context/sink,
+ *         an out-of-range level (not clamped), or a build without TRACE.
+ */
+int tracesinklevel(mrtk_ctx_t* ctx, int level);
+
 /**
  * @brief Open trace output (initializes tick counter for tracet).
  * @param[in] ctx   Runtime context (NULL = use global)
