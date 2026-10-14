@@ -42,8 +42,8 @@ typedef struct {
 
 typedef struct {
     sol_t sol;          /* the solution as the server produced it */
-    double rb[3];       /* base position (ecef) when collected */
-    int has_base;       /* rb is valid */
+    double rb[3];       /* rtk.rb (ecef) when collected, as the telnet display uses it */
+    int has_base;       /* the mode uses a base and rb is known (RPC `base`) */
     double leap;        /* GPST - UTC (s) for sol.time */
     int geoid_model;    /* solopt geoid model of the run */
     int has_separation; /* separation is valid */
