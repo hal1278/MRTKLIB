@@ -1,11 +1,15 @@
 /*------------------------------------------------------------------------------
- * unit test : RTK server start state, immediate stop, failure cleanup and restart
+ * unit test : RTK server start state, stop, failure cleanup, restart and buffer size
  * Uses public APIs and fields only, with no test hooks in the library.
  *-----------------------------------------------------------------------------*/
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef __GLIBC__
+#include <malloc.h>
+#endif
 
 #ifdef _WIN32
 #include <process.h>
@@ -28,7 +32,7 @@ static struct {
 } watchdog = {PTHREAD_MUTEX_INITIALIZER, 1, 0, "initialization", 0};
 
 typedef struct {
-    int strs[8], formats[3];
+    int strs[8], formats[3], buffsize;
     char *paths[8], *cmds[3], *rcvopts[3];
     double nmeapos[3];
     prcopt_t prcopt;
@@ -81,8 +85,8 @@ static int state(rtksvr_t* svr) {
 static int start(rtksvr_t* svr, options_t* opt, char* errmsg) {
     gtime_t rst = {0};
     errmsg[0] = '\0';
-    return rtksvrstart(svr, 1, 4096, opt->strs, opt->paths, opt->formats, 0, opt->cmds, opt->cmds, opt->rcvopts, 0, 0,
-                       opt->nmeapos, &opt->prcopt, opt->solopt, NULL, rst, errmsg);
+    return rtksvrstart(svr, 1, opt->buffsize, opt->strs, opt->paths, opt->formats, 0, opt->cmds, opt->cmds,
+                       opt->rcvopts, 0, 0, opt->nmeapos, &opt->prcopt, opt->solopt, NULL, rst, errmsg);
 }
 
 static int start_ok(rtksvr_t* svr, options_t* opt) {
@@ -224,15 +228,52 @@ static void test_double_stop(rtksvr_t* svr, options_t* opt) {
     CHECK(state(svr) == 0, "state after restart/stop is not 0");
 }
 
+#ifdef __GLIBC__
+static void check_size(uint8_t* ptr, const char* member, int i, int buffsize) {
+    size_t size = malloc_usable_size(ptr);
+    if (size >= (size_t)buffsize) return;
+    fprintf(stderr, "FAIL: %s iteration %d: %s[%d] usable size is %zu (expected at least %d)\n", case_name, iteration,
+            member, i, size, buffsize);
+    fails++;
+}
+#endif
+
+static int test_small_buffer(rtksvr_t* svr, options_t* opt) {
+#ifdef __GLIBC__
+    int i;
+#endif
+    opt->buffsize = 1024;
+    progress("start with small buffer");
+    if (!start_ok(svr, opt)) return 0;
+    CHECK(svr->buffsize == 4096, "effective buffer size is not 4096");
+#ifdef __GLIBC__
+    for (i = 0; i < 3; i++) {
+        check_size(svr->buff[i], "buff", i, svr->buffsize);
+        check_size(svr->pbuf[i], "pbuf", i, svr->buffsize);
+    }
+    for (i = 0; i < 2; i++) check_size(svr->sbuf[i], "sbuf", i, svr->buffsize);
+#else
+    printf("SKIP: small_buffer allocation size check requires glibc malloc_usable_size\n");
+#endif
+    progress("stop after small buffer start");
+    rtksvrstop(svr, opt->cmds);
+    CHECK(state(svr) == 0, "state after stop is not 0");
+#ifdef __GLIBC__
+    return 0;
+#else
+    return 77;
+#endif
+}
+
 int main(int argc, char** argv) {
     rtksvr_t* svr;
     options_t opt = {0};
     pthread_t thread;
-    int i, rc;
+    int i, rc, result = 0;
 
     if (argc != 3 || (strcmp(argv[1], "start_state") && strcmp(argv[1], "stop_after_start") &&
                       strcmp(argv[1], "start_failure_cleanup") && strcmp(argv[1], "stop_without_start") &&
-                      strcmp(argv[1], "double_stop"))) {
+                      strcmp(argv[1], "double_stop") && strcmp(argv[1], "small_buffer"))) {
         fprintf(stderr, "usage: %s case existing-file\n", argv[0]);
         return 1;
     }
@@ -251,6 +292,7 @@ int main(int argc, char** argv) {
     if (fails) return 1;
     opt.prcopt = prcopt_default;
     opt.solopt[0] = opt.solopt[1] = solopt_default;
+    opt.buffsize = 4096;
     for (i = 0; i < 8; i++) {
         opt.strs[i] = STR_NONE;
         opt.paths[i] = "";
@@ -268,6 +310,8 @@ int main(int argc, char** argv) {
         test_start_failure_cleanup(svr, &opt, argv[2]);
     else if (!strcmp(case_name, "stop_without_start"))
         test_stop_without_start(svr, &opt);
+    else if (!strcmp(case_name, "small_buffer"))
+        result = test_small_buffer(svr, &opt);
     else
         test_double_stop(svr, &opt);
 
@@ -284,6 +328,7 @@ int main(int argc, char** argv) {
         printf("%s: %d check(s) FAILED\n", case_name, fails);
         return 1;
     }
+    if (result == 77) return 77;
     printf("PASS: %s\n", case_name);
     return 0;
 }

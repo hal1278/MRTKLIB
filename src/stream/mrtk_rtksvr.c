@@ -1229,7 +1229,7 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     }
     for (i = 0; i < 3; i++) { /* input/log streams */
         svr->nb[i] = svr->npb[i] = 0;
-        if (!(svr->buff[i] = (uint8_t*)malloc(buffsize)) || !(svr->pbuf[i] = (uint8_t*)malloc(buffsize))) {
+        if (!(svr->buff[i] = (uint8_t*)malloc(svr->buffsize)) || !(svr->pbuf[i] = (uint8_t*)malloc(svr->buffsize))) {
             goto malloc_error;
         }
         for (j = 0; j < 12; j++) {
@@ -1260,7 +1260,7 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
         svr->rtcm[i].dgps = svr->nav.dgps;
     }
     for (i = 0; i < 2; i++) { /* output peek buffer */
-        if (!(svr->sbuf[i] = (uint8_t*)malloc(buffsize))) {
+        if (!(svr->sbuf[i] = (uint8_t*)malloc(svr->buffsize))) {
             goto malloc_error;
         }
     }
