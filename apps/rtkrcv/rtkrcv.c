@@ -860,20 +860,22 @@ static void prstream(vt_t* vt) {
 /* print ssr correction ------------------------------------------------------*/
 static void prssr(vt_t* vt) {
     rcvcmd_ssr_t data;
-    static char buff[128 * MAXSAT];
     gtime_t time;
     const ssr_t* ssr = data.ssr;
     int i, valid;
-    char tstr[64], id[32], *p = buff;
+    char tstr[64], id[32];
 
     rcvcmd_read_ssr(cmd, &data);
     time = data.time;
 
-    p += sprintf(p,
-                 "\n%s%3s %3s %3s %3s %3s %19s %6s %6s %6s %6s %6s %6s %8s "
-                 "%6s %6s %6s%s\n",
-                 ESC_BOLD, "SAT", "S", "UDI", "IOD", "URA", "T0", "D0-A", "D0-C", "D0-R", "D1-A", "D1-C", "D1-R", "C0",
-                 "C1", "C2", "C-HR", ESC_RESET);
+    /* Match the old vt_puts abort at the first failed write. */
+    if (!vt_printf(vt,
+                   "\n%s%3s %3s %3s %3s %3s %19s %6s %6s %6s %6s %6s %6s %8s "
+                   "%6s %6s %6s%s\n",
+                   ESC_BOLD, "SAT", "S", "UDI", "IOD", "URA", "T0", "D0-A", "D0-C", "D0-R", "D1-A", "D1-C", "D1-R",
+                   "C0", "C1", "C2", "C-HR", ESC_RESET)) {
+        return;
+    }
     for (i = 0; i < MAXSAT; i++) {
         if (!ssr[i].t0[0].time) {
             continue;
@@ -881,14 +883,16 @@ static void prssr(vt_t* vt) {
         satno2id(i + 1, id);
         valid = fabs(timediff(time, ssr[i].t0[0])) <= 1800.0;
         time2str(ssr[i].t0[0], tstr, 0);
-        p += sprintf(p,
-                     "%3s %3s %3.0f %3d %3d %19s %6.3f %6.3f %6.3f %6.3f %6.3f "
-                     "%6.3f %8.3f %6.3f %6.4f %6.3f\n",
-                     id, valid ? "OK" : "-", ssr[i].udi[0], ssr[i].iode, ssr[i].ura, tstr, ssr[i].deph[0],
-                     ssr[i].deph[1], ssr[i].deph[2], ssr[i].ddeph[0] * 1E3, ssr[i].ddeph[1] * 1E3,
-                     ssr[i].ddeph[2] * 1E3, ssr[i].dclk[0], ssr[i].dclk[1] * 1E3, ssr[i].dclk[2] * 1E3, ssr[i].hrclk);
+        if (!vt_printf(vt,
+                       "%3s %3s %3.0f %3d %3d %19s %6.3f %6.3f %6.3f %6.3f %6.3f "
+                       "%6.3f %8.3f %6.3f %6.4f %6.3f\n",
+                       id, valid ? "OK" : "-", ssr[i].udi[0], ssr[i].iode, ssr[i].ura, tstr, ssr[i].deph[0],
+                       ssr[i].deph[1], ssr[i].deph[2], ssr[i].ddeph[0] * 1E3, ssr[i].ddeph[1] * 1E3,
+                       ssr[i].ddeph[2] * 1E3, ssr[i].dclk[0], ssr[i].dclk[1] * 1E3, ssr[i].dclk[2] * 1E3,
+                       ssr[i].hrclk)) {
+            return;
+        }
     }
-    vt_puts(vt, buff);
 }
 /* parse system option -------------------------------------------------------*/
 static int parse_sysopt(const char* arg) {
