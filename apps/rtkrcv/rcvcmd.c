@@ -279,6 +279,7 @@ void rcvcmd_save_navigation(rcvcmd_t* cmd) {
 const char* rcvcmd_password(rcvcmd_t* cmd) { return cmd->passwd; }
 int rcvcmd_time_type(rcvcmd_t* cmd) { return cmd->timetype; }
 int rcvcmd_solution_type(rcvcmd_t* cmd) { return cmd->soltype; }
+int rcvcmd_solution_height(rcvcmd_t* cmd) { return cmd->settings.solopt[0].height; }
 int rcvcmd_solution_flags(rcvcmd_t* cmd) { return cmd->solflag; }
 int rcvcmd_monitor_port(rcvcmd_t* cmd) { return cmd->moniport; }
 
@@ -353,12 +354,6 @@ int rcvcmd_save(rcvcmd_t* cmd, const char* file) {
     }
     return 1;
 }
-
-/* temporary until stage 3 */
-rtksvr_t* rcvcmd_server(rcvcmd_t* cmd) { return cmd->svr; }
-stream_t* rcvcmd_monitor(rcvcmd_t* cmd) { return &cmd->moni; }
-/* temporary until stage 3 */
-int rcvcmd_solution_height(rcvcmd_t* cmd) { return cmd->settings.solopt[0].height; }
 
 /* adapter notice ------------------------------------------------------------*/
 static void notice(const rcvcmd_io_t* io, rcvcmd_notice_code_t code, const char* path, const char* text, int status) {
@@ -635,4 +630,197 @@ void rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
     }
 
     notice(io, RCVCMD_NOTICE_SERVER_STOPPED, NULL, NULL, 0);
+}
+
+/* display readers -----------------------------------------------------------*/
+void rcvcmd_read_status(rcvcmd_t* cmd, rcvcmd_status_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i, j;
+
+    rtksvrlock(svr);
+    data->runtime = 0.0;
+    data->has_x = data->has_P = data->has_xa = data->has_Pa = 0;
+    memset(data->x3, 0, sizeof(data->x3));
+    memset(data->P_diag, 0, sizeof(data->P_diag));
+    memset(data->xa3, 0, sizeof(data->xa3));
+    memset(data->Pa_diag, 0, sizeof(data->Pa_diag));
+    data->rtk = svr->rtk;
+    data->thread = (int)svr->thread;
+    data->cycle = svr->cycle;
+    data->state = svr->state;
+    data->rtkstat = svr->rtk.sol.stat;
+    data->nsat0 = svr->obs[0][0].n;
+    data->nsat1 = svr->obs[1][0].n;
+    data->cputime = svr->cputime;
+    data->prcout = svr->prcout;
+    data->nave = svr->nave;
+    for (i = 0; i < 3; i++) {
+        data->nb[i] = svr->nb[i];
+    }
+    for (i = 0; i < 3; i++) {
+        for (j = 0; j < 10; j++) {
+            data->nmsg[i][j] = svr->nmsg[i][j];
+        }
+    }
+    if (svr->state) {
+        data->runtime = (double)(tickget() - svr->tick) / 1000.0;
+    }
+    for (i = 0; i < 3; i++) {
+        memcpy(data->nmsg2[i], svr->rtcm[i].nmsg2, sizeof(data->nmsg2[i]));
+        memcpy(data->nmsg3[i], svr->rtcm[i].nmsg3, sizeof(data->nmsg3[i]));
+    }
+    /* deep copy state vector values to avoid data race after unlock (#74) */
+    if (svr->rtk.x) {
+        data->has_x = 1;
+        memcpy(data->x3, svr->rtk.x, sizeof(double) * 3);
+    }
+    if (svr->rtk.P) {
+        data->has_P = 1;
+        data->P_diag[0] = svr->rtk.P[0];
+        data->P_diag[1] = svr->rtk.P[1 + 1 * svr->rtk.nx];
+        data->P_diag[2] = svr->rtk.P[2 + 2 * svr->rtk.nx];
+    }
+    if (svr->rtk.xa) {
+        data->has_xa = 1;
+        memcpy(data->xa3, svr->rtk.xa, sizeof(double) * 3);
+    }
+    if (svr->rtk.Pa) {
+        data->has_Pa = 1;
+        data->Pa_diag[0] = svr->rtk.Pa[0];
+        data->Pa_diag[1] = svr->rtk.Pa[1 + 1 * svr->rtk.na];
+        data->Pa_diag[2] = svr->rtk.Pa[2 + 2 * svr->rtk.na];
+    }
+    /* null out shared pointers to prevent accidental access after unlock */
+    data->rtk.x = data->rtk.P = data->rtk.Q = data->rtk.xa = data->rtk.Pa = NULL;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_satellite(rcvcmd_t* cmd, rcvcmd_satellite_t* data) {
+    rtksvr_t* svr = cmd->svr;
+
+    rtksvrlock(svr);
+    data->rtk = svr->rtk;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_observ(rcvcmd_t* cmd, int sys, rcvcmd_observ_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i, n = 0;
+
+    rtksvrlock(svr);
+    for (i = 0; i < svr->obs[0][0].n && n < MAXOBS * 2; i++) {
+        if (!(satsys(svr->obs[0][0].data[i].sat, NULL) & sys)) {
+            continue;
+        }
+        data->obs[n++] = svr->obs[0][0].data[i];
+    }
+    for (i = 0; i < svr->obs[1][0].n && n < MAXOBS * 2; i++) {
+        if (!(satsys(svr->obs[1][0].data[i].sat, NULL) & sys)) {
+            continue;
+        }
+        data->obs[n++] = svr->obs[1][0].data[i];
+    }
+    data->n = n;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_navidata(rcvcmd_t* cmd, rcvcmd_navidata_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i;
+
+    rtksvrlock(svr);
+    data->time = svr->rtk.sol.time;
+    for (i = 0; i < MAXSAT * 2; i++) {
+        data->eph[i] = svr->nav.eph[i];
+    }
+    for (i = 0; i < MAXPRNGLO; i++) {
+        data->geph[i] = svr->nav.geph[i];
+    }
+    for (i = 0; i < 8; i++) {
+        data->ion[i] = svr->nav.ion_gps[i];
+    }
+    for (i = 0; i < 8; i++) {
+        data->utc[i] = svr->nav.utc_gps[i];
+    }
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i;
+
+    rtksvrlock(svr);
+    data->time = svr->rtk.sol.time;
+    for (i = 0; i < MAXSAT; i++) {
+        data->ssr[i] = svr->nav.ssr_ch[0][i];
+    }
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i;
+
+    rtksvrlock(svr);
+    memset(data->format, 0, sizeof(data->format));
+    for (i = 0; i < 8; i++) {
+        data->stream[i] = svr->stream[i];
+    }
+    for (i = 0; i < 3; i++) {
+        data->format[i] = svr->format[i];
+    }
+    for (i = 3; i < 5; i++) {
+        data->format[i] = svr->solopt[i - 3].posf;
+    }
+    data->stream[8] = cmd->moni;
+    data->format[8] = SOLF_LLH;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int n;
+
+    rtksvrlock(svr);
+    data->n = n = svr->rtk.neb;
+    data->errbuf[0] = '\0';
+    if (n > 0) {
+        svr->rtk.errbuf[n] = '\0';
+        memcpy(data->errbuf, svr->rtk.errbuf, n);
+        data->errbuf[n] = '\0';
+        svr->rtk.neb = 0;
+    }
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data) {
+    rtksvr_t* svr = cmd->svr;
+    int i;
+
+    rtksvrlock(svr);
+    data->nsol = svr->nsol;
+    for (i = 0; i < svr->nsol; i++) {
+        data->solbuf[i] = svr->solbuf[i];
+    }
+    if (data->nsol > 0) {
+        for (i = 0; i < 3; i++) {
+            data->rb[i] = svr->rtk.rb[i];
+        }
+    }
+    svr->nsol = 0;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_clear_error(rcvcmd_t* cmd) {
+    rtksvr_t* svr = cmd->svr;
+    rtksvrlock(svr);
+    svr->rtk.neb = 0;
+    rtksvrunlock(svr);
+}
+
+void rcvcmd_clear_solution(rcvcmd_t* cmd) {
+    rtksvr_t* svr = cmd->svr;
+    /* Keep the legacy unlocked discard before cyclic solution display until
+     * the solution-event work (D-17). */
+    svr->nsol = 0;
 }

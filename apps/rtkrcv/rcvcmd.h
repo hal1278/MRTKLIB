@@ -13,6 +13,32 @@
  *
  * SPDX-License-Identifier: BSD-2-Clause
  *-----------------------------------------------------------------------------*/
+/**
+ * @file rcvcmd.h
+ * @brief Internal RTK receiver command layer shared by adapters.
+ *
+ * Owns server/monitor resources, startup/finish, start/stop, configuration and
+ * locked copies of server data. Adapters own parsing, formatting, terminal
+ * interaction, sockets, signals, and process runtime/trace setup and teardown.
+ *
+ * rcvcmd_t is opaque. Only one instance may exist while core sysopts remains
+ * process-global; callers use a handle so that restriction can later be lifted
+ * inside the layer. rcvcmd_io_t supplies synchronous notices and overwrite
+ * confirmation, preserving output and question order without terminal coupling.
+ *
+ * Each display has one reader filling caller-owned storage under the same lock
+ * as before the split. Solution/error reads consume the shared buffers. The
+ * adapter prints after the reader unlocks. Readers allocate no large temporary
+ * snapshots; callers keep one copy in their existing display stack frame.
+ * Pointer/lock members copied inside rtk_t or stream_t are not live handles for
+ * callers to dereference or use; displays consume only the copied values.
+ *
+ * Threading is unchanged from before the split. There are no lifecycle states,
+ * reader counts, configuration mutex, events, claims, or new serialization.
+ * Start/stop can still race with display/configuration operations as before.
+ * Stream copies still use the server lock until stage 4. The legacy unlocked
+ * cyclic-solution discard is retained until solution-event work (D-17).
+ */
 #ifndef RCVCMD_H
 #define RCVCMD_H
 
@@ -23,9 +49,6 @@
 extern "C" {
 #endif
 
-/* The layer owns configuration, server start/stop, and process server/monitor
- * resources. Display reads still use temporary accessors below. Threading
- * remains the same as before the split; no configuration mutex is added. */
 typedef struct rcvcmd rcvcmd_t;
 
 typedef struct {
@@ -95,6 +118,8 @@ const char* rcvcmd_password(rcvcmd_t* cmd);
 int rcvcmd_time_type(rcvcmd_t* cmd);
 /** @brief Read the configured console solution format. */
 int rcvcmd_solution_type(rcvcmd_t* cmd);
+/** @brief Read the configured solution height mode at the original formatting points. */
+int rcvcmd_solution_height(rcvcmd_t* cmd);
 /** @brief Read the configured console solution flags. */
 int rcvcmd_solution_flags(rcvcmd_t* cmd);
 /** @brief Read the requested monitor port. */
@@ -116,11 +141,98 @@ int rcvcmd_load(rcvcmd_t* cmd, const char* file);
 /** @brief Write receiver then system options with the original comment; return 1 on success. */
 int rcvcmd_save(rcvcmd_t* cmd, const char* file);
 
-/* temporary until stage 3 */
-rtksvr_t* rcvcmd_server(rcvcmd_t* cmd);
-stream_t* rcvcmd_monitor(rcvcmd_t* cmd);
-/* temporary until stage 3 */
-int rcvcmd_solution_height(rcvcmd_t* cmd);
+typedef struct {
+    rtk_t rtk;
+    uint32_t nmsg2[3][100], nmsg3[3][400];
+    int thread, cycle, state, rtkstat, nsat0, nsat1, prcout, nave;
+    int cputime, nb[3], nmsg[3][10];
+    double runtime;
+    double x3[3], P_diag[3], xa3[3], Pa_diag[3];
+    int has_x, has_P, has_xa, has_Pa;
+} rcvcmd_status_t;
+
+typedef struct {
+    rtk_t rtk;
+} rcvcmd_satellite_t;
+
+typedef struct {
+    obsd_t obs[MAXOBS * 2];
+    int n;
+} rcvcmd_observ_t;
+
+typedef struct {
+    eph_t eph[MAXSAT * 2];
+    geph_t geph[MAXPRNGLO];
+    double ion[8], utc[8];
+    gtime_t time;
+} rcvcmd_navidata_t;
+
+typedef struct {
+    ssr_t ssr[MAXSAT];
+    gtime_t time;
+} rcvcmd_ssr_t;
+
+typedef struct {
+    stream_t stream[9];
+    int format[9];
+} rcvcmd_stream_t;
+
+typedef struct {
+    char errbuf[MAXERRMSG + 1];
+    int n;
+} rcvcmd_error_t;
+
+typedef struct {
+    sol_t solbuf[MAXSOLBUF];
+    double rb[3];
+    int nsol;
+} rcvcmd_solution_t;
+
+/** @brief Copy status fields and the existing deep copies of vector values.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_status(rcvcmd_t* cmd, rcvcmd_status_t* data);
+/** @brief Copy the satellite display's RTK values.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_satellite(rcvcmd_t* cmd, rcvcmd_satellite_t* data);
+/** @brief Copy rover then base observations matching sys, with the existing cap.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[in] sys Satellite-system mask, with the original observation filtering.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_observ(rcvcmd_t* cmd, int sys, rcvcmd_observ_t* data);
+/** @brief Copy navigation time, ephemerides, GPS ionosphere and UTC parameters.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_navidata(rcvcmd_t* cmd, rcvcmd_navidata_t* data);
+/** @brief Copy solution time and channel-zero SSR values.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_ssr(rcvcmd_t* cmd, rcvcmd_ssr_t* data);
+/** @brief Copy streams, monitor and formats under the legacy server lock.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_stream(rcvcmd_t* cmd, rcvcmd_stream_t* data);
+/** @brief Copy and clear pending errors; errbuf is terminated, n retains the byte count.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_error(rcvcmd_t* cmd, rcvcmd_error_t* data);
+/** @brief Copy and clear pending solutions; only rows below nsol and their rb are valid.
+ * @param[in] cmd The sole command-layer instance.
+ * @param[out] data Caller-owned storage, filled directly without another snapshot copy.
+ */
+void rcvcmd_read_solution(rcvcmd_t* cmd, rcvcmd_solution_t* data);
+/** @brief Discard errors under the server lock at the start of the error command. */
+void rcvcmd_clear_error(rcvcmd_t* cmd);
+/** @brief Preserve the unlocked discard before cyclic solution display until D-17. */
+void rcvcmd_clear_solution(rcvcmd_t* cmd);
 
 #ifdef __cplusplus
 }
