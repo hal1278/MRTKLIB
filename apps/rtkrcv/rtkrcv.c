@@ -1021,7 +1021,7 @@ static void cmd_restart(char** args, int narg, vt_t* vt) {
 }
 /* solution command ----------------------------------------------------------*/
 static void cmd_solution(char** args, int narg, vt_t* vt) {
-    rcvcmd_solution_t* data;
+    rcvcmd_legacy_solution_t* data;
     int i, cycle = 0;
 
     trace(NULL, 3, "cmd_solution:\n");
@@ -1030,7 +1030,7 @@ static void cmd_solution(char** args, int narg, vt_t* vt) {
         cycle = (int)(atof(args[1]) * 1000.0);
     }
 
-    if (!(data = (rcvcmd_solution_t*)malloc(sizeof(*data)))) {
+    if (!(data = (rcvcmd_legacy_solution_t*)malloc(sizeof(*data)))) {
         trace(NULL, 2, "cmd_solution: snapshot allocation failed\n");
         return;
     }

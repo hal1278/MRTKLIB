@@ -368,6 +368,15 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
 
+# Command-layer events: sequential cases share its sole process-global instance.
+add_executable(utest_rcvcmd_events ${_UTEST_DIR}/utest_rcvcmd_events.c
+    apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c)
+target_compile_options(utest_rcvcmd_events PRIVATE -std=c11)
+target_include_directories(utest_rcvcmd_events PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvcmd_events PRIVATE mrtklib pthread)
+add_test(NAME utest_rcvcmd_events COMMAND utest_rcvcmd_events)
+set_tests_properties(utest_rcvcmd_events PROPERTIES LABELS "utest" TIMEOUT 30)
+
 # Event ring of the rtkrcv command layer (apps/rtkrcv/rcvevent.c): seq, lost, more.
 add_executable(utest_rcvevent ${_UTEST_DIR}/utest_rcvevent.c apps/rtkrcv/rcvevent.c)
 target_compile_options(utest_rcvevent PRIVATE -std=c11)
