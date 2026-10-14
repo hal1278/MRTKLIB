@@ -391,8 +391,10 @@ rcvcmd_config_result_t rcvcmd_set_option(rcvcmd_t* cmd, const rcvcmd_option_t* o
         pthread_mutex_lock(&cmd->config_lock);
     }
     if (str2opt(option->opt, value)) {
-        if (restart) {
+        if (option->system) {
             getsysopts(&cmd->settings.prcopt, cmd->settings.solopt, &cmd->settings.filopt);
+        }
+        if (restart) {
             if (option->system) {
                 cmd->modflgs[option->index] = 1;
             } else {
