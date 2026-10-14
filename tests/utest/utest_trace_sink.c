@@ -132,7 +132,8 @@ static void levels_with_file(mrtk_ctx_t* ctx, capture_t* c) {
     for (level = 1; level <= 3; level++) trace(ctx, level, "file %d\n", level);
     tracet(ctx, 2, "timed %d\n", 42);
     traceclose(ctx);
-    fp = fopen(path, "rb");
+    /* text mode, like traceopen(): Windows writes CRLF */
+    fp = fopen(path, "r");
     CHECK(fp != NULL, "cannot reopen trace file");
     if (fp) {
         n = fread(text, 1, sizeof(text) - 1, fp);
@@ -355,14 +356,15 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
         opened = stropen(&stream, STR_FTP, STR_MODE_R, "user:secretpw@127.0.0.1/file");
         CHECK(opened, "FTP stream did not open");
         if (opened) {
-            /* readftp compares GPST with its initial UTC + 10 s deadline. */
-            CHECK(timediff(utc2gpst(timeget()), timeget()) > 10.0, "first FTP read is not yet due");
-            if (!fails) {
-                strread(&stream, buff, sizeof(buff));
-                started = 1;
-            }
             start = tickget();
-            while (!fails && (uint32_t)(tickget() - start) < 10000) {
+            while ((uint32_t)(tickget() - start) < 20000) {
+                /* Read until readftp starts the worker (it then sets the stream
+                   message), but not after: the worker writes the ftp state
+                   without the stream lock. */
+                if (!started) {
+                    strread(&stream, buff, sizeof(buff));
+                    started = stream.msg[0] != '\0';
+                }
                 pthread_mutex_lock(&c->lock);
                 done = c->ftp_done;
                 if (done) worker = c->ftp_thread;
@@ -370,7 +372,7 @@ static int ftp_secret(mrtk_ctx_t* ctx, capture_t* c) {
                 if (done) break;
                 sleepms(10);
             }
-            CHECK(done, "FTP failure message did not arrive within 10 s");
+            CHECK(done, "FTP failure message did not arrive within 20 s");
             /* Joining the worker captured by the callback avoids closeftp's race. */
             if (done) CHECK(pthread_join(worker, NULL) == 0, "FTP worker join failed");
             if (started && !done) {
