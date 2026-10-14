@@ -107,8 +107,9 @@ During transitions, `status` retains its labels and shows `stop` with zero
 values; `satellite` and `stream` show their headers, and `solution` and `error`
 have no data rows. After a stop, displays retain the last values.
 
-`shutdown` records the request immediately, lets any current transition
-finish, then stops the server and exits. After the request, `start`, `stop`,
+`shutdown` replies `rtk server shutdown ...`, records the request about one
+second later, lets any current transition finish, then stops the server and
+exits. After the request, `start`, `stop`,
 and `restart` reply `rtk server shutting down`. SIGINT, SIGTERM, and SIGUSR2
 also finish the current transition before stopping and exiting.
 

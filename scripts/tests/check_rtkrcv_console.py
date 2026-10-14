@@ -1331,6 +1331,13 @@ def shutdown_checks(args):
                         text == "shutdown\nrtk server shutdown ...\n",
                         "shutdown accepted during start",
                     )
+                    # The console records the request after its reply and a 1 s pause.
+                    wait_command(
+                        third,
+                        "start",
+                        lambda s: s == "rtk server shutting down\n",
+                        "telnet shutdown request recorded",
+                    )
                 else:
                     server.process.send_signal(signal.SIGTERM)
                     wait_command(

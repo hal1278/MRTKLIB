@@ -1524,9 +1524,12 @@ static void* con_thread(void* arg) {
                 break;
             case 19: /* shutdown */
                 if (!strcmp(args[0], "shutdown")) {
-                    rcvcmd_request_shutdown(cmd);
+                    /* Record after the reply has had time to reach the client:
+                     * main does not wait for console threads once it sees the
+                     * request (same order as the former intflg). */
                     vt_printf(con->vt, "rtk server shutdown ...\n");
                     sleepms(1000);
+                    rcvcmd_request_shutdown(cmd);
                     con->state = 0;
                 }
                 break;
@@ -1730,8 +1733,8 @@ static void accept_sock(int ssock, con_t** con) {
  *       the command.
  *
  *     shutdown
- *       Record shutdown immediately, finish any current transition, then stop
- *       RTK server and exit. Further start/stop/restart commands are refused.
+ *       Record shutdown after the reply, finish any current transition, then
+ *       stop RTK server and exit. Further start/stop/restart commands are refused.
  *
  *     !command [arg...]
  *       Execute command by the operating system shell. Do not use the
