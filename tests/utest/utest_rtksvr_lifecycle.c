@@ -180,6 +180,7 @@ static void test_start_failure_cleanup(rtksvr_t* svr, options_t* opt, char* path
         }
     }
     CHECK(svr->stream[3].port == NULL, "failed stream 3 holds a port");
+    CHECK(svr->obsdata == NULL, "observation work buffer is not NULL");
     for (i = 0; i < 3; i++) {
         check_null(svr->buff[i], "buff", i);
         check_null(svr->pbuf[i], "pbuf", i);

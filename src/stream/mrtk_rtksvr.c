@@ -822,12 +822,44 @@ static void send_nmea(rtksvr_t* svr, uint32_t* tickreset) {
         tracet(NULL, 3, "send nmea: rr=%.3f %.3f %.3f\n", sol_nmea.rr[0], sol_nmea.rr[1], sol_nmea.rr[2]);
     }
 }
+/* free run resources, preserving diagnostics for streams not opened --------*/
+static void rtksvrcleanup(rtksvr_t* svr, int nstream) {
+    int i;
+
+    for (i = 0; i < nstream; i++) {
+        strclose(svr->stream + i);
+    }
+    for (i = 0; i < 3; i++) {
+        svr->nb[i] = svr->npb[i] = 0;
+        free(svr->buff[i]);
+        svr->buff[i] = NULL;
+        free(svr->pbuf[i]);
+        svr->pbuf[i] = NULL;
+        free_raw(svr->raw + i);
+        free_rtcm(svr->rtcm + i);
+    }
+    for (i = 0; i < 2; i++) {
+        svr->nsb[i] = 0;
+        free(svr->sbuf[i]);
+        svr->sbuf[i] = NULL;
+    }
+    free(svr->obsdata);
+    svr->obsdata = NULL;
+}
+/* read server state once per thread cycle ----------------------------------*/
+static int rtksvrstate(rtksvr_t* svr) {
+    int state;
+
+    rtksvrlock(svr);
+    state = svr->state;
+    rtksvrunlock(svr);
+    return state;
+}
 /* rtk server thread ---------------------------------------------------------*/
 static void* rtksvrthread(void* arg) {
     rtksvr_t* svr = (rtksvr_t*)arg;
     mrtk_ctx_t* ctx = svr->ctx;
     obs_t obs;
-    obsd_t* data = (obsd_t*)malloc(MAXOBS * 2 * sizeof(obsd_t));
     sol_t sol = {{0}};
     double tt;
     uint32_t tick, ticknmea, tick1hz, tickreset;
@@ -837,16 +869,14 @@ static void* rtksvrthread(void* arg) {
 
     tracet(ctx, 3, "rtksvrthread:\n");
 
-    if (!data) {
-        return 0;
-    }
-    svr->state = 1;
-    obs.data = data;
-    svr->tick = tickget();
-    ticknmea = tick1hz = svr->tick - 1000;
-    tickreset = svr->tick - MIN_INT_RESET;
+    obs.data = svr->obsdata;
+    rtksvrlock(svr);
+    tick = svr->tick;
+    rtksvrunlock(svr);
+    ticknmea = tick1hz = tick - 1000;
+    tickreset = tick - MIN_INT_RESET;
 
-    for (cycle = 0; svr->state; cycle++) {
+    for (cycle = 0; rtksvrstate(svr); cycle++) {
         tick = tickget();
         for (i = 0; i < 3; i++) {
             p = svr->buff[i] + svr->nb[i];
@@ -942,24 +972,7 @@ static void* rtksvrthread(void* arg) {
         /* sleep until next cycle */
         sleepms(svr->cycle - cputime);
     }
-    for (i = 0; i < MAXSTRRTK; i++) {
-        strclose(svr->stream + i);
-    }
-    for (i = 0; i < 3; i++) {
-        svr->nb[i] = svr->npb[i] = 0;
-        free(svr->buff[i]);
-        svr->buff[i] = NULL;
-        free(svr->pbuf[i]);
-        svr->pbuf[i] = NULL;
-        free_raw(svr->raw + i);
-        free_rtcm(svr->rtcm + i);
-    }
-    for (i = 0; i < 2; i++) {
-        svr->nsb[i] = 0;
-        free(svr->sbuf[i]);
-        svr->sbuf[i] = NULL;
-    }
-    free(data);
+    rtksvrcleanup(svr, MAXSTRRTK);
     return 0;
 }
 /* initialize rtk server -------------------------------------------------------
@@ -1008,6 +1021,7 @@ extern int rtksvrinit(rtksvr_t* svr) {
     for (i = 0; i < 3; i++) {
         svr->pbuf[i] = NULL;
     }
+    svr->obsdata = NULL;
     for (i = 0; i < MAXSOLBUF; i++) {
         svr->solbuf[i] = sol0;
     }
@@ -1125,6 +1139,9 @@ extern void rtksvrunlock(rtksvr_t* svr) { rtk_unlock(&svr->lock); }
 
 /* start rtk server ------------------------------------------------------------
  * start rtk server thread
+ * Success means running; an immediate stop is safe. Failed setup leaves no
+ * stream open or run buffer allocated, retaining failed stream diagnostics.
+ * Serialize start/stop on the same server; read state under rtksvrlock.
  * args   : rtksvr_t *svr    IO rtk server
  *          int     cycle    I  server cycle (ms)
  *          int     buffsize I  input buffer size (bytes)
@@ -1179,10 +1196,13 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     tracet(NULL, 3, "rtksvrstart: cycle=%d buffsize=%d navsel=%d nmeacycle=%d nmeareq=%d\n", cycle, buffsize, navsel,
            nmeacycle, nmeareq);
 
+    rtksvrlock(svr);
     if (svr->state) {
+        rtksvrunlock(svr);
         sprintf(errmsg, "server already started");
         return 0;
     }
+    rtksvrunlock(svr);
     strinitcom();
     svr->cycle = cycle > 1 ? cycle : 1;
     svr->nmeacycle = nmeacycle > 1000 ? nmeacycle : 1000;
@@ -1210,9 +1230,7 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     for (i = 0; i < 3; i++) { /* input/log streams */
         svr->nb[i] = svr->npb[i] = 0;
         if (!(svr->buff[i] = (uint8_t*)malloc(buffsize)) || !(svr->pbuf[i] = (uint8_t*)malloc(buffsize))) {
-            tracet(NULL, 1, "rtksvrstart: malloc error\n");
-            sprintf(errmsg, "rtk server malloc error");
-            return 0;
+            goto malloc_error;
         }
         for (j = 0; j < 12; j++) {
             svr->nmsg[i][j] = 0;
@@ -1223,8 +1241,9 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
         strcpy(svr->cmds_periodic[i], !cmds_periodic[i] ? "" : cmds_periodic[i]);
 
         /* initialize receiver raw and rtcm control */
-        init_raw(svr->raw + i, formats[i]);
-        init_rtcm(svr->rtcm + i);
+        if (!init_raw(svr->raw + i, formats[i]) || !init_rtcm(svr->rtcm + i)) {
+            goto malloc_error;
+        }
 
         /* set receiver and rtcm option */
         strcpy(svr->raw[i].opt, rcvopts[i]);
@@ -1242,10 +1261,11 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
     }
     for (i = 0; i < 2; i++) { /* output peek buffer */
         if (!(svr->sbuf[i] = (uint8_t*)malloc(buffsize))) {
-            tracet(NULL, 1, "rtksvrstart: malloc error\n");
-            sprintf(errmsg, "rtk server malloc error");
-            return 0;
+            goto malloc_error;
         }
+    }
+    if (!(svr->obsdata = (obsd_t*)malloc(MAXOBS * 2 * sizeof(obsd_t)))) {
+        goto malloc_error;
     }
     /* set solution options */
     for (i = 0; i < 2; i++) {
@@ -1338,9 +1358,7 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
         }
         if (!stropen(svr->stream + i, strs[i], rw, paths[i])) {
             sprintf(errmsg, "str%d open error path=%s", i + 1, paths[i]);
-            for (i--; i >= 0; i--) {
-                strclose(svr->stream + i);
-            }
+            rtksvrcleanup(svr, i);
             return 0;
         }
         /* set initial time for rtcm and raw */
@@ -1377,25 +1395,41 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
         writesolhead(svr->stream + i, svr->solopt + i - 3);
     }
     /* create rtk server thread */
+    rtksvrlock(svr);
+    svr->tick = tickget();
+    svr->state = 1;
+    rtksvrunlock(svr);
     {
         pthread_attr_t attr;
+        rtk_thread_t thread;
         int rc;
         pthread_attr_init(&attr);
         pthread_attr_setstacksize(&attr, 8 * 1024 * 1024); /* 8 MB (match Linux default) */
-        rc = pthread_create(&svr->thread, &attr, rtksvrthread, svr);
+        rc = pthread_create(&thread, &attr, rtksvrthread, svr);
         pthread_attr_destroy(&attr);
         if (rc) {
-            for (i = 0; i < MAXSTRRTK; i++) {
-                strclose(svr->stream + i);
-            }
+            rtksvrlock(svr);
+            svr->state = 0;
+            rtksvrunlock(svr);
+            rtksvrcleanup(svr, MAXSTRRTK);
             sprintf(errmsg, "thread create error\n");
             return 0;
         }
+        rtksvrlock(svr);
+        svr->thread = thread;
+        rtksvrunlock(svr);
     }
     return 1;
+
+malloc_error:
+    rtksvrcleanup(svr, 0);
+    tracet(NULL, 1, "rtksvrstart: malloc error\n");
+    sprintf(errmsg, "rtk server malloc error");
+    return 0;
 }
 /* stop rtk server -------------------------------------------------------------
- * start rtk server thread
+ * stop rtk server thread; no-op when stopped, returns after the thread ends
+ * Serialize start/stop on the same server; read state under rtksvrlock.
  * args   : rtksvr_t *svr    IO rtk server
  *          char    **cmds   I  input stream stop commands
  *                              cmds[0]=input stream rover (NULL: no command)
@@ -1405,23 +1439,28 @@ extern int rtksvrstart(rtksvr_t* svr, int cycle, int buffsize, int* strs, char**
  *-----------------------------------------------------------------------------*/
 extern void rtksvrstop(rtksvr_t* svr, char** cmds) {
     int i;
+    rtk_thread_t thread;
 
     tracet(NULL, 3, "rtksvrstop:\n");
 
     /* write stop commands to input streams */
     rtksvrlock(svr);
+    if (!svr->state) {
+        rtksvrunlock(svr);
+        return;
+    }
     for (i = 0; i < 3; i++) {
         if (cmds[i]) {
             strsendcmd(svr->stream + i, cmds[i]);
         }
     }
-    rtksvrunlock(svr);
-
     /* stop rtk server */
     svr->state = 0;
+    thread = svr->thread;
+    rtksvrunlock(svr);
 
     /* free rtk server thread */
-    pthread_join(svr->thread, NULL);
+    pthread_join(thread, NULL);
 }
 /* open output/log stream ------------------------------------------------------
  * open output/log stream
@@ -1437,13 +1476,13 @@ extern void rtksvrstop(rtksvr_t* svr, char** cmds) {
 extern int rtksvropenstr(rtksvr_t* svr, int index, int str, const char* path, const solopt_t* solopt) {
     tracet(NULL, 3, "rtksvropenstr: index=%d str=%d path=%s\n", index, str, path);
 
-    if (index < 3 || index > 7 || !svr->state) {
+    if (index < 3 || index > 7) {
         return 0;
     }
 
     rtksvrlock(svr);
 
-    if (svr->stream[index].state > 0) {
+    if (!svr->state || svr->stream[index].state > 0) {
         rtksvrunlock(svr);
         return 0;
     }
@@ -1472,12 +1511,16 @@ extern int rtksvropenstr(rtksvr_t* svr, int index, int str, const char* path, co
 extern void rtksvrclosestr(rtksvr_t* svr, int index) {
     tracet(NULL, 3, "rtksvrclosestr: index=%d\n", index);
 
-    if (index < 3 || index > 7 || !svr->state) {
+    if (index < 3 || index > 7) {
         return;
     }
 
     rtksvrlock(svr);
 
+    if (!svr->state) {
+        rtksvrunlock(svr);
+        return;
+    }
     strclose(svr->stream + index);
 
     rtksvrunlock(svr);
@@ -1500,10 +1543,11 @@ extern int rtksvrostat(rtksvr_t* svr, int rcv, gtime_t* time, int* sat, double* 
 
     tracet(NULL, 4, "rtksvrostat: rcv=%d\n", rcv);
 
+    rtksvrlock(svr);
     if (!svr->state) {
+        rtksvrunlock(svr);
         return 0;
     }
-    rtksvrlock(svr);
     ns = svr->obs[rcv][0].n;
     if (ns > 0) {
         *time = svr->obs[rcv][0].data[0].time;
@@ -1560,11 +1604,11 @@ extern int rtksvrmark(rtksvr_t* svr, const char* name, const char* comment) {
 
     tracet(NULL, 4, "rtksvrmark:name=%s comment=%s\n", name, comment);
 
+    rtksvrlock(svr);
     if (!svr->state) {
+        rtksvrunlock(svr);
         return 0;
     }
-
-    rtksvrlock(svr);
 
     time2str(svr->rtk.sol.time, tstr, 3);
     tow = time2gpst(svr->rtk.sol.time, &week);
