@@ -806,7 +806,10 @@ int rcvrpc_start(rcvrpc_t** out, const rcvrpc_options_t* options, rcvcmd_t* cmd)
      * Slow incomplete handshakes hold a worker for at most five seconds.
      * With automatic ping off, the one-second WebSocket timeout bounds mg_stop's
      * idle wait; the data callback answers client pings. No document_root:
-     * file GETs stay 404 and file mutations stay 405. */
+     * file GETs stay 404 and file mutations stay 405. CivetWeb writes a
+     * WebSocket frame header and its payload separately; without TCP_NODELAY,
+     * Nagle's algorithm can hold the payload until the client's delayed ACK,
+     * which delayed each small response by about 40 ms on Linux. */
     const char* configuration[] = {"listening_ports",
                                    listening,
                                    "num_threads",
@@ -817,6 +820,8 @@ int rcvrpc_start(rcvrpc_t** out, const rcvrpc_options_t* options, rcvcmd_t* cmd)
                                    "1000",
                                    "enable_websocket_ping_pong",
                                    "no",
+                                   "tcp_nodelay",
+                                   "1",
                                    NULL};
     rcvrpc_t* rpc;
     yyjson_mut_doc* ready;

@@ -488,6 +488,29 @@ class TransportTests(unittest.TestCase):
             for request_id in ("text-\u20ac", 0, -1):
                 self.assertEqual(ws.request(request_id=request_id)["id"], request_id)
 
+    def test_responses_not_delayed(self):
+        """Sequential requests are answered without a delayed-ACK wait.
+
+        A response frame is written as a header and a payload. Without TCP_NODELAY,
+        Nagle's algorithm can hold the payload until the client acknowledges the
+        header, and the client may delay that acknowledgement (40 ms observed on
+        Linux). The median tolerates up to four slow round trips; the test assumes
+        that the client and the server get a CPU promptly most of the time (on
+        Linux with 8 busy loops per CPU the median stayed below 0.1 ms). A platform
+        that acknowledges at once passes without TCP_NODELAY, so this checks for
+        the delay, not for the socket option.
+        """
+        with Server(self.args) as server:
+            ws = server.connect()
+            self.version(ws)
+            times = []
+            for request_id in range(10):
+                started = time.monotonic()
+                self.assertIn("result", ws.request(request_id=request_id))
+                times.append(time.monotonic() - started)
+            times.sort()
+            self.assertLess(times[len(times) // 2], 0.02, f"round trips (s): {times}")
+
     def test_shutdown(self):
         """Shutdown replies before closing every open connection with 1001."""
         with Server(self.args) as server:
