@@ -361,6 +361,10 @@ class MethodsTests(unittest.TestCase):
                 {"after": 0, "limit": 1001},
             ):
                 self.assertEqual(self.call(ws, "getEvents", params)["events"], [])
+            # A name with an embedded NUL is another method, not a prefix match.
+            for method in ("shutdown\u0000extra", "start\u0000extra"):
+                self.assertEqual(ws.request(method, params={})["error"]["code"], -32601)
+            self.assertEqual(self.call(ws, "getStatus")["status"]["lifecycle"]["state"], "stopped")
             self.finish(server, ws)
 
 

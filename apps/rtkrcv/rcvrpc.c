@@ -20,8 +20,8 @@
 #if CIVETWEB_VERSION_MAJOR < 1 || (CIVETWEB_VERSION_MAJOR == 1 && CIVETWEB_VERSION_MINOR < 16)
 #error "MRTK RPC requires CivetWeb 1.16 or newer"
 #endif
-#if !defined(YYJSON_VERSION_HEX) || YYJSON_VERSION_HEX < 0x000A00
-#error "MRTK RPC requires yyjson 0.10 or newer"
+#if !defined(YYJSON_VERSION_HEX) || YYJSON_VERSION_HEX < 0x000B00
+#error "MRTK RPC requires yyjson 0.11 or newer"
 #endif
 
 #include "mrtklib/mrtk_trace.h"
@@ -465,14 +465,15 @@ static int integer_param(yyjson_val* value, uint64_t cap, uint64_t* out) {
 /* Method-specific validation stays separate from U14's envelope handling. */
 static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* method, yyjson_val* params,
                                 yyjson_mut_val** error) {
-    const char* name = yyjson_get_str(method);
-    int start = !strcmp(name, "start"), restart = !strcmp(name, "restart"), stop = !strcmp(name, "stop");
-    int events = !strcmp(name, "getEvents");
+    /* Length-aware comparisons: a name with an embedded NUL is another method. */
+    int start = yyjson_equals_str(method, "start"), restart = yyjson_equals_str(method, "restart");
+    int stop = yyjson_equals_str(method, "stop"), events = yyjson_equals_str(method, "getEvents");
+    int snapshot = yyjson_equals_str(method, "getStatus") || yyjson_equals_str(method, "sync");
+    int version = yyjson_equals_str(method, "getVersion");
     yyjson_mut_val* result;
     yyjson_val *key, *value;
     yyjson_obj_iter iter;
-    if (!start && !restart && !stop && !events && strcmp(name, "getStatus") && strcmp(name, "sync") &&
-        strcmp(name, "getVersion") && strcmp(name, "shutdown")) {
+    if (!start && !restart && !stop && !events && !snapshot && !version && !yyjson_equals_str(method, "shutdown")) {
         *error = rpc_error(doc, -32601, "Method not found", NULL);
         return NULL;
     }
@@ -482,10 +483,10 @@ static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* 
         if (events && (yyjson_equals_str(key, "after") || yyjson_equals_str(key, "limit"))) continue;
         goto invalid;
     }
-    if (!strcmp(name, "getStatus") || !strcmp(name, "sync")) {
-        rcvcmd_snapshot_t snapshot;
-        rcvcmd_snapshot(rpc->cmd, &snapshot);
-        return rcvjson_snapshot(doc, &snapshot);
+    if (snapshot) {
+        rcvcmd_snapshot_t copy;
+        rcvcmd_snapshot(rpc->cmd, &copy);
+        return rcvjson_snapshot(doc, &copy);
     }
     if (events) {
         uint64_t after, limit = 1000;
@@ -577,7 +578,7 @@ static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* 
         return result;
     }
     result = yyjson_mut_obj(doc);
-    if (!strcmp(name, "getVersion")) {
+    if (version) {
         yyjson_mut_obj_add_str(doc, result, "protocolVersion", "0.1");
         yyjson_mut_obj_add_str(doc, result, "mrtklibVersion", MRTKLIB_VERSION_STRING);
         yyjson_mut_obj_add_str(doc, result, "authentication", rpc->options->no_auth ? "none" : "token");
@@ -594,13 +595,40 @@ internal:
     return NULL;
 }
 
+/* yyjson reports a failed insertion only through each call's return value, so a
+ * missed allocation failure would send a success with members or events left out.
+ * The response document records any failure; the reply then closes with 1011. */
+typedef struct {
+    int failed;
+} rpc_allocation_t;
+
+static void* response_malloc(void* ctx, size_t size) {
+    void* memory = malloc(size);
+    if (!memory) ((rpc_allocation_t*)ctx)->failed = 1;
+    return memory;
+}
+
+static void* response_realloc(void* ctx, void* ptr, size_t old_size, size_t size) {
+    void* memory = realloc(ptr, size);
+    (void)old_size;
+    if (!memory) ((rpc_allocation_t*)ctx)->failed = 1;
+    return memory;
+}
+
+static void response_free(void* ctx, void* ptr) {
+    (void)ctx;
+    free(ptr);
+}
+
 static void handle_message(rcvrpc_t* rpc, struct mg_connection* connection, const char* message, size_t length) {
     /* Raw numeric values preserve every ID digit, including numbers beyond uint64. */
     yyjson_doc* request_doc = yyjson_read(message, length, YYJSON_READ_NUMBER_AS_RAW);
     yyjson_val* request = yyjson_doc_get_root(request_doc);
     yyjson_val *id = yyjson_obj_get(request, "id"), *version = yyjson_obj_get(request, "jsonrpc"),
                *method = yyjson_obj_get(request, "method"), *params = yyjson_obj_get(request, "params");
-    yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+    rpc_allocation_t allocation = {0};
+    yyjson_alc allocator = {response_malloc, response_realloc, response_free, &allocation};
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(&allocator);
     yyjson_mut_val *response, *error = NULL, *result = NULL;
     char* encoded;
     size_t encoded_length;
@@ -629,7 +657,7 @@ static void handle_message(rcvrpc_t* rpc, struct mg_connection* connection, cons
         doc, response, "id",
         id && (yyjson_is_str(id) || yyjson_is_raw(id)) ? yyjson_val_mut_copy(doc, id) : yyjson_mut_null(doc));
     yyjson_mut_obj_add_val(doc, response, error ? "error" : "result", error ? error : result);
-    encoded = yyjson_mut_write(doc, 0, &encoded_length);
+    encoded = allocation.failed ? NULL : yyjson_mut_write(doc, 0, &encoded_length);
     if (encoded) {
         mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_TEXT, encoded, encoded_length);
         free(encoded);

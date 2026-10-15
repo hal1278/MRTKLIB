@@ -714,6 +714,7 @@ static void overwrite_checks(char* config) {
     rcvcmd_result_t result;
     gtime_t rst = {0};
     char long_path[MAXSTRPATH], expected[1024], *second;
+    int i;
     uint64_t before;
     CHECK(ctx != NULL, "overwrite context");
     if (!ctx) return;
@@ -784,6 +785,15 @@ static void overwrite_checks(char* config) {
     rcvcmd_start(cmd, &callbacks);
     CHECK(!strcmp(probe.seen[0], "out_%Y%m%d.pos"), "any time-tag input prevents keyword resolution");
     set_option(cmd, "inpstr2-type", "off");
+    /* 1003 characters and ten %Y would expand to 1043: reppath() must not run. */
+    memset(long_path, 'k', 1003);
+    for (i = 0; i < 10; i++) memcpy(long_path + 1003 + 2 * i, "%Y", 2);
+    long_path[1023] = 0;
+    set_option(cmd, "outstr1-path", long_path);
+    probe.count = 0;
+    rcvcmd_start(cmd, &callbacks);
+    CHECK(probe.count == 1 && !strcmp(probe.seen[0], long_path), "a name that could overflow is not resolved");
+    set_option(cmd, "outstr1-path", "out_%Y%m%d.pos::S=1");
     set_option(cmd, "pos1-correction", "bds-b2b");
     rcvcmd_start(cmd, &callbacks);
     rcvcmd_get_lifecycle(cmd, &lifecycle);

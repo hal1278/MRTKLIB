@@ -191,6 +191,18 @@ static void conversion_checks(void) {
               yyjson_equals_str(yyjson_obj_get(yyjson_obj_get(root, "data"), "text"), "bad" REPLACEMENT),
           "log event sanitizes UTF-8");
     yyjson_doc_free(copy);
+    /* A whole sink message of invalid bytes triples in length when replaced. */
+    memset(event.data.log.text, 0xFF, RCVEVENT_TEXT - 1);
+    event.data.log.text[RCVEVENT_TEXT - 1] = '\0';
+    copy = encoded(doc, rcvjson_event(doc, &event));
+    root = yyjson_doc_get_root(copy);
+    {
+        yyjson_val* text = yyjson_obj_get(yyjson_obj_get(root, "data"), "text");
+        CHECK(yyjson_get_len(text) == 3 * (RCVEVENT_TEXT - 1) &&
+                  rcvjson_utf8_valid(yyjson_get_str(text), yyjson_get_len(text)),
+              "a full-length invalid log text is replaced completely");
+    }
+    yyjson_doc_free(copy);
     event.kind = RCVEVENT_STATUS;
     memset(&event.data, 0, sizeof(event.data));
     event.data.status.last_error = RCVCMD_START_ERROR_OVERWRITE;

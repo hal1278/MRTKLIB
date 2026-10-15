@@ -827,11 +827,29 @@ static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* 
     free(pcvr.pcv);
     free(pcvs.pcv);
 }
+/* Upper bound of reppath()'s output length: of its keywords only %Y and %W
+ * (2 -> 4 characters) and %n (2 -> 3) lengthen a path. */
+static size_t expanded_length(const char* path) {
+    size_t n = strlen(path);
+    const char* p;
+    for (p = path; (p = strchr(p, '%')); p++) {
+        if (p[1] == 'Y' || p[1] == 'W') {
+            n += 2;
+        } else if (p[1] == 'n') {
+            n += 1;
+        }
+    }
+    return n;
+}
+
 /* Match stream/mrtk_stream.c openfile() option parsing and openfile_() reppath.
  * Time-tag inputs reset the process clock before outputs open, so their output
- * keyword names cannot be predicted here. Keep the unresolved name in that case. */
+ * keyword names cannot be predicted here. Keep the unresolved name in that case.
+ * reppath() writes without a bound (also inside its 1024-byte repstr() buffer), so
+ * a name that could expand past MAXSTRPATH - 1 is not resolved either; the
+ * stream's own open shares that limit. */
 static void overwrite_path(const rcvcmd_settings_t* settings, const char* configured, char* out) {
-    char path[1024];
+    char path[MAXSTRPATH];
     const char* option;
     int i, replay = 0;
     for (i = 0; i < 3; i++) {
@@ -841,7 +859,7 @@ static void overwrite_path(const rcvcmd_settings_t* settings, const char* config
     }
     strcpy(path, configured);
     if (strstr(path, "::")) *strstr(path, "::") = '\0';
-    if (replay)
+    if (replay || expanded_length(path) >= MAXSTRPATH)
         strcpy(out, path);
     else
         reppath(path, out, utc2gpst(timeget()), "", "");
@@ -927,7 +945,7 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io, i
         int denied = 0;
         size_t used = 0;
         for (i = 3; i < 8; i++) {
-            char path[1024];
+            char path[MAXSTRPATH];
             int answer;
             size_t offset, length;
             if (settings->strtype[i] != STR_FILE) continue;

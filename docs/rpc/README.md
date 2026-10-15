@@ -495,8 +495,10 @@ number must not lose a whole event page or close the connection.
   frequent. The `level` of a message is the lowest selected level at which it
   is delivered.
 - `text` is English text for display. It is not part of the contract: show
-  it, do not parse it. Long messages are truncated. Secrets (passwords in
-  stream paths, the token) never appear.
+  it, do not parse it. Long messages are truncated. Bytes that are not valid
+  UTF-8 (a file name in another encoding, a character cut by the truncation)
+  are replaced with U+FFFD, because JSON strings must be Unicode. Secrets
+  (passwords in stream paths, the token) never appear.
 - Log messages can arrive after `stopped`, for example from a download that
   is still finishing.
 
