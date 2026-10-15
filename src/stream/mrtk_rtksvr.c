@@ -112,12 +112,12 @@ static void writesol(rtksvr_t* svr, int index) {
         n = outsols(buff, &svr->rtk.sol, svr->rtk.rb, &solopt);
         strwrite(svr->moni, buff, n);
     }
-    /* save solution buffer */
+    /* save solution buffer (check nsol under the lock: readers reset it) */
+    rtksvrlock(svr);
     if (svr->nsol < MAXSOLBUF) {
-        rtksvrlock(svr);
         svr->solbuf[svr->nsol++] = svr->rtk.sol;
-        rtksvrunlock(svr);
     }
+    rtksvrunlock(svr);
 }
 /* update glonass frequency channel number in raw data struct ----------------*/
 static void update_glofcn(rtksvr_t* svr) {
@@ -841,7 +841,7 @@ static void* rtksvrthread(void* arg) {
     uint32_t tick, ticknmea, tick1hz, tickreset;
     uint8_t *p, *q;
     char msg[128];
-    int i, j, n, fobs[3] = {0}, cycle, cputime;
+    int i, j, n, fobs[3] = {0}, cycle, cputime, outage;
 
     tracet(ctx, 3, "rtksvrthread:\n");
 
@@ -866,10 +866,10 @@ static void* rtksvrthread(void* arg) {
             }
             /* write receiver raw/rtcm data to log stream */
             strwrite(svr->stream + i + 5, p, n);
-            svr->nb[i] += n;
 
-            /* save peek buffer */
+            /* count input bytes (read by other threads) and save peek buffer */
             rtksvrlock(svr);
+            svr->nb[i] += n;
             n = n < svr->buffsize - svr->npb[i] ? n : svr->buffsize - svr->npb[i];
             memcpy(svr->pbuf[i] + svr->npb[i], p, n);
             svr->npb[i] += n;
@@ -886,8 +886,13 @@ static void* rtksvrthread(void* arg) {
         }
         /* averaging single base pos */
         if (fobs[1] > 0 && svr->rtk.opt.refpos == POSOPT_SINGLE) {
-            if ((svr->rtk.opt.maxaveep <= 0 || svr->nave < svr->rtk.opt.maxaveep) &&
-                pntpos(ctx, svr->obs[1][0].data, svr->obs[1][0].n, &svr->nav, &svr->rtk.opt, &sol, NULL, NULL, msg)) {
+            int ave =
+                (svr->rtk.opt.maxaveep <= 0 || svr->nave < svr->rtk.opt.maxaveep) &&
+                pntpos(ctx, svr->obs[1][0].data, svr->obs[1][0].n, &svr->nav, &svr->rtk.opt, &sol, NULL, NULL, msg);
+
+            /* update the average (read by other threads) */
+            rtksvrlock(svr);
+            if (ave) {
                 svr->nave++;
                 for (i = 0; i < 3; i++) {
                     svr->rb_ave[i] += (sol.rr[i] - svr->rb_ave[i]) / svr->nave;
@@ -896,7 +901,9 @@ static void* rtksvrthread(void* arg) {
             for (i = 0; i < 3; i++) {
                 svr->rtk.opt.rb[i] = svr->rb_ave[i];
             }
+            rtksvrunlock(svr);
         }
+        outage = 0;
         for (i = 0; i < fobs[0]; i++) { /* for each rover observation data */
             obs.n = 0;
             for (j = 0; j < svr->obs[0][i].n && obs.n < MAXOBS * 2; j++) {
@@ -926,7 +933,7 @@ static void* rtksvrthread(void* arg) {
             }
             /* if cpu overload, inclement obs outage counter and break */
             if ((int)(tickget() - tick) >= svr->cycle) {
-                svr->prcout += fobs[0] - i - 1;
+                outage += fobs[0] - i - 1;
             }
         }
         /* send null solution if no solution (1hz) */
@@ -943,9 +950,15 @@ static void* rtksvrthread(void* arg) {
             send_nmea(svr, &tickreset);
             ticknmea = tick;
         }
-        if ((cputime = (int)(tickget() - tick)) > 0) {
+        cputime = (int)(tickget() - tick);
+
+        /* update cycle counters (read by other threads) */
+        rtksvrlock(svr);
+        svr->prcout += outage;
+        if (cputime > 0) {
             svr->cputime = cputime;
         }
+        rtksvrunlock(svr);
 
         /* sleep until next cycle */
         sleepms(svr->cycle - cputime);
