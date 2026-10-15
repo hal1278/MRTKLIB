@@ -93,10 +93,16 @@ typedef struct {
     int status;
 } rcvcmd_notice_t;
 
+typedef enum {
+    RCVCMD_OVERWRITE_REFUSE_STOP = 0,
+    RCVCMD_OVERWRITE_ALLOW = 1,
+    RCVCMD_OVERWRITE_REFUSE_CONTINUE = 2
+} rcvcmd_overwrite_t;
+
 typedef struct {
     void* arg;
     void (*notice)(void* arg, const rcvcmd_notice_t* notice);
-    int (*confirm_overwrite)(void* arg, const char* path); /* 1: overwrite / no file, 0: abort */
+    int (*confirm_overwrite)(void* arg, const char* path); /* rcvcmd_overwrite_t */
 } rcvcmd_io_t;
 
 typedef enum { RCVCMD_STOPPED, RCVCMD_STARTING, RCVCMD_RUNNING, RCVCMD_STOPPING } rcvcmd_state_t;
@@ -115,6 +121,7 @@ typedef struct {
     rcvcmd_state_t state;
     rcvcmd_stop_reason_t stop_reason;
     rcvcmd_start_error_t last_error;
+    char paths[RCVEVENT_PATHS]; /* distinct refused paths, NUL-separated, double NUL at end */
 } rcvcmd_lifecycle_t;
 
 typedef enum {
@@ -138,6 +145,31 @@ typedef struct {
     int has_solution;    /* valid while running */
     rcvevent_t solution; /* last solution event of this run, including NONE */
 } rcvcmd_snapshot_t;
+
+typedef enum { RCVCMD_OP_START, RCVCMD_OP_STOP, RCVCMD_OP_RESTART, RCVCMD_OP_SHUTDOWN } rcvcmd_operation_t;
+
+typedef struct {
+    uint64_t seq; /* zero when no execution is required */
+} rcvcmd_claim_t;
+
+/** @brief Claim a lifecycle transition and publish its initial status.
+ * @param[in,out] cmd The sole command-layer instance.
+ * @param[in] operation Requested operation; SHUTDOWN waits for the preceding claim.
+ * @param[out] claim Transferable execution token, zero for refusals or an unchanged stop.
+ * @return Acceptance with claim-event seq, or refusal with the current boundary.
+ * Waits only for counted readers to copy their data. A nonzero token MUST be
+ * executed exactly once, from any thread, using rcvcmd_execute(). Until then
+ * other lifecycle operations are busy and shutdown waits. Callbacks are not run.
+ */
+rcvcmd_result_t rcvcmd_claim(rcvcmd_t* cmd, rcvcmd_operation_t operation, rcvcmd_claim_t* claim);
+/** @brief Execute a previously accepted claim, publishing its final status.
+ * @param[in,out] cmd Instance that issued the claim.
+ * @param[in] claim Nonzero token from rcvcmd_claim; consumed at entry.
+ * @param[in] io Synchronous callbacks, borrowed until this call returns.
+ * @return Final result with the original claim seq; BUSY for an already consumed token.
+ * Holds no publish mutex while executing server operations or callbacks.
+ */
+rcvcmd_result_t rcvcmd_execute(rcvcmd_t* cmd, const rcvcmd_claim_t* claim, const rcvcmd_io_t* io);
 
 /** @brief Return the last published sequence under the publish mutex. */
 uint64_t rcvcmd_last_seq(rcvcmd_t* cmd);

@@ -11,7 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Initial `mrtk run` WebSocket JSON-RPC transport with token authentication,
   origin checks, an ephemeral-port ready line, `getVersion` and `shutdown`.
-  The remaining protocol 0.1 methods follow in the next implementation unit.
+  Lifecycle, status and paged events are implemented, including request-scoped
+  output overwrite agreements and asynchronous lifecycle execution.
 - `--no-console` for RPC operation and `--exit-on-stdin-eof` for parents to
   tie the server lifetime to a stdin pipe while retaining normal shutdown.
 - `MRTK_WITH_RPC` build option (default `ON`), system CivetWeb 1.16 dependency

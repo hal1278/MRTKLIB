@@ -214,8 +214,29 @@ if(MRTK_WITH_RPC)
     if(NOT civetweb_FOUND)
         message(FATAL_ERROR "RPC requires CivetWeb 1.16 or newer: install libcivetweb-dev (Debian/Ubuntu), civetweb (Homebrew), mingw-w64-ucrt-x86_64-civetweb (MSYS2), or civetweb (vcpkg); or use -DMRTK_WITH_RPC=OFF.")
     endif()
-    # Packages may omit a CMake version file; rcvrpc.c checks the header version.
+    # Packages may omit a CMake version file, so compile the package's own header:
+    # the compiler resolves the include directories as the build will (generator
+    # expressions included). A package older than 0.11 (Debian 13 ships 0.10,
+    # which lacks yyjson_mut_float) is not used: the pinned release is fetched.
     find_package(yyjson CONFIG QUIET)
+    set(MRTK_YYJSON_TARGET yyjson::yyjson)
+    if(yyjson_FOUND)
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES yyjson::yyjson)
+        set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+        unset(MRTK_YYJSON_PACKAGE_USABLE CACHE)
+        check_c_source_compiles("#include <yyjson.h>
+#if !defined(YYJSON_VERSION_HEX) || YYJSON_VERSION_HEX < 0x000B00
+#error yyjson older than 0.11
+#endif
+int mrtk_yyjson_version_check;" MRTK_YYJSON_PACKAGE_USABLE)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+        if(NOT MRTK_YYJSON_PACKAGE_USABLE)
+            message(STATUS "yyjson package is older than 0.11: fetching yyjson 0.13.0")
+            set(yyjson_FOUND FALSE)
+        endif()
+    endif()
     if(NOT yyjson_FOUND)
         include(FetchContent)
         if(POLICY CMP0135)
@@ -229,9 +250,8 @@ if(MRTK_WITH_RPC)
             URL https://github.com/ibireme/yyjson/archive/refs/tags/0.13.0.tar.gz
             URL_HASH SHA256=34e0f62a2bc11ab20d601e8ca1cc2b2079503aa45119a19133d89d19b94a0fae)
         FetchContent_MakeAvailable(yyjson)
-    endif()
-    if(NOT TARGET yyjson::yyjson)
-        add_library(yyjson::yyjson ALIAS yyjson)
+        # The fetched target; an older package's yyjson::yyjson may also exist.
+        set(MRTK_YYJSON_TARGET yyjson)
     endif()
     set(_RCVRPC_SOURCE apps/rtkrcv/rcvrpc.c)
 else()
@@ -267,7 +287,8 @@ target_include_directories(mrtk PRIVATE apps/rtkrcv)
 target_compile_definitions(mrtk PRIVATE SVR_REUSEADDR)
 target_link_libraries(mrtk PRIVATE mrtklib pthread)
 if(MRTK_WITH_RPC)
-    target_link_libraries(mrtk PRIVATE civetweb::civetweb yyjson::yyjson)
+    target_link_libraries(mrtk PRIVATE civetweb::civetweb ${MRTK_YYJSON_TARGET})
+    target_compile_definitions(mrtk PRIVATE RCVJSON_RPC)
 endif()
 target_link_options(mrtk PRIVATE $<$<OR:$<PLATFORM_ID:Linux>,$<PLATFORM_ID:FreeBSD>>:-rdynamic>)
 
@@ -405,9 +426,14 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
 
-add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c)
+add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c apps/rtkrcv/rcvevent.c)
 target_compile_options(utest_rcvjson PRIVATE -std=c11)
 target_include_directories(utest_rcvjson PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvjson PRIVATE mrtklib)
+if(MRTK_WITH_RPC)
+    target_compile_definitions(utest_rcvjson PRIVATE RCVJSON_RPC)
+    target_link_libraries(utest_rcvjson PRIVATE ${MRTK_YYJSON_TARGET})
+endif()
 add_test(NAME utest_rcvjson COMMAND utest_rcvjson)
 set_tests_properties(utest_rcvjson PROPERTIES LABELS "utest" TIMEOUT 30)
 
@@ -2375,6 +2401,11 @@ if(MRTK_WITH_RPC)
             --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR}
             --compiler ${CMAKE_C_COMPILER})
     set_tests_properties(rpc_transport PROPERTIES LABELS "rpc" TIMEOUT 180)
+    add_test(NAME rpc_methods
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_rpc_methods.py
+            --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR})
+    set_tests_properties(rpc_methods PROPERTIES LABELS "rpc" TIMEOUT 180
+        FIXTURES_REQUIRED regression_data)
 endif()
 
 # ── JSON-RPC contract self-check (docs/rpc/openrpc.json) ──────────────────────

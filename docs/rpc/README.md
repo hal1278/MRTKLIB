@@ -1,6 +1,6 @@
 # `mrtk run` JSON-RPC Interface
 
-> **Status:** Draft — protocol 0.1, not implemented yet ·
+> **Status:** Protocol 0.1, implemented in the prototype except automatic stop at input end (`inputEnd`, §5) ·
 > **Tracking:** [#326](https://github.com/h-shiono/MRTKLIB/issues/326) ·
 > **Contract:** [`openrpc.json`](openrpc.json)
 >
@@ -294,7 +294,27 @@ status events):
 |---|---|
 | `state` | `stopped`, `starting`, `running` or `stopping` |
 | `stopReason` | In `stopping` and `stopped`, except before the first start: `request` (a stop, restart or shutdown request from any interface, or a signal), `inputEnd`, or `error` (the start failed) |
-| `lastError` | The most recent start failure, `{reason, message}`: present in `stopped` with `stopReason: "error"` and in a following `starting`, until a start succeeds. `reason` is a stable name from an open set (0.1: `startFailed`); `message` is English text for display, not part of the contract |
+| `lastError` | The most recent start failure, `{reason, message, paths?}`: present in `stopped` with `stopReason: "error"` and in a following `starting`, until a start succeeds. `reason` is a stable name from an open set (0.1: `startFailed`, `outputExists`); `paths` is present exactly with `outputExists`; `message` is English text for display, not part of the contract |
+
+`start` and `restart` accept an optional `overwrite` parameter, an array of
+strings (default `[]`). Existing output files are refused unless their paths
+appear in this list, with an exact byte comparison; a string containing NUL is
+an invalid parameter, as no path contains one. A refusal ends the start in
+`stopped` with `stopReason: "error"` and
+`lastError: {reason: "outputExists", message, paths}`. `paths` lists distinct
+refused files in stream slot order. Pass **every path the user agreed to** on
+each attempt, not only the last `paths`: configuration can change, and a long
+list may be reported over several attempts. *Why:* an agreement belongs to the
+request; the server does not retain overwrite permission between requests.
+
+The paths are the files the server would open: the configured path before
+`::`, with time keywords resolved at the start. The telnet console also asks
+about that resolved name; its question and file-by-file order are unchanged.
+With a time-tag replay input (`::T`), the inputs set the process clock only when
+they open, so output paths with time keywords are not checked. Files opened
+later by a swap interval (`::S=`) are overwritten without a check. A name can
+also differ if a time boundary passes between checking and opening (while
+waiting for a telnet answer or `misc-startcmd`).
 
 ## 6. Status
 
@@ -364,7 +384,9 @@ ascending order:
 | `oldestSeq` | With `lost`: the oldest `seq` still held |
 
 After `lost`, call `sync` again. The status is recovered; the missing
-solutions and log messages are not. `after` greater than the last published
+solutions and log messages are not. `limit` defaults to 1000; larger values are cut to 1000. Values below 1, wrong
+types for `overwrite`, `after` or `limit`, and unknown parameter names produce
+`invalidParams` (-32602). `after` greater than the last published
 `seq` is an invalid parameter.
 
 ### The event buffer
@@ -458,6 +480,20 @@ instant twice, while the offset is all a client needs. During an inserted
 leap second a client shows the same UTC second twice; the server's own UTC
 time cannot represent `23:59:60` either.
 
+Positioning engines are not expected to produce non-finite numbers; if they
+do, the server keeps the event stream valid JSON:
+
+- A solution whose time is not finite is not published: like the solutions
+  before the first epoch, it has no time to report.
+- A solution with any other value that is NaN or infinite is sent as a `none`
+  solution with only `time`, `leapSeconds` and `status: "none"`.
+- At the first such solution after valid ones, the server emits a level-1 log
+  message.
+
+*Why:* JSON cannot represent non-finite numbers (RFC 8259 §6), and one invalid
+number must not lose a whole event page or close the connection. A substitute
+value would look like a valid one.
+
 ## 9. Log messages
 
 `logMessage` is `{level, text}`.
@@ -469,8 +505,10 @@ time cannot represent `23:59:60` either.
   frequent. The `level` of a message is the lowest selected level at which it
   is delivered.
 - `text` is English text for display. It is not part of the contract: show
-  it, do not parse it. Long messages are truncated. Secrets (passwords in
-  stream paths, the token) never appear.
+  it, do not parse it. Long messages are truncated. Bytes that are not valid
+  UTF-8 (a file name in another encoding, a character cut by the truncation)
+  are replaced with U+FFFD, because JSON strings must be Unicode. Secrets
+  (passwords in stream paths, the token) never appear.
 - Log messages can arrive after `stopped`, for example from a download that
   is still finishing.
 
@@ -489,7 +527,7 @@ Errors use the JSON-RPC error object. Branch on `data.reason`, not on
 | -32700 | — | Parse error |
 | -32600 | — | Invalid request (also: batch requests) |
 | -32601 | — | Method not found |
-| -32602 | `invalidParams` | Invalid parameters |
+| -32602 | `invalidParams` | Unknown parameters, wrong `overwrite`/`after`/`limit` types, an out-of-range `after`, or `limit` below 1 |
 | -32603 | — | Internal error |
 | 1001 | `busy` | A lifecycle request during `starting` or `stopping`, or during a restart; `data.state` holds the state |
 | 1002 | `alreadyRunning` | `start` while running |

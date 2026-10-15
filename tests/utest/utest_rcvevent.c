@@ -8,6 +8,7 @@
  *
  * Explicit CHECK macro (not assert) so it is robust under -DNDEBUG.
  *----------------------------------------------------------------------------*/
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -146,8 +147,35 @@ static void test_read_newest(void) {
     rcvevent_free(&ring);
 }
 
+static void test_solution_finite(void) {
+    rcvevent_solution_t s;
+    memset(&s, 0, sizeof(s));
+    s.leap = 18.0;
+    s.sol.rr[0] = -3961904.9;
+    CHECK(rcvevent_solution_finite(&s), "finite solution");
+    s.sol.rr[3] = NAN;
+    s.sol.qv[0] = NAN;
+    s.sol.dtr[0] = INFINITY;
+    CHECK(rcvevent_solution_finite(&s), "unsent velocity and clock bias are not checked");
+    s.sol.time.sec = NAN;
+    CHECK(!rcvevent_solution_finite(&s), "non-finite time");
+    s.sol.time.sec = 0.5;
+    s.sol.qr[5] = INFINITY;
+    CHECK(!rcvevent_solution_finite(&s), "non-finite covariance");
+    s.sol.qr[5] = 0.0f;
+    s.rb[1] = NAN;
+    CHECK(rcvevent_solution_finite(&s), "base ignored without has_base");
+    s.has_base = 1;
+    CHECK(!rcvevent_solution_finite(&s), "non-finite base");
+    s.has_base = 0;
+    s.separation = NAN;
+    s.has_separation = 1;
+    CHECK(!rcvevent_solution_finite(&s), "non-finite separation");
+}
+
 int main(void) {
     test_empty();
+    test_solution_finite();
     test_read_limit();
     test_overflow();
     test_read_newest();

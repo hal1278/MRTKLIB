@@ -27,7 +27,12 @@
 extern "C" {
 #endif
 
-#define RCVEVENT_TEXT 512 /* log text bytes including the terminating NUL */
+/* Both sizes follow the core: a whole trace sink message (MRTK_TRACE_SINK_MSGLEN,
+ * checked in rcvcmd.c because this header stays light), and the longest stream path
+ * plus the list terminator. The ring never cuts a log text and one refused path always
+ * fits; the union, and so every entry, is about 1 KB. */
+#define RCVEVENT_TEXT 1024              /* log text bytes including the terminating NUL */
+#define RCVEVENT_PATHS (MAXSTRPATH + 1) /* NUL-separated refused paths, then an empty string */
 
 typedef enum { RCVEVENT_STATUS, RCVEVENT_SOLUTION, RCVEVENT_LOG } rcvevent_kind_t;
 
@@ -38,6 +43,7 @@ typedef struct {
     int state;       /* rcvcmd_state_t */
     int stop_reason; /* rcvcmd_stop_reason_t */
     int last_error;  /* rcvcmd_start_error_t */
+    char paths[RCVEVENT_PATHS];
 } rcvevent_status_t;
 
 typedef struct {
@@ -80,6 +86,15 @@ typedef struct {
     uint64_t oldest; /* with lost: the oldest seq held */
 } rcvevent_read_t;
 
+/**
+ * @brief Check that the values a solution event carries out are finite.
+ * Covers time, leap seconds, position, position covariance, age, ratio and,
+ * when present, the base position and the geoid separation; values that no
+ * adapter writes (velocity, clock bias) are not checked.
+ * @param[in] s Solution event data.
+ * @return 1 if all are finite, otherwise 0.
+ */
+int rcvevent_solution_finite(const rcvevent_solution_t* s);
 /**
  * @brief Allocate an empty ring.
  * @param[out] ring Ring to initialize.

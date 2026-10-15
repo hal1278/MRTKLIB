@@ -34,6 +34,27 @@ int rcvjson_utf8_valid(const char* text, size_t length);
  */
 size_t rcvjson_sanitize_utf8(const char* text, size_t length, char* out, size_t capacity);
 
+#ifdef RCVJSON_RPC
+#include <yyjson.h>
+
+#include "rcvcmd.h"
+
+/** @brief Return the protocol lifecycle state name. */
+const char* rcvjson_state_name(rcvcmd_state_t state);
+/** @brief Return the positioning.mode TOML name for a core mode. */
+const char* rcvjson_mode_name(int mode);
+/** @brief Return the output.geoid_model TOML name for a core model. */
+const char* rcvjson_geoid_name(int model);
+/** @brief Convert a lifecycle copy; returned values belong to doc. */
+yyjson_mut_val* rcvjson_lifecycle(yyjson_mut_doc* doc, const rcvcmd_lifecycle_t* value);
+/** @brief Convert an ECEF server solution, degrading non-finite data to none. */
+yyjson_mut_val* rcvjson_solution(yyjson_mut_doc* doc, const rcvevent_solution_t* value);
+/** @brief Convert an atomic status snapshot; returned values belong to doc. */
+yyjson_mut_val* rcvjson_snapshot(yyjson_mut_doc* doc, const rcvcmd_snapshot_t* value);
+/** @brief Convert an event copy, sanitizing log text to valid UTF-8. */
+yyjson_mut_val* rcvjson_event(yyjson_mut_doc* doc, const rcvevent_t* value);
+#endif
+
 #ifdef __cplusplus
 }
 #endif
