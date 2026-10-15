@@ -77,6 +77,7 @@
 #include "mrtklib/mrtk_context.h"
 #include "mrtklib/mrtklib.h"
 #include "rcvcmd.h"
+#include "rcvrpc.h"
 #include "rtklib.h"
 #include "vt.h"
 
@@ -147,6 +148,12 @@ static const char* usage[] = {
     "  -sta NAME            Station name for receiver DCB",
     "  -v,  -ver            Print version",
     "  -rst Y/M/D H:M:S     Start day/time (raw/rtcm data start time)",
+    "       --rpc-port PORT     WebSocket RPC port (0: choose a free port)",
+    "       --rpc-bind ADDR     RPC bind address (default: 127.0.0.1)",
+    "       --rpc-origin ORIGIN Allowed browser origin (repeatable)",
+    "       --rpc-no-auth       Disable authentication on loopback only",
+    "       --no-console        Disable local console (requires --rpc-port)",
+    "       --exit-on-stdin-eof  Shut down on stdin EOF (requires --no-console)",
     "  -h,  --help          Show this help",
     "",
     "Examples:",
@@ -1762,11 +1769,23 @@ int mrtk_run(int argc, char** argv) {
     gtime_t rst = {0};
 
     mrtk_ctx_t* ctx;
+    rcvrpc_options_t rpc_options;
+    rcvrpc_t* rpc = NULL;
+    int rpc_option, exit_status = 0;
 
+    rcvrpc_options_init(&rpc_options);
     /* translate --long flags to their -short aliases before parsing */
     mrtk_normalize_args(argc, argv, opt_aliases);
 
     for (i = 1; i < argc; i++) {
+        rpc_option = rcvrpc_parse_option(&rpc_options, argc, argv, &i);
+        if (rpc_option < 0) {
+            rcvrpc_options_free(&rpc_options);
+            return -1;
+        }
+        if (rpc_option) {
+            continue;
+        }
         if (mrtk_is_help_flag(argv[i])) {
             printusage();
         } else if (!strcmp(argv[i], "-s")) {
@@ -1798,6 +1817,11 @@ int mrtk_run(int argc, char** argv) {
         }
     }
 
+    if (!rcvrpc_options_validate(&rpc_options)) {
+        rcvrpc_options_free(&rpc_options);
+        return -1;
+    }
+
     /* Initialize MRTKLIB runtime context */
     ctx = mrtk_ctx_create();
     if (!ctx) {
@@ -1823,6 +1847,7 @@ int mrtk_run(int argc, char** argv) {
         traceopen(ctx, TRACEFILE);
         tracelevel(ctx, trace_level);
     }
+    if (rpc_options.exit_on_stdin_eof) rcvcmd_reserve_stdin(cmd);
     rcvcmd_initialize(cmd, file, password, staname, moniport, outstat, rst);
     if (port) {
         /* open socket for remote console */
@@ -1836,7 +1861,7 @@ int mrtk_run(int argc, char** argv) {
             rcvcmd_destroy(cmd);
             return -1;
         }
-    } else {
+    } else if (!rpc_options.no_console) {
         /* open device for local console */
         if (!(con[0] = con_open(0, dev))) {
             fprintf(stderr, "console open error dev=%s\n", dev);
@@ -1867,6 +1892,11 @@ int mrtk_run(int argc, char** argv) {
         sigaction(SIGSEGV, &sa_crash, NULL);
     }
 
+    if (!rcvrpc_start(&rpc, &rpc_options, cmd)) {
+        exit_status = -1;
+        goto shutdown;
+    }
+
     /* start rtk server */
     if (start) {
         rcvcmd_start(cmd, &process_io);
@@ -1879,9 +1909,12 @@ int mrtk_run(int argc, char** argv) {
     if (intflg) {
         trace(NULL, 3, "sigshut: sig=%d\n", (int)shut_signal);
     }
+shutdown:
     /* stop rtk server */
     rcvcmd_request_shutdown(cmd);
     rcvcmd_shutdown(cmd, &process_io);
+    rcvrpc_stop(rpc);
+    rcvrpc_options_free(&rpc_options);
 
     if (port) {
         /* close socket for remote console */
@@ -1899,5 +1932,5 @@ int mrtk_run(int argc, char** argv) {
     g_mrtk_legacy_ctx = NULL;
     /* Keep the context, sink and ring reachable for console/download threads
      * that may still trace; destroy them once all such threads are joined. */
-    return 0;
+    return exit_status;
 }

@@ -6,6 +6,8 @@
 |-------------|---------|-------|
 | C compiler | C11 support | GCC 7+, Clang 5+, Apple Clang |
 | CMake | 3.15+ | Build system |
+| CivetWeb | 1.16+, with WebSocket support | Required for `MRTK_WITH_RPC=ON` (default); system package |
+| yyjson | 0.10+ | Required for RPC; CMake fetches 0.13.0 if no suitable package is found |
 | LAPACK | any | Hardware-accelerated matrix operations |
 
 ### Platform-Specific Dependencies
@@ -14,7 +16,7 @@
 
     ```bash
     sudo apt-get update
-    sudo apt-get install -y cmake build-essential liblapack-dev
+    sudo apt-get install -y cmake build-essential liblapack-dev libcivetweb-dev
     ```
 
 === "macOS (Homebrew)"
@@ -22,12 +24,50 @@
     ```bash
     # Xcode command line tools provide Apple Clang + Accelerate (LAPACK)
     xcode-select --install
-    brew install cmake
+    brew install cmake civetweb
     ```
 
 === "macOS (Apple Silicon)"
 
     No additional LAPACK installation needed — macOS ships with the Accelerate framework which provides LAPACK.
+
+For MSYS2 UCRT64, the CivetWeb package is
+`mingw-w64-ucrt-x86_64-civetweb`. With vcpkg, install `civetweb`.
+The RPC implementation currently targets POSIX systems; these package names
+also identify the dependency for future Windows support.
+
+### RPC dependencies and offline builds
+
+`MRTK_WITH_RPC` defaults to `ON` and enables the WebSocket endpoint of
+`mrtk run`. CMake finds the system CivetWeb package with
+`find_package(civetweb CONFIG)` and requires version 1.16 or newer with WebSocket
+support. Install it before configuring; CivetWeb is not downloaded by the
+build. If its CMake package is outside the usual search paths, add its
+prefix to `CMAKE_PREFIX_PATH`.
+
+CMake first looks for a yyjson 0.10 or newer CMake package. If it cannot find
+one, FetchContent downloads the hash-verified yyjson 0.13.0 release archive
+and builds it with tests, fuzzers, miscellaneous tools and documentation
+disabled. This requires network access during configuration, including on
+Ubuntu 24.04, where yyjson is not provided by the default system packages.
+No third-party source is stored in this repository.
+
+For an offline build, install a suitable yyjson CMake package, or provide an
+already extracted yyjson 0.13.0 source tree:
+
+```bash
+cmake --preset default -DFETCHCONTENT_SOURCE_DIR_YYJSON=/absolute/path/to/yyjson-0.13.0
+```
+
+To omit both RPC dependencies, configure with:
+
+```bash
+cmake --preset default -DMRTK_WITH_RPC=OFF
+```
+
+That build rejects `--rpc-port`, `--rpc-bind`, `--rpc-origin`,
+`--rpc-no-auth`, `--no-console` and `--exit-on-stdin-eof` with an error.
+RPC transport tests are registered only when `MRTK_WITH_RPC=ON`.
 
 ## Build from Source
 

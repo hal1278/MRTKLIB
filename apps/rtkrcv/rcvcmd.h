@@ -107,7 +107,8 @@ typedef enum {
     RCVCMD_START_ERROR_NONE,
     RCVCMD_START_ERROR_CORRECTION,
     RCVCMD_START_ERROR_OVERWRITE,
-    RCVCMD_START_ERROR_SERVER
+    RCVCMD_START_ERROR_SERVER,
+    RCVCMD_START_ERROR_STDIN_RESERVED
 } rcvcmd_start_error_t;
 
 typedef struct {
@@ -179,6 +180,11 @@ void rcvcmd_request_shutdown(rcvcmd_t* cmd);
  * @return 1 if shutdown was requested, 0 otherwise.
  */
 int rcvcmd_shutdown_requested(rcvcmd_t* cmd);
+/** @brief Reserve stdin for the parent-liveness watcher, preventing file input from consuming it.
+ * @param[in,out] cmd The sole command-layer instance.
+ * Reservation is permanent for this instance and takes effect at the next start.
+ */
+void rcvcmd_reserve_stdin(rcvcmd_t* cmd);
 /** @brief Wait for any transition, then stop a running server despite the request.
  * @param[in,out] cmd The sole command-layer instance.
  * @param[in] io Adapter output and overwrite callbacks; both must be supplied.

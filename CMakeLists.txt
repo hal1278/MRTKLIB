@@ -207,6 +207,37 @@ else()
     message(STATUS "Matrix backend: internal LU")
 endif()
 
+# RPC dependencies stay external; yyjson alone has a verified download fallback.
+option(MRTK_WITH_RPC "Build the mrtk run WebSocket RPC endpoint" ON)
+if(MRTK_WITH_RPC)
+    find_package(civetweb CONFIG QUIET)
+    if(NOT civetweb_FOUND)
+        message(FATAL_ERROR "RPC requires CivetWeb 1.16 or newer: install libcivetweb-dev (Debian/Ubuntu), civetweb (Homebrew), mingw-w64-ucrt-x86_64-civetweb (MSYS2), or civetweb (vcpkg); or use -DMRTK_WITH_RPC=OFF.")
+    endif()
+    # Packages may omit a CMake version file; rcvrpc.c checks the header version.
+    find_package(yyjson CONFIG QUIET)
+    if(NOT yyjson_FOUND)
+        include(FetchContent)
+        if(POLICY CMP0135)
+            cmake_policy(SET CMP0135 NEW)
+        endif()
+        set(YYJSON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+        set(YYJSON_BUILD_FUZZER OFF CACHE BOOL "" FORCE)
+        set(YYJSON_BUILD_MISC OFF CACHE BOOL "" FORCE)
+        set(YYJSON_BUILD_DOC OFF CACHE BOOL "" FORCE)
+        FetchContent_Declare(yyjson
+            URL https://github.com/ibireme/yyjson/archive/refs/tags/0.13.0.tar.gz
+            URL_HASH SHA256=34e0f62a2bc11ab20d601e8ca1cc2b2079503aa45119a19133d89d19b94a0fae)
+        FetchContent_MakeAvailable(yyjson)
+    endif()
+    if(NOT TARGET yyjson::yyjson)
+        add_library(yyjson::yyjson ALIAS yyjson)
+    endif()
+    set(_RCVRPC_SOURCE apps/rtkrcv/rcvrpc.c)
+else()
+    set(_RCVRPC_SOURCE apps/rtkrcv/rcvrpc_off.c)
+endif()
+
 # ── mrtk (unified CLI) ────────────────────────────────────────────────────────
 add_executable(mrtk
     apps/mrtk/mrtk_main.c
@@ -214,6 +245,8 @@ add_executable(mrtk
     apps/rtkrcv/rtkrcv.c
     apps/rtkrcv/rcvcmd.c
     apps/rtkrcv/rcvevent.c
+    apps/rtkrcv/rcvjson.c
+    ${_RCVRPC_SOURCE}
     apps/rtkrcv/vt.c
     apps/str2str/str2str.c
     apps/convbin/convbin.c
@@ -226,12 +259,16 @@ add_executable(mrtk
     apps/l6extract/l6extract.c
 )
 # The command layer uses C11, as the core does; override the global legacy -ansi flag.
-set_source_files_properties(apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c PROPERTIES
+set_source_files_properties(apps/rtkrcv/rcvcmd.c apps/rtkrcv/rcvevent.c apps/rtkrcv/rcvjson.c
+    apps/rtkrcv/rcvrpc.c apps/rtkrcv/rcvrpc_off.c PROPERTIES
     COMPILE_OPTIONS "$<$<COMPILE_LANG_AND_ID:C,GNU,Clang,AppleClang>:-std=c11>"
 )
 target_include_directories(mrtk PRIVATE apps/rtkrcv)
 target_compile_definitions(mrtk PRIVATE SVR_REUSEADDR)
 target_link_libraries(mrtk PRIVATE mrtklib pthread)
+if(MRTK_WITH_RPC)
+    target_link_libraries(mrtk PRIVATE civetweb::civetweb yyjson::yyjson)
+endif()
 target_link_options(mrtk PRIVATE $<$<OR:$<PLATFORM_ID:Linux>,$<PLATFORM_ID:FreeBSD>>:-rdynamic>)
 
 # ── Install ───────────────────────────────────────────────────────────────────
@@ -367,6 +404,12 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
     set_tests_properties(utest_rtksvr_lifecycle_${case} PROPERTIES LABELS "utest" TIMEOUT 30)
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c)
+target_compile_options(utest_rcvjson PRIVATE -std=c11)
+target_include_directories(utest_rcvjson PRIVATE apps/rtkrcv)
+add_test(NAME utest_rcvjson COMMAND utest_rcvjson)
+set_tests_properties(utest_rcvjson PROPERTIES LABELS "utest" TIMEOUT 30)
 
 # Command-layer events: sequential cases share its sole process-global instance.
 add_executable(utest_rcvcmd_events ${_UTEST_DIR}/utest_rcvcmd_events.c
@@ -2325,6 +2368,14 @@ set_tests_properties(has_ppp_check PROPERTIES
     FIXTURES_REQUIRED has_data
     LABELS            "regression;has;ppp"
 )
+
+if(MRTK_WITH_RPC)
+    add_test(NAME rpc_transport
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_rpc_transport.py
+            --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR}
+            --compiler ${CMAKE_C_COMPILER})
+    set_tests_properties(rpc_transport PROPERTIES LABELS "rpc" TIMEOUT 180)
+endif()
 
 # ── JSON-RPC contract self-check (docs/rpc/openrpc.json) ──────────────────────
 # Examples match their schemas and every rule rejects its counter-example
