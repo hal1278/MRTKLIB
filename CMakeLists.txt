@@ -214,25 +214,25 @@ if(MRTK_WITH_RPC)
     if(NOT civetweb_FOUND)
         message(FATAL_ERROR "RPC requires CivetWeb 1.16 or newer: install libcivetweb-dev (Debian/Ubuntu), civetweb (Homebrew), mingw-w64-ucrt-x86_64-civetweb (MSYS2), or civetweb (vcpkg); or use -DMRTK_WITH_RPC=OFF.")
     endif()
-    # Packages may omit a CMake version file, so read the header of the found
-    # package. One older than 0.11 (Debian 13 ships 0.10, which lacks
-    # yyjson_mut_float) is not used: the pinned release is fetched instead.
+    # Packages may omit a CMake version file, so compile the package's own header:
+    # the compiler resolves the include directories as the build will (generator
+    # expressions included). A package older than 0.11 (Debian 13 ships 0.10,
+    # which lacks yyjson_mut_float) is not used: the pinned release is fetched.
     find_package(yyjson CONFIG QUIET)
     set(MRTK_YYJSON_TARGET yyjson::yyjson)
     if(yyjson_FOUND)
-        set(_yyjson_hex 0)
-        get_target_property(_yyjson_include yyjson::yyjson INTERFACE_INCLUDE_DIRECTORIES)
-        foreach(_yyjson_dir IN LISTS _yyjson_include)
-            if(EXISTS "${_yyjson_dir}/yyjson.h")
-                file(STRINGS "${_yyjson_dir}/yyjson.h" _yyjson_line REGEX "^#define YYJSON_VERSION_HEX +0x[0-9A-Fa-f]+")
-                string(REGEX MATCH "0x[0-9A-Fa-f]+" _yyjson_line "${_yyjson_line}")
-                if(_yyjson_line)
-                    math(EXPR _yyjson_hex "${_yyjson_line}")
-                endif()
-                break()
-            endif()
-        endforeach()
-        if(_yyjson_hex LESS 2816) # 0x000B00 = 0.11
+        include(CheckCSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES yyjson::yyjson)
+        set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+        unset(MRTK_YYJSON_PACKAGE_USABLE CACHE)
+        check_c_source_compiles("#include <yyjson.h>
+#if !defined(YYJSON_VERSION_HEX) || YYJSON_VERSION_HEX < 0x000B00
+#error yyjson older than 0.11
+#endif
+int mrtk_yyjson_version_check;" MRTK_YYJSON_PACKAGE_USABLE)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
+        if(NOT MRTK_YYJSON_PACKAGE_USABLE)
             message(STATUS "yyjson package is older than 0.11: fetching yyjson 0.13.0")
             set(yyjson_FOUND FALSE)
         endif()
