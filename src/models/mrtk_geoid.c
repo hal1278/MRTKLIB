@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "mrtklib/mrtk_foundation.h"
 #include "mrtklib/mrtk_trace.h"
 
 /*--- local constants (duplicated to avoid rtklib.h dependency) -------------*/
@@ -38,19 +39,35 @@ static const double range[4];            /* embedded geoid area range {W,E,S,N} 
 static const float geoid[361][181];      /* embedded geoid heights (m) (lon x lat) */
 static FILE* fp_geoid = NULL;            /* geoid file pointer */
 static int model_geoid = GEOID_EMBEDDED; /* geoid model */
+static rtk_lock_t lock_geoid = RTK_LOCK_INITIALIZER;
+
+/* Keep diagnostics local to each query: trace sinks may take other locks. */
+typedef struct {
+    enum {
+        GEOID_ERR_NONE,
+        GEOID_ERR_EMB_RANGE,
+        GEOID_ERR_FILE_RANGE,
+        GEOID_ERR_GSI_RANGE,
+        GEOID_ERR_GSI_FORMAT,
+        GEOID_ERR_GSI_POS,
+        GEOID_ERR_GSI_OUTAGE
+    } type;
+    int off, i, j;
+    char buff[16];
+} geoid_error_t;
 
 /* bilinear interpolation ----------------------------------------------------*/
 static double interpb(const double* y, double a, double b) {
     return y[0] * (1.0 - a) * (1.0 - b) + y[1] * a * (1.0 - b) + y[2] * (1.0 - a) * b + y[3] * a * b;
 }
 /* embedded geoid model ------------------------------------------------------*/
-static double geoidh_emb(const double* pos) {
+static double geoidh_emb(const double* pos, geoid_error_t* error) {
     const double dlon = 1.0, dlat = 1.0;
     double a, b, y[4];
     int i1, i2, j1, j2;
 
     if (pos[1] < range[0] || range[1] < pos[1] || pos[0] < range[2] || range[3] < pos[0]) {
-        trace(NULL, 2, "out of geoid model range: lat=%.3f lon=%.3f\n", pos[0], pos[1]);
+        error->type = GEOID_ERR_EMB_RANGE;
         return 0.0;
     }
     a = (pos[1] - range[0]) / dlon;
@@ -68,15 +85,16 @@ static double geoidh_emb(const double* pos) {
     return interpb(y, a, b);
 }
 /* get 2 byte signed integer from file ---------------------------------------*/
-static int16_t fget2b(FILE* fp, int32_t off) {
+static int16_t fget2b(FILE* fp, int32_t off, geoid_error_t* error) {
     uint8_t v[2];
     if (fseek(fp, off, SEEK_SET) == EOF || fread(v, 2, 1, fp) < 1) {
-        trace(NULL, 2, "geoid data file range error: off=%ld\n", off);
+        error->type = GEOID_ERR_FILE_RANGE;
+        error->off = off;
     }
     return ((int16_t)v[0] << 8) + v[1]; /* big-endian */
 }
 /* egm96 15x15" model --------------------------------------------------------*/
-static double geoidh_egm96(const double* pos) {
+static double geoidh_egm96(const double* pos, geoid_error_t* errors) {
     const double lon0 = 0.0, lat0 = 90.0, dlon = 15.0 / 60.0, dlat = -15.0 / 60.0;
     const int nlon = 1440, nlat = 721;
     double a, b, y[4];
@@ -94,22 +112,23 @@ static double geoidh_egm96(const double* pos) {
     j1 = (int)b;
     b -= j1;
     j2 = j1 < nlat - 1 ? j1 + 1 : j1;
-    y[0] = fget2b(fp_geoid, 2L * (i1 + j1 * nlon)) * 0.01;
-    y[1] = fget2b(fp_geoid, 2L * (i2 + j1 * nlon)) * 0.01;
-    y[2] = fget2b(fp_geoid, 2L * (i1 + j2 * nlon)) * 0.01;
-    y[3] = fget2b(fp_geoid, 2L * (i2 + j2 * nlon)) * 0.01;
+    y[0] = fget2b(fp_geoid, 2L * (i1 + j1 * nlon), &errors[0]) * 0.01;
+    y[1] = fget2b(fp_geoid, 2L * (i2 + j1 * nlon), &errors[1]) * 0.01;
+    y[2] = fget2b(fp_geoid, 2L * (i1 + j2 * nlon), &errors[2]) * 0.01;
+    y[3] = fget2b(fp_geoid, 2L * (i2 + j2 * nlon), &errors[3]) * 0.01;
     return interpb(y, a, b);
 }
 /* get 4byte float from file -------------------------------------------------*/
-static float fget4f(FILE* fp, int off) {
+static float fget4f(FILE* fp, int off, geoid_error_t* error) {
     float v = 0.0;
     if (fseek(fp, (long)off, SEEK_SET) == EOF || fread(&v, 4, 1, fp) < 1) {
-        trace(NULL, 2, "geoid data file range error: off=%ld\n", off);
+        error->type = GEOID_ERR_FILE_RANGE;
+        error->off = off;
     }
     return v; /* small-endian */
 }
 /* egm2008 model -------------------------------------------------------------*/
-static double geoidh_egm08(const double* pos, int model) {
+static double geoidh_egm08(const double* pos, int model, geoid_error_t* errors) {
     const double lon0 = 0.0, lat0 = 90.0;
     double dlon, dlat;
     double a, b, y[4];
@@ -147,38 +166,41 @@ static double geoidh_egm08(const double* pos, int model) {
     /* (2) Und_min2.5x2.5_egm2008_isw=82_WGS84_TideFree_SE.gz */
 #if 0
     /* not zero-inserted */
-    y[0]=fget4f(fp_geoid,4L*(i1+j1*(nlon)));
-    y[1]=fget4f(fp_geoid,4L*(i2+j1*(nlon)));
-    y[2]=fget4f(fp_geoid,4L*(i1+j2*(nlon)));
-    y[3]=fget4f(fp_geoid,4L*(i2+j2*(nlon)));
+    y[0]=fget4f(fp_geoid,4L*(i1+j1*(nlon)), &errors[0]);
+    y[1]=fget4f(fp_geoid,4L*(i2+j1*(nlon)), &errors[1]);
+    y[2]=fget4f(fp_geoid,4L*(i1+j2*(nlon)), &errors[2]);
+    y[3]=fget4f(fp_geoid,4L*(i2+j2*(nlon)), &errors[3]);
 #else
     /* zero-inserted version (2009/12/10) */
-    y[0] = fget4f(fp_geoid, 4L * (i1 + j1 * (nlon + 2) + 1));
-    y[1] = fget4f(fp_geoid, 4L * (i2 + j1 * (nlon + 2) + 1));
-    y[2] = fget4f(fp_geoid, 4L * (i1 + j2 * (nlon + 2) + 1));
-    y[3] = fget4f(fp_geoid, 4L * (i2 + j2 * (nlon + 2) + 1));
+    y[0] = fget4f(fp_geoid, 4L * (i1 + j1 * (nlon + 2) + 1), &errors[0]);
+    y[1] = fget4f(fp_geoid, 4L * (i2 + j1 * (nlon + 2) + 1), &errors[1]);
+    y[2] = fget4f(fp_geoid, 4L * (i1 + j2 * (nlon + 2) + 1), &errors[2]);
+    y[3] = fget4f(fp_geoid, 4L * (i2 + j2 * (nlon + 2) + 1), &errors[3]);
 #endif
     return interpb(y, a, b);
 }
 /* get gsi geoid data --------------------------------------------------------*/
-static double fgetgsi(FILE* fp, int nlon, int nlat, int i, int j) {
+static double fgetgsi(FILE* fp, int nlon, int nlat, int i, int j, geoid_error_t* error) {
     const int nf = 28, wf = 9, nl = nf * wf + 2, nr = (nlon - 1) / nf + 1;
     double v;
     int off = nl + j * nr * nl + i / nf * nl + i % nf * wf;
-    char buff[16] = "";
+    char* buff = error->buff;
+
+    error->i = i;
+    error->j = j;
 
     if (fseek(fp, (long)off, SEEK_SET) == EOF || fread(buff, wf, 1, fp) < 1) {
-        trace(NULL, 2, "out of range for gsi geoid: i=%d j=%d\n", i, j);
+        error->type = GEOID_ERR_GSI_RANGE;
         return 0.0;
     }
     if (sscanf(buff, "%lf", &v) < 1) {
-        trace(NULL, 2, "gsi geoid data format error: i=%d j=%d buff=%s\n", i, j, buff);
+        error->type = GEOID_ERR_GSI_FORMAT;
         return 0.0;
     }
     return v;
 }
 /* gsi geoid 2000 1.0x1.5" model ---------------------------------------------*/
-static double geoidh_gsi(const double* pos) {
+static double geoidh_gsi(const double* pos, geoid_error_t* errors) {
     const double lon0 = 120.0, lon1 = 150.0, lat0 = 20.0, lat1 = 50.0;
     const double dlon = 1.5 / 60.0, dlat = 1.0 / 60.0;
     const int nlon = 1201, nlat = 1801;
@@ -186,7 +208,7 @@ static double geoidh_gsi(const double* pos) {
     int i1, i2, j1, j2;
 
     if (!fp_geoid || pos[1] < lon0 || lon1 < pos[1] || pos[0] < lat0 || lat1 < pos[0]) {
-        trace(NULL, 2, "out of range for gsi geoid: lat=%.3f lon=%.3f\n", pos[0], pos[1]);
+        errors[0].type = GEOID_ERR_GSI_POS;
         return 0.0;
     }
     a = (pos[1] - lon0) / dlon;
@@ -197,15 +219,23 @@ static double geoidh_gsi(const double* pos) {
     j1 = (int)b;
     b -= j1;
     j2 = j1 < nlat - 1 ? j1 + 1 : j1;
-    y[0] = fgetgsi(fp_geoid, nlon, nlat, i1, j1);
-    y[1] = fgetgsi(fp_geoid, nlon, nlat, i2, j1);
-    y[2] = fgetgsi(fp_geoid, nlon, nlat, i1, j2);
-    y[3] = fgetgsi(fp_geoid, nlon, nlat, i2, j2);
+    y[0] = fgetgsi(fp_geoid, nlon, nlat, i1, j1, &errors[0]);
+    y[1] = fgetgsi(fp_geoid, nlon, nlat, i2, j1, &errors[1]);
+    y[2] = fgetgsi(fp_geoid, nlon, nlat, i1, j2, &errors[2]);
+    y[3] = fgetgsi(fp_geoid, nlon, nlat, i2, j2, &errors[3]);
     if (y[0] == 999.0 || y[1] == 999.0 || y[2] == 999.0 || y[3] == 999.0) {
-        trace(NULL, 2, "geoidh_gsi: data outage (lat=%.3f lon=%.3f)\n", pos[0], pos[1]);
+        errors[4].type = GEOID_ERR_GSI_OUTAGE;
         return 0.0;
     }
     return interpb(y, a, b);
+}
+/* close geoid model file with lock_geoid held -------------------------------*/
+static void closegeoid_locked(void) {
+    if (fp_geoid) {
+        fclose(fp_geoid);
+    }
+    fp_geoid = NULL;
+    model_geoid = GEOID_EMBEDDED;
 }
 /* open geoid model file -------------------------------------------------------
  * open geoid model file
@@ -223,39 +253,48 @@ static double geoidh_gsi(const double* pos) {
  *          Und_min1x1_egm2008_isw=82_WGS84_TideFree_SE    : EGM2008 1.0x1.0"
  *          gsigeome_ver4 : GSI geoid 2000 1.0x1.5" (japanese area)
  *          (byte-order of binary files must be compatible to cpu)
+ *          calls to opengeoid(), closegeoid() and geoidh() are serialized.
  *-----------------------------------------------------------------------------*/
 int opengeoid(int model, const char* file) {
-    trace(NULL, 3, "opengeoid: model=%d file=%s\n", model, file);
+    int status = 1, error = 0;
 
-    closegeoid();
-    if (model == GEOID_EMBEDDED) {
-        return 1;
+    rtk_lock(&lock_geoid);
+    closegeoid_locked();
+    if (model != GEOID_EMBEDDED) {
+        if (model != GEOID_EGM96_M150 && model != GEOID_EGM2008_M25 && model != GEOID_EGM2008_M10 &&
+            model != GEOID_GSI2000_M15) {
+            status = 0;
+            error = 1;
+        } else if (!(fp_geoid = fopen(file, "rb"))) {
+            status = 0;
+            error = 2;
+        } else {
+            model_geoid = model;
+        }
     }
-    if (model != GEOID_EGM96_M150 && model != GEOID_EGM2008_M25 && model != GEOID_EGM2008_M10 &&
-        model != GEOID_GSI2000_M15) {
+    rtk_unlock(&lock_geoid);
+
+    trace(NULL, 3, "opengeoid: model=%d file=%s\n", model, file);
+    trace(NULL, 3, "closegoid:\n");
+    if (error == 1) {
         trace(NULL, 2, "invalid geoid model: model=%d file=%s\n", model, file);
-        return 0;
-    }
-    if (!(fp_geoid = fopen(file, "rb"))) {
+    } else if (error == 2) {
         trace(NULL, 2, "geoid model file open error: model=%d file=%s\n", model, file);
-        return 0;
     }
-    model_geoid = model;
-    return 1;
+    return status;
 }
 /* close geoid model file ------------------------------------------------------
  * close geoid model file
  * args   : none
  * return : none
+ * notes  : calls to opengeoid(), closegeoid() and geoidh() are serialized.
  *-----------------------------------------------------------------------------*/
 void closegeoid(void) {
-    trace(NULL, 3, "closegoid:\n");
+    rtk_lock(&lock_geoid);
+    closegeoid_locked();
+    rtk_unlock(&lock_geoid);
 
-    if (fp_geoid) {
-        fclose(fp_geoid);
-    }
-    fp_geoid = NULL;
-    model_geoid = GEOID_EMBEDDED;
+    trace(NULL, 3, "closegoid:\n");
 }
 /* geoid height ----------------------------------------------------------------
  * get geoid height from geoid model
@@ -264,10 +303,13 @@ void closegeoid(void) {
  * notes  : to use external geoid model, call function opengeoid() to open
  *          geoid model before calling the function. If the external geoid model
  *          is not open, the function uses embedded geoid model.
+ *          calls to opengeoid(), closegeoid() and geoidh() are serialized.
  *-----------------------------------------------------------------------------*/
 double geoidh(const double* pos) {
-    double posd[2], h;
+    double posd[2], h = 0.0;
+    geoid_error_t errors[5] = {{0}};
 
+    rtk_lock(&lock_geoid);
     posd[1] = pos[1] * R2D;
     posd[0] = pos[0] * R2D;
     if (posd[1] < 0.0) {
@@ -275,27 +317,55 @@ double geoidh(const double* pos) {
     }
 
     if (posd[1] < 0.0 || 360.0 - 1E-12 < posd[1] || posd[0] < -90.0 || 90.0 < posd[0]) {
+        rtk_unlock(&lock_geoid);
         trace(NULL, 2, "out of range for geoid model: lat=%.3f lon=%.3f\n", posd[0], posd[1]);
         return 0.0;
     }
     switch (model_geoid) {
         case GEOID_EMBEDDED:
-            h = geoidh_emb(posd);
+            h = geoidh_emb(posd, &errors[0]);
             break;
         case GEOID_EGM96_M150:
-            h = geoidh_egm96(posd);
+            h = geoidh_egm96(posd, errors);
             break;
         case GEOID_EGM2008_M25:
-            h = geoidh_egm08(posd, model_geoid);
+            h = geoidh_egm08(posd, model_geoid, errors);
             break;
         case GEOID_EGM2008_M10:
-            h = geoidh_egm08(posd, model_geoid);
+            h = geoidh_egm08(posd, model_geoid, errors);
             break;
         case GEOID_GSI2000_M15:
-            h = geoidh_gsi(posd);
+            h = geoidh_gsi(posd, errors);
             break;
         default:
-            return 0.0;
+            break;
+    }
+    rtk_unlock(&lock_geoid);
+
+    for (int i = 0; i < 5; i++) {
+        const geoid_error_t* error = &errors[i];
+        switch (error->type) {
+            case GEOID_ERR_EMB_RANGE:
+                trace(NULL, 2, "out of geoid model range: lat=%.3f lon=%.3f\n", posd[0], posd[1]);
+                break;
+            case GEOID_ERR_FILE_RANGE:
+                trace(NULL, 2, "geoid data file range error: off=%ld\n", (long)error->off);
+                break;
+            case GEOID_ERR_GSI_RANGE:
+                trace(NULL, 2, "out of range for gsi geoid: i=%d j=%d\n", error->i, error->j);
+                break;
+            case GEOID_ERR_GSI_FORMAT:
+                trace(NULL, 2, "gsi geoid data format error: i=%d j=%d buff=%s\n", error->i, error->j, error->buff);
+                break;
+            case GEOID_ERR_GSI_POS:
+                trace(NULL, 2, "out of range for gsi geoid: lat=%.3f lon=%.3f\n", posd[0], posd[1]);
+                break;
+            case GEOID_ERR_GSI_OUTAGE:
+                trace(NULL, 2, "geoidh_gsi: data outage (lat=%.3f lon=%.3f)\n", posd[0], posd[1]);
+                break;
+            default:
+                break;
+        }
     }
     if (fabs(h) > 200.0) {
         trace(NULL, 2, "invalid geoid model: lat=%.3f lon=%.3f h=%.3f\n", posd[0], posd[1], h);

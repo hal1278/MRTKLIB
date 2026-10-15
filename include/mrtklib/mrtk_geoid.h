@@ -47,6 +47,7 @@ extern "C" {
 
 /**
  * @brief Open geoid model file.
+ * @note Calls to opengeoid(), closegeoid() and geoidh() are serialized.
  * @param[in] model  Geoid model type (GEOID_EMBEDDED, GEOID_EGM96_M150, etc.)
  * @param[in] file   Geoid model file path
  * @return Status (1:ok, 0:error)
@@ -61,11 +62,13 @@ int opengeoid(int model, const char* file);
 
 /**
  * @brief Close geoid model file.
+ * @note Calls to opengeoid(), closegeoid() and geoidh() are serialized.
  */
 void closegeoid(void);
 
 /**
  * @brief Get geoid height from geoid model.
+ * @note Calls to opengeoid(), closegeoid() and geoidh() are serialized.
  * @param[in] pos  Geodetic position {lat, lon} (rad)
  * @return Geoid height (m) (0.0: error)
  * @note To use external geoid model, call opengeoid() before this function.
