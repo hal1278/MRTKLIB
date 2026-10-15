@@ -394,6 +394,15 @@ add_test(NAME utest_lclblk COMMAND utest_lclblk
          WORKING_DIRECTORY ${_UTEST_DIR})
 set_tests_properties(utest_lclblk PROPERTIES LABELS "utest")
 
+# Concurrent geoid queries and model replacement with a synthetic EGM96 grid.
+add_executable(utest_geoid_threads ${_UTEST_DIR}/utest_geoid_threads.c)
+# Override global -ansi (=C90): this test uses C11 (P-01).
+target_compile_options(utest_geoid_threads PRIVATE -std=c11)
+target_link_libraries(utest_geoid_threads PRIVATE mrtklib pthread)
+add_test(NAME utest_geoid_threads COMMAND utest_geoid_threads
+         WORKING_DIRECTORY ${_UTEST_DIR})
+set_tests_properties(utest_geoid_threads PROPERTIES LABELS "utest" TIMEOUT 20)
+
 # RTCM3 MSM BDS B2b round-trip test (issue #333 / #296)
 add_executable(utest_msm_bds_b2b ${_UTEST_DIR}/utest_msm_bds_b2b.c)
 # Override global -ansi (=C90): this test uses C11 (P-01).

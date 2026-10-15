@@ -327,6 +327,9 @@ typedef enum {
 #include <pthread.h>
 #define rtk_thread_t pthread_t
 #define rtk_lock_t pthread_mutex_t
+/* Module state callable before initialization (e.g. geoid) needs a static lock.
+ * Choose the lock type and its static initializer together for each platform. */
+#define RTK_LOCK_INITIALIZER PTHREAD_MUTEX_INITIALIZER
 #define rtk_initlock(f) pthread_mutex_init(f, NULL)
 #define rtk_lock(f) pthread_mutex_lock(f)
 #define rtk_unlock(f) pthread_mutex_unlock(f)
