@@ -264,8 +264,6 @@ void rcvcmd_password(rcvcmd_t* cmd, char* password, size_t size);
 int rcvcmd_time_type(rcvcmd_t* cmd);
 /** @brief Read the configured console solution format. */
 int rcvcmd_solution_type(rcvcmd_t* cmd);
-/** @brief Read the captured run's solution height mode for solution formatting. */
-int rcvcmd_solution_height(rcvcmd_t* cmd);
 /** @brief Read the configured console solution flags. */
 int rcvcmd_solution_flags(rcvcmd_t* cmd);
 /** @brief Read the requested monitor port. */

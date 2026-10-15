@@ -373,7 +373,9 @@ static void prtime(vt_t* vt, gtime_t time) {
     vt_printf(vt, "%s ", tstr);
 }
 /* print solution ------------------------------------------------------------*/
-static void prsolution(vt_t* vt, const sol_t* sol, const double* rb) {
+static void prsolution(vt_t* vt, const rcvevent_solution_t* solution) {
+    const sol_t* sol = &solution->sol;
+    const double* rb = solution->rb;
     const char* solstr[] = {"------", "FIX", "FLOAT", "SBAS", "DGPS", "SINGLE", "PPP", ""};
     double pos[3] = {0}, Qr[9], Qe[9] = {0}, dms1[3] = {0}, dms2[3] = {0}, bl[3] = {0};
     double enu[3] = {0}, pitch = 0.0, yaw = 0.0, len;
@@ -406,8 +408,8 @@ static void prsolution(vt_t* vt, const sol_t* sol, const double* rb) {
             covenu(pos, Qr, Qe);
             deg2dms(pos[0] * R2D, dms1, 4);
             deg2dms(pos[1] * R2D, dms2, 4);
-            if (rcvcmd_solution_height(cmd) == 1) {
-                pos[2] -= geoidh(pos); /* geodetic */
+            if (solution->height_type == 1 && solution->has_separation) {
+                pos[2] -= solution->separation; /* geodetic */
             }
         }
         vt_printf(vt, " %s:%2.0f %02.0f %07.4f", pos[0] < 0 ? "S" : "N", fabs(dms1[0]), dms1[1], dms1[2]);
@@ -420,8 +422,8 @@ static void prsolution(vt_t* vt, const sol_t* sol, const double* rb) {
         if (norm(sol->rr, 3) > 0.0) {
             ecef2pos(sol->rr, pos);
             covenu(pos, Qr, Qe);
-            if (rcvcmd_solution_height(cmd) == 1) {
-                pos[2] -= geoidh(pos); /* geodetic */
+            if (solution->height_type == 1 && solution->has_separation) {
+                pos[2] -= solution->separation; /* geodetic */
             }
         }
         vt_printf(vt, " %s:%11.8f", pos[0] < 0.0 ? "S" : "N", fabs(pos[0]) * R2D);
@@ -1053,7 +1055,7 @@ static void cmd_solution(char** args, int narg, con_t* con) {
         rcvcmd_read_solutions(cmd, &con->solution_cursor, data);
         for (i = 0; i < data->nsol; i++) {
             rcvevent_solution_t* solution = &data->events[i].data.solution;
-            prsolution(vt, &solution->sol, solution->rb);
+            prsolution(vt, solution);
         }
         if (cycle > 0) {
             sleepms(cycle);

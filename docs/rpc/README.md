@@ -550,8 +550,6 @@ Planned for later versions:
   observations, input message counts, uptime, estimated states, baseline
   length;
 - velocity in solutions;
-- the geoid separation for file-based geoid models (until then
-  `geoid.separation` is present only with the `internal` model);
 - `lastError.reason` values more specific than `startFailed`.
 
 Possible later additions, without changing what is defined here: push

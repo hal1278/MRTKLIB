@@ -99,7 +99,7 @@ struct rcvcmd {
     rcvcmd_staging_t* staging;
     pthread_t collector;
     int collector_started, collector_exit, initialized;
-    int run_mode, run_geoid;
+    int run_mode, run_geoid, run_height;
     uint64_t solution_start_seq;
     rcvevent_t last_solution;
     int has_solution, previous_none;
@@ -257,12 +257,13 @@ static void publish_trace(void* arg, int level, const char* msg) {
 static void collect_events(rcvcmd_t* cmd) {
     rcvcmd_staging_t* stage = cmd->staging;
     rtksvr_t* svr = cmd->svr;
-    int i, mode, geoid, uses_base;
+    int i, mode, geoid, height, uses_base;
     double pos[3];
 
     pthread_mutex_lock(&cmd->publish_lock);
     mode = cmd->run_mode;
     geoid = cmd->run_geoid;
+    height = cmd->run_height;
     pthread_mutex_unlock(&cmd->publish_lock);
     uses_base = mode == PMODE_DGPS || mode == PMODE_KINEMA || mode == PMODE_STATIC || mode == PMODE_MOVEB ||
                 mode == PMODE_FIXED || mode == PMODE_VRS_RTK;
@@ -292,8 +293,9 @@ static void collect_events(rcvcmd_t* cmd) {
             memcpy(solution->rb, stage->rb, sizeof(solution->rb));
             solution->has_base = uses_base && norm(stage->rb, 3) > 0.0;
             solution->geoid_model = geoid;
+            solution->height_type = height;
             /* geoidh() indexes its table with (int) of a NaN position otherwise. */
-            if (geoid == 0 && isfinite(sol->rr[0]) && isfinite(sol->rr[1]) && isfinite(sol->rr[2])) {
+            if (isfinite(sol->rr[0]) && isfinite(sol->rr[1]) && isfinite(sol->rr[2])) {
                 ecef2pos(sol->rr, pos);
                 if (isfinite(pos[0]) && isfinite(pos[1]) && isfinite(pos[2])) {
                     solution->separation = geoidh(pos);
@@ -602,7 +604,6 @@ static int read_console_setting(rcvcmd_t* cmd, const int* setting) {
 
 int rcvcmd_time_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->timetype); }
 int rcvcmd_solution_type(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->soltype); }
-int rcvcmd_solution_height(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->run_settings.solopt[0].height); }
 int rcvcmd_solution_flags(rcvcmd_t* cmd) { return read_console_setting(cmd, &cmd->solflag); }
 int rcvcmd_monitor_port(rcvcmd_t* cmd) { return cmd->moniport; }
 
@@ -1208,6 +1209,7 @@ rcvcmd_result_t rcvcmd_execute(rcvcmd_t* cmd, const rcvcmd_claim_t* claim, const
         cmd->lifecycle.state = RCVCMD_RUNNING;
         cmd->run_mode = cmd->run_settings.prcopt.mode;
         cmd->run_geoid = cmd->run_settings.solopt[0].geoid;
+        cmd->run_height = cmd->run_settings.solopt[0].height;
         cmd->lifecycle.last_error = RCVCMD_START_ERROR_NONE;
         memset(cmd->lifecycle.paths, 0, sizeof(cmd->lifecycle.paths));
     } else {
