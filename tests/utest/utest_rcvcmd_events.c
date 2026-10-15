@@ -681,6 +681,127 @@ static void errbuf_checks(rcvcmd_t* cmd, const char* path) {
     }
 }
 
+typedef struct {
+    int count, allow, stop;
+    char seen[5][1024];
+} overwrite_probe_t;
+
+static void probe_notice(void* arg, const rcvcmd_notice_t* value) {
+    (void)arg;
+    (void)value;
+}
+
+static int probe_overwrite(void* arg, const char* path) {
+    overwrite_probe_t* probe = arg;
+    CHECK(probe->count < 5, "overwrite callback bounded by stream slots");
+    if (probe->count < 5) strcpy(probe->seen[probe->count++], path);
+    return probe->allow  ? RCVCMD_OVERWRITE_ALLOW
+           : probe->stop ? RCVCMD_OVERWRITE_REFUSE_STOP
+                         : RCVCMD_OVERWRITE_REFUSE_CONTINUE;
+}
+
+static void overwrite_checks(char* config) {
+    mrtk_ctx_t* ctx = mrtk_ctx_create();
+    rcvcmd_t* cmd;
+    overwrite_probe_t probe = {0};
+    rcvcmd_io_t callbacks = {&probe, NULL, probe_overwrite};
+    rcvcmd_lifecycle_t lifecycle;
+    rcvcmd_snapshot_t snapshot;
+    rcvcmd_claim_t claim;
+    rcvevent_read_t read;
+    rcvevent_t event;
+    rcvcmd_result_t result;
+    gtime_t rst = {0};
+    char long_path[501], expected[1024], *second;
+    uint64_t before;
+    CHECK(ctx != NULL, "overwrite context");
+    if (!ctx) return;
+    g_mrtk_ctx = ctx;
+    cmd = rcvcmd_create(ctx);
+    CHECK(cmd != NULL, "overwrite instance");
+    if (!cmd) {
+        g_mrtk_ctx = NULL;
+        mrtk_ctx_destroy(ctx);
+        return;
+    }
+    callbacks.notice = probe_notice;
+    rcvcmd_initialize(cmd, config, "admin", "", 0, 0, rst);
+    set_option(cmd, "pos1-correction", "none");
+    set_option(cmd, "inpstr1-type", "off");
+    set_option(cmd, "inpstr2-type", "off");
+    set_option(cmd, "inpstr3-type", "off");
+    set_option(cmd, "misc-startcmd", "");
+    set_option(cmd, "misc-stopcmd", "");
+    set_option(cmd, "out-geoid", "internal");
+    set_option(cmd, "outstr1-type", "file");
+    set_option(cmd, "outstr2-type", "file");
+    set_option(cmd, "logstr1-type", "file");
+    set_option(cmd, "outstr1-path", "first.pos::S=1");
+    set_option(cmd, "outstr2-path", "first.pos");
+    set_option(cmd, "logstr1-path", "second.pos");
+    result = rcvcmd_start(cmd, &callbacks);
+    CHECK(result.kind == RCVCMD_START_FAILED && probe.count == 3, "RPC-style refusal checks all files");
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    second = lifecycle.paths + strlen(lifecycle.paths) + 1;
+    CHECK(!strcmp(lifecycle.paths, "first.pos") && !strcmp(second, "second.pos") && second[strlen(second) + 1] == 0,
+          "refused paths are distinct and preserve slot order");
+    rcvcmd_snapshot(cmd, &snapshot);
+    CHECK(!memcmp(snapshot.lifecycle.paths, lifecycle.paths, sizeof(lifecycle.paths)),
+          "snapshot retains refused paths");
+    CHECK(rcvcmd_read_events(cmd, snapshot.seq - 1, &event, 1, &read) == 0 && read.n == 1 &&
+              !memcmp(event.data.status.paths, lifecycle.paths, sizeof(lifecycle.paths)),
+          "status packs the same paths without growing the event");
+    probe.count = 0;
+    probe.stop = 1;
+    rcvcmd_start(cmd, &callbacks);
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    CHECK(probe.count == 1 && !strcmp(lifecycle.paths, "first.pos") && lifecycle.paths[10] == 0,
+          "telnet-style refusal stops at first file and records its path");
+    memset(long_path, 'x', sizeof(long_path) - 1);
+    long_path[sizeof(long_path) - 1] = 0;
+    set_option(cmd, "outstr2-path", long_path);
+    probe.count = probe.stop = 0;
+    rcvcmd_start(cmd, &callbacks);
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    second = lifecycle.paths + strlen(lifecycle.paths) + 1;
+    CHECK(probe.count == 3 && !strcmp(second, "second.pos"), "oversized entry omitted, later fitting path retained");
+    set_option(cmd, "outstr1-path", "out_%Y%m%d.pos::S=1");
+    probe.count = 0;
+    probe.stop = 1;
+    reppath("out_%Y%m%d.pos", expected, utc2gpst(timeget()), "", "");
+    rcvcmd_start(cmd, &callbacks);
+    CHECK(probe.count == 1 && !strcmp(probe.seen[0], expected), "overwrite uses the resolved stream name");
+    set_option(cmd, "inpstr2-type", "file");
+    set_option(cmd, "inpstr2-path", "missing::x10::T");
+    probe.count = 0;
+    rcvcmd_start(cmd, &callbacks);
+    CHECK(!strcmp(probe.seen[0], "out_%Y%m%d.pos"), "any time-tag input prevents keyword resolution");
+    set_option(cmd, "inpstr2-type", "off");
+    set_option(cmd, "pos1-correction", "bds-b2b");
+    rcvcmd_start(cmd, &callbacks);
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    CHECK(lifecycle.last_error == RCVCMD_START_ERROR_CORRECTION && !lifecycle.paths[0],
+          "other failures replace paths with empty storage");
+    set_option(cmd, "pos1-correction", "none");
+    set_option(cmd, "outstr1-type", "off");
+    set_option(cmd, "outstr2-type", "off");
+    set_option(cmd, "logstr1-type", "off");
+    probe.allow = 1;
+    result = rcvcmd_start(cmd, &callbacks);
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    CHECK(result.kind == RCVCMD_SUCCESS && !lifecycle.paths[0] && lifecycle.last_error == RCVCMD_START_ERROR_NONE,
+          "successful start clears the failure and its paths");
+    before = rcvcmd_last_seq(cmd);
+    result = rcvcmd_claim(cmd, RCVCMD_OP_RESTART, &claim);
+    CHECK(result.seq == before + 1 && result.state == RCVCMD_STOPPING, "restart claim takes effect at stopping");
+    CHECK(rcvcmd_claim(cmd, RCVCMD_OP_STOP, &(rcvcmd_claim_t){0}).state == RCVCMD_STOPPING,
+          "busy returns stopping state");
+    rcvcmd_execute(cmd, &claim, &callbacks);
+    CHECK(rcvcmd_last_seq(cmd) == before + 4, "restart execution publishes its three remaining statuses");
+    rcvcmd_stop(cmd, &callbacks);
+    destroy_context(cmd, ctx);
+}
+
 int main(int argc, char** argv) {
     char directory[] = "utest_rcvcmd_events_XXXXXX";
     char config[1024] = "events.conf";
@@ -730,7 +851,23 @@ int main(int argc, char** argv) {
     io.notice = on_notice;
     io.confirm_overwrite = overwrite;
 
-    result = rcvcmd_start(cmd, &io);
+    {
+        rcvcmd_claim_t claim, refused;
+        int operation;
+        result = rcvcmd_claim(cmd, RCVCMD_OP_STOP, &claim);
+        CHECK(result.kind == RCVCMD_SUCCESS && !claim.seq && !result.seq, "stopped stop needs no execution");
+        result = rcvcmd_claim(cmd, RCVCMD_OP_START, &claim);
+        CHECK(result.kind == RCVCMD_SUCCESS && result.state == RCVCMD_STARTING && claim.seq == 1,
+              "claim publishes starting before execution");
+        for (operation = RCVCMD_OP_START; operation <= RCVCMD_OP_RESTART; operation++) {
+            result = rcvcmd_claim(cmd, operation, &refused);
+            CHECK(result.kind == RCVCMD_BUSY && result.state == RCVCMD_STARTING && !refused.seq,
+                  "every operation refused during a held claim");
+        }
+        result = rcvcmd_execute(cmd, &claim, &io);
+        CHECK(rcvcmd_execute(cmd, &claim, &io).kind == RCVCMD_BUSY && rcvcmd_last_seq(cmd) == 2,
+              "execution token can be consumed only once");
+    }
     CHECK(result.kind == RCVCMD_SUCCESS && result.state == RCVCMD_RUNNING && result.seq == 1,
           "start result carries claim seq");
     CHECK(read_all(cmd) == 2, "start publishes starting and running");
@@ -860,6 +997,7 @@ int main(int argc, char** argv) {
     sink_checks();
     notice_checks(config);
     stdin_checks(config);
+    overwrite_checks(config);
 cleanup_files:
     CHECK(unlink(config) == 0 && chdir(original) == 0 && rmdir(directory) == 0, "temporary config cleanup");
     free(original);

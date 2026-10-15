@@ -268,6 +268,7 @@ target_compile_definitions(mrtk PRIVATE SVR_REUSEADDR)
 target_link_libraries(mrtk PRIVATE mrtklib pthread)
 if(MRTK_WITH_RPC)
     target_link_libraries(mrtk PRIVATE civetweb::civetweb yyjson::yyjson)
+    target_compile_definitions(mrtk PRIVATE RCVJSON_RPC)
 endif()
 target_link_options(mrtk PRIVATE $<$<OR:$<PLATFORM_ID:Linux>,$<PLATFORM_ID:FreeBSD>>:-rdynamic>)
 
@@ -408,6 +409,11 @@ set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_
 add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c)
 target_compile_options(utest_rcvjson PRIVATE -std=c11)
 target_include_directories(utest_rcvjson PRIVATE apps/rtkrcv)
+target_link_libraries(utest_rcvjson PRIVATE mrtklib)
+if(MRTK_WITH_RPC)
+    target_compile_definitions(utest_rcvjson PRIVATE RCVJSON_RPC)
+    target_link_libraries(utest_rcvjson PRIVATE yyjson::yyjson)
+endif()
 add_test(NAME utest_rcvjson COMMAND utest_rcvjson)
 set_tests_properties(utest_rcvjson PROPERTIES LABELS "utest" TIMEOUT 30)
 
@@ -2375,6 +2381,11 @@ if(MRTK_WITH_RPC)
             --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR}
             --compiler ${CMAKE_C_COMPILER})
     set_tests_properties(rpc_transport PROPERTIES LABELS "rpc" TIMEOUT 180)
+    add_test(NAME rpc_methods
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_rpc_methods.py
+            --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR})
+    set_tests_properties(rpc_methods PROPERTIES LABELS "rpc" TIMEOUT 180
+        FIXTURES_REQUIRED regression_data)
 endif()
 
 # ── JSON-RPC contract self-check (docs/rpc/openrpc.json) ──────────────────────

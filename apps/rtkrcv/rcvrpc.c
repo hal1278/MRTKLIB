@@ -31,6 +31,7 @@
 #define RPC_MESSAGE_MAX 65536
 
 typedef struct rpc_client {
+    pthread_mutex_t lock;
     struct mg_connection* connection;
     struct rpc_client* next;
     size_t length;
@@ -38,12 +39,23 @@ typedef struct rpc_client {
     char message[RPC_MESSAGE_MAX];
 } rpc_client_t;
 
+typedef struct {
+    char** paths;
+    size_t count;
+} rpc_overwrite_t;
+
 struct rcvrpc {
     struct mg_context* context;
     const rcvrpc_options_t* options;
     rcvcmd_t* cmd;
     pthread_mutex_t lock;
     pthread_mutex_t log_lock;
+    pthread_mutex_t lifecycle_lock;
+    pthread_cond_t lifecycle_cond;
+    pthread_t lifecycle_thread;
+    int lifecycle_started, lifecycle_exit;
+    rcvcmd_claim_t pending_claim;
+    rpc_overwrite_t pending_overwrite;
     rpc_client_t* clients;
     int stopping, watcher_started;
     pthread_t watcher;
@@ -281,6 +293,12 @@ static void ready_ws(struct mg_connection* connection, void* arg) {
         mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE, code, 2);
         return;
     }
+    if (pthread_mutex_init(&client->lock, NULL)) {
+        const char code[] = {3, (char)243};
+        mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE, code, 2);
+        free(client);
+        return;
+    }
     client->connection = connection;
     mg_set_user_connection_data(connection, client);
     pthread_mutex_lock(&rpc->lock);
@@ -288,6 +306,7 @@ static void ready_ws(struct mg_connection* connection, void* arg) {
         const char code[] = {3, (char)233};
         mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE, code, 2);
         mg_set_user_connection_data(connection, NULL);
+        pthread_mutex_destroy(&client->lock);
         free(client);
         pthread_mutex_unlock(&rpc->lock);
         return;
@@ -304,16 +323,19 @@ static void close_ws(const struct mg_connection* connection, void* arg) {
     for (cursor = &rpc->clients; *cursor; cursor = &(*cursor)->next) {
         if ((*cursor)->connection == connection) {
             rpc_client_t* client = *cursor;
+            pthread_mutex_lock(&client->lock);
             *cursor = client->next;
+            mg_set_user_connection_data(connection, NULL);
+            pthread_mutex_unlock(&client->lock);
+            pthread_mutex_destroy(&client->lock);
             free(client);
             break;
         }
     }
     pthread_mutex_unlock(&rpc->lock);
-    mg_set_user_connection_data(connection, NULL);
 }
 
-/* The registry lock orders every Close against replies and shutdown. */
+/* Caller holds the connection mutex, including for the final shutdown Close. */
 static void close_frame(struct mg_connection* connection, const char* data, size_t length) {
     rpc_client_t* client = mg_get_user_connection_data(connection);
     if (client->close_sent) return;
@@ -338,21 +360,222 @@ static yyjson_mut_val* rpc_error(yyjson_mut_doc* doc, int code, const char* mess
     return error;
 }
 
-/* Keep method lookup and parameter rules out of envelope validation so U15 can
- * add handlers without changing transport or request-envelope handling. */
+static void free_overwrite(rpc_overwrite_t* overwrite) {
+    size_t i;
+    for (i = 0; i < overwrite->count; i++) free(overwrite->paths[i]);
+    free(overwrite->paths);
+    memset(overwrite, 0, sizeof(*overwrite));
+}
+
+static void rpc_notice(void* arg, const rcvcmd_notice_t* notice) {
+    (void)arg;
+    (void)notice; /* The command layer already traces each notice into logMessage. */
+}
+
+static int rpc_confirm_overwrite(void* arg, const char* path) {
+    rpc_overwrite_t* overwrite = arg;
+    FILE* file = fopen(path, "r");
+    size_t i;
+    if (!file) return RCVCMD_OVERWRITE_ALLOW;
+    fclose(file);
+    for (i = 0; i < overwrite->count; i++)
+        if (!strcmp(path, overwrite->paths[i])) return RCVCMD_OVERWRITE_ALLOW;
+    return RCVCMD_OVERWRITE_REFUSE_CONTINUE;
+}
+
+static void* execute_lifecycle(void* arg) {
+    rcvrpc_t* rpc = arg;
+    pthread_mutex_lock(&rpc->lifecycle_lock);
+    for (;;) {
+        rcvcmd_claim_t claim;
+        rpc_overwrite_t overwrite;
+        rcvcmd_io_t io = {NULL, rpc_notice, rpc_confirm_overwrite};
+        while (!rpc->pending_claim.seq && !rpc->lifecycle_exit)
+            pthread_cond_wait(&rpc->lifecycle_cond, &rpc->lifecycle_lock);
+        if (!rpc->pending_claim.seq && rpc->lifecycle_exit) break;
+        claim = rpc->pending_claim;
+        overwrite = rpc->pending_overwrite;
+        rpc->pending_claim.seq = 0;
+        memset(&rpc->pending_overwrite, 0, sizeof(rpc->pending_overwrite));
+        pthread_mutex_unlock(&rpc->lifecycle_lock);
+        io.arg = &overwrite;
+        rcvcmd_execute(rpc->cmd, &claim, &io);
+        free_overwrite(&overwrite);
+        pthread_mutex_lock(&rpc->lifecycle_lock);
+    }
+    pthread_mutex_unlock(&rpc->lifecycle_lock);
+    return NULL;
+}
+
+/* Requests retain raw numbers to preserve IDs. Parse integer-valued JSON
+ * numbers exactly, including exponent notation, saturating at cap. This avoids
+ * accepting a rounded fractional cursor near 2^53. JSON syntax is already valid. */
+static int integer_param(yyjson_val* value, uint64_t cap, uint64_t* out) {
+    const char* raw = yyjson_get_raw(value);
+    size_t n, i = 0, digits = 0, fraction = 0, trailing = 0, significant;
+    int negative = 0, dot = 0, exponent_sign = 1, exponent = 0;
+    long shift;
+    uint64_t number = 0;
+    if (!raw) return 0;
+    n = yyjson_get_len(value);
+    if (raw[i] == '-') {
+        negative = 1;
+        i++;
+    }
+    for (; i < n && raw[i] != 'e' && raw[i] != 'E'; i++) {
+        if (raw[i] == '.') {
+            dot = 1;
+            continue;
+        }
+        digits++;
+        fraction += dot;
+        trailing = raw[i] == '0' ? trailing + 1 : 0;
+    }
+    if (i < n) {
+        i++;
+        if (raw[i] == '-' || raw[i] == '+') {
+            exponent_sign = raw[i] == '-' ? -1 : 1;
+            i++;
+        }
+        for (; i < n; i++)
+            if (exponent < 100000) exponent = exponent * 10 + raw[i] - '0';
+    }
+    if (trailing == digits) {
+        *out = 0;
+        return 1;
+    }
+    if (negative) return 0;
+    shift = (long)exponent_sign * exponent - (long)fraction + (long)trailing;
+    if (shift < 0) return 0;
+    significant = digits - trailing;
+    for (i = 0; significant; i++) {
+        unsigned int digit;
+        if (raw[i] == '.') continue;
+        digit = (unsigned int)(raw[i] - '0');
+        number = number > (cap - digit) / 10 ? cap : number * 10 + digit;
+        significant--;
+    }
+    while (shift-- > 0 && number < cap) number = number > cap / 10 ? cap : number * 10;
+    *out = number;
+    return 1;
+}
+
+/* Method-specific validation stays separate from U14's envelope handling. */
 static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* method, yyjson_val* params,
                                 yyjson_mut_val** error) {
+    const char* name = yyjson_get_str(method);
+    int start = !strcmp(name, "start"), restart = !strcmp(name, "restart"), stop = !strcmp(name, "stop");
+    int events = !strcmp(name, "getEvents");
     yyjson_mut_val* result;
-    if (!yyjson_equals_str(method, "getVersion") && !yyjson_equals_str(method, "shutdown")) {
+    yyjson_val *key, *value;
+    yyjson_obj_iter iter;
+    if (!start && !restart && !stop && !events && strcmp(name, "getStatus") && strcmp(name, "sync") &&
+        strcmp(name, "getVersion") && strcmp(name, "shutdown")) {
         *error = rpc_error(doc, -32601, "Method not found", NULL);
         return NULL;
     }
-    if (params && yyjson_obj_size(params)) {
-        *error = rpc_error(doc, -32602, "Invalid parameters", "invalidParams");
-        return NULL;
+    yyjson_obj_iter_init(params, &iter);
+    while ((key = yyjson_obj_iter_next(&iter))) {
+        if ((start || restart) && yyjson_equals_str(key, "overwrite")) continue;
+        if (events && (yyjson_equals_str(key, "after") || yyjson_equals_str(key, "limit"))) continue;
+        goto invalid;
+    }
+    if (!strcmp(name, "getStatus") || !strcmp(name, "sync")) {
+        rcvcmd_snapshot_t snapshot;
+        rcvcmd_snapshot(rpc->cmd, &snapshot);
+        return rcvjson_snapshot(doc, &snapshot);
+    }
+    if (events) {
+        uint64_t after, limit = 1000;
+        rcvevent_t* copy;
+        rcvevent_read_t read;
+        yyjson_mut_val* array;
+        int i;
+        if (!integer_param(yyjson_obj_get(params, "after"), UINT64_C(9007199254740992), &after) ||
+            after > UINT64_C(9007199254740991))
+            goto invalid;
+        value = yyjson_obj_get(params, "limit");
+        if (value && (!integer_param(value, 1000, &limit) || !limit)) goto invalid;
+        copy = malloc((size_t)limit * sizeof(*copy));
+        if (!copy) goto internal;
+        if (rcvcmd_read_events(rpc->cmd, after, copy, (int)limit, &read) < 0) {
+            free(copy);
+            goto invalid;
+        }
+        result = yyjson_mut_obj(doc);
+        array = yyjson_mut_arr(doc);
+        for (i = 0; i < read.n; i++) yyjson_mut_arr_append(array, rcvjson_event(doc, &copy[i]));
+        free(copy);
+        yyjson_mut_obj_add_val(doc, result, "events", array);
+        yyjson_mut_obj_add_uint(doc, result, "next", read.next);
+        yyjson_mut_obj_add_bool(doc, result, "more", read.more);
+        yyjson_mut_obj_add_bool(doc, result, "lost", read.lost);
+        if (read.lost) yyjson_mut_obj_add_uint(doc, result, "oldestSeq", read.oldest);
+        return result;
+    }
+    if (start || stop || restart) {
+        rcvcmd_claim_t claim;
+        rcvcmd_result_t accepted;
+        rpc_overwrite_t overwrite = {0};
+        size_t i, max;
+        value = yyjson_obj_get(params, "overwrite");
+        if (value) {
+            yyjson_val* path;
+            if (!yyjson_is_arr(value)) goto invalid;
+            yyjson_arr_foreach(value, i, max, path) if (!yyjson_is_str(path)) goto invalid;
+            overwrite.count = yyjson_arr_size(value);
+            if (overwrite.count) {
+                overwrite.paths = calloc(overwrite.count, sizeof(*overwrite.paths));
+                if (!overwrite.paths) goto internal;
+            }
+            yyjson_arr_foreach(value, i, max, path) {
+                size_t length = yyjson_get_len(path);
+                overwrite.paths[i] = malloc(length + 1);
+                if (!overwrite.paths[i]) {
+                    free_overwrite(&overwrite);
+                    goto internal;
+                }
+                memcpy(overwrite.paths[i], yyjson_get_str(path), length + 1);
+                /* Embedded NUL cannot agree to a shorter filesystem path. */
+                if (strlen(overwrite.paths[i]) != length) overwrite.paths[i][0] = 0;
+            }
+        }
+        accepted = rcvcmd_claim(rpc->cmd,
+                                start     ? RCVCMD_OP_START
+                                : restart ? RCVCMD_OP_RESTART
+                                          : RCVCMD_OP_STOP,
+                                &claim);
+        if (claim.seq) {
+            pthread_mutex_lock(&rpc->lifecycle_lock);
+            rpc->pending_claim = claim;
+            rpc->pending_overwrite = overwrite;
+            pthread_cond_signal(&rpc->lifecycle_cond);
+            pthread_mutex_unlock(&rpc->lifecycle_lock);
+        } else
+            free_overwrite(&overwrite);
+        if (accepted.kind != RCVCMD_SUCCESS) {
+            int busy = accepted.kind == RCVCMD_BUSY;
+            *error = rpc_error(doc,
+                               busy                                      ? 1001
+                               : accepted.kind == RCVCMD_ALREADY_RUNNING ? 1002
+                                                                         : 1003,
+                               busy                                      ? "Server is busy"
+                               : accepted.kind == RCVCMD_ALREADY_RUNNING ? "Already running"
+                                                                         : "Shutting down",
+                               busy                                      ? "busy"
+                               : accepted.kind == RCVCMD_ALREADY_RUNNING ? "alreadyRunning"
+                                                                         : "shuttingDown");
+            if (busy)
+                yyjson_mut_obj_add_str(doc, yyjson_mut_obj_get(*error, "data"), "state",
+                                       rcvjson_state_name(accepted.state));
+            return NULL;
+        }
+        result = yyjson_mut_obj(doc);
+        yyjson_mut_obj_add_uint(doc, result, "seq", accepted.seq);
+        return result;
     }
     result = yyjson_mut_obj(doc);
-    if (yyjson_equals_str(method, "getVersion")) {
+    if (!strcmp(name, "getVersion")) {
         yyjson_mut_obj_add_str(doc, result, "protocolVersion", "0.1");
         yyjson_mut_obj_add_str(doc, result, "mrtklibVersion", MRTKLIB_VERSION_STRING);
         yyjson_mut_obj_add_str(doc, result, "authentication", rpc->options->no_auth ? "none" : "token");
@@ -361,6 +584,12 @@ static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* 
         yyjson_mut_obj_add_uint(doc, result, "seq", rcvcmd_last_seq(rpc->cmd));
     }
     return result;
+invalid:
+    *error = rpc_error(doc, -32602, "Invalid parameters", "invalidParams");
+    return NULL;
+internal:
+    *error = rpc_error(doc, -32603, "Internal error", NULL);
+    return NULL;
 }
 
 static void handle_message(rcvrpc_t* rpc, struct mg_connection* connection, const char* message, size_t length) {
@@ -410,15 +639,19 @@ static void handle_message(rcvrpc_t* rpc, struct mg_connection* connection, cons
 
 static int data_ws(struct mg_connection* connection, int bits, char* data, size_t length, void* arg) {
     rcvrpc_t* rpc = arg;
-    rpc_client_t* client = mg_get_user_connection_data(connection);
+    rpc_client_t* client;
     int opcode = bits & 15, keep = 1;
-    if (!client) return 0;
     pthread_mutex_lock(&rpc->lock);
-    /* This mutex covers response construction/write and final closes. CivetWeb's
-     * mg_websocket_write takes its connection write lock internally, keeping each
-     * frame indivisible; the registry lock also orders responses before close and
-     * keeps connection pointers alive until close_ws removes them. */
-    if (rpc->stopping || client->close_sent)
+    client = mg_get_user_connection_data(connection);
+    if (!client) {
+        pthread_mutex_unlock(&rpc->lock);
+        return 0;
+    }
+    pthread_mutex_lock(&client->lock);
+    pthread_mutex_unlock(&rpc->lock);
+    /* Per-connection assembly and writes preserve receive order without making
+     * another client's progress depend on this client's socket backpressure. */
+    if (client->close_sent)
         keep = 0;
     else if ((bits & 0x70) || ((opcode & 8) && (!(bits & 0x80) || length > 125))) {
         close_code(connection, 1002);
@@ -455,7 +688,7 @@ static int data_ws(struct mg_connection* connection, int bits, char* data, size_
             client->length = 0;
         }
     }
-    pthread_mutex_unlock(&rpc->lock);
+    pthread_mutex_unlock(&client->lock);
     return keep;
 }
 
@@ -571,11 +804,19 @@ int rcvrpc_start(rcvrpc_t** out, const rcvrpc_options_t* options, rcvcmd_t* cmd)
     rpc->cmd = cmd;
     pthread_mutex_init(&rpc->lock, NULL);
     pthread_mutex_init(&rpc->log_lock, NULL);
+    pthread_mutex_init(&rpc->lifecycle_lock, NULL);
+    pthread_cond_init(&rpc->lifecycle_cond, NULL);
     snprintf(listening, sizeof(listening), strchr(host, ':') ? "[%s]:%d" : "%s:%d", host, options->port);
     callbacks.begin_request = begin_request;
     callbacks.log_message = log_message;
     callbacks.log_access = log_access;
     mg_init_library(0);
+    if (pthread_create(&rpc->lifecycle_thread, NULL, execute_lifecycle, rpc)) {
+        startup_error("RPC lifecycle thread could not start");
+        rcvrpc_stop(rpc);
+        return 0;
+    }
+    rpc->lifecycle_started = 1;
     rpc->context = mg_start(&callbacks, rpc, configuration);
     if (!rpc->context) {
         fprintf(stderr, "error: RPC listen failed: %s\n",
@@ -632,12 +873,23 @@ void rcvrpc_stop(rcvrpc_t* rpc) {
     if (!rpc) return;
     pthread_mutex_lock(&rpc->lock);
     rpc->stopping = 1;
-    for (client = rpc->clients; client; client = client->next) close_code(client->connection, 1001);
+    for (client = rpc->clients; client; client = client->next) {
+        pthread_mutex_lock(&client->lock);
+        close_code(client->connection, 1001);
+        pthread_mutex_unlock(&client->lock);
+    }
     pthread_mutex_unlock(&rpc->lock);
+    pthread_mutex_lock(&rpc->lifecycle_lock);
+    rpc->lifecycle_exit = 1;
+    pthread_cond_signal(&rpc->lifecycle_cond);
+    pthread_mutex_unlock(&rpc->lifecycle_lock);
+    if (rpc->lifecycle_started) pthread_join(rpc->lifecycle_thread, NULL);
     if (rpc->watcher_started) pthread_join(rpc->watcher, NULL);
     if (rpc->context) mg_stop(rpc->context);
     mg_exit_library();
     pthread_mutex_destroy(&rpc->lock);
     pthread_mutex_destroy(&rpc->log_lock);
+    pthread_mutex_destroy(&rpc->lifecycle_lock);
+    pthread_cond_destroy(&rpc->lifecycle_cond);
     free(rpc);
 }

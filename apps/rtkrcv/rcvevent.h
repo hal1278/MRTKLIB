@@ -27,7 +27,8 @@
 extern "C" {
 #endif
 
-#define RCVEVENT_TEXT 512 /* log text bytes including the terminating NUL */
+#define RCVEVENT_PATHS 508 /* NUL-separated refused paths; fits inside the log union member */
+#define RCVEVENT_TEXT 512  /* log text bytes including the terminating NUL */
 
 typedef enum { RCVEVENT_STATUS, RCVEVENT_SOLUTION, RCVEVENT_LOG } rcvevent_kind_t;
 
@@ -38,6 +39,7 @@ typedef struct {
     int state;       /* rcvcmd_state_t */
     int stop_reason; /* rcvcmd_stop_reason_t */
     int last_error;  /* rcvcmd_start_error_t */
+    char paths[RCVEVENT_PATHS];
 } rcvevent_status_t;
 
 typedef struct {

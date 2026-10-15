@@ -255,6 +255,40 @@
               "oldestSeq": 4200
             }
           }
+        },
+        {
+          "name": "Output overwrite refused",
+          "params": [
+            {
+              "name": "after",
+              "value": 12
+            }
+          ],
+          "result": {
+            "name": "events",
+            "value": {
+              "events": [
+                {
+                  "seq": 13,
+                  "kind": "status",
+                  "data": {
+                    "state": "stopped",
+                    "stopReason": "error",
+                    "lastError": {
+                      "reason": "outputExists",
+                      "message": "Output files already exist.",
+                      "paths": [
+                        "/tmp/solution.pos"
+                      ]
+                    }
+                  }
+                }
+              ],
+              "next": 13,
+              "more": false,
+              "lost": false
+            }
+          }
         }
       ],
       "errors": [
@@ -268,7 +302,16 @@
       "summary": "Start positioning.",
       "description": "Accepted when the server is stopped: the server moves to `starting` and the response returns. The outcome arrives as a later status event: `running`, or `stopped` with stopReason `error` and lastError.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "overwrite",
+          "required": false,
+          "description": "Paths the user agreed to overwrite, compared byte for byte with the paths the server would open. Defaults to an empty list. Pass every agreed path on each attempt.",
+          "schema": {
+            "$ref": "#/components/schemas/OverwritePaths"
+          }
+        }
+      ],
       "result": {
         "name": "accepted",
         "schema": {
@@ -284,6 +327,25 @@
         },
         {
           "$ref": "#/components/errors/ShuttingDown"
+        }
+      ],
+      "examples": [
+        {
+          "name": "Accept overwriting an existing output",
+          "params": [
+            {
+              "name": "overwrite",
+              "value": [
+                "/tmp/solution.pos"
+              ]
+            }
+          ],
+          "result": {
+            "name": "accepted",
+            "value": {
+              "seq": 12
+            }
+          }
         }
       ]
     },
@@ -313,7 +375,16 @@
       "summary": "Stop and start again without letting other lifecycle requests in between.",
       "description": "When running: status events `stopping`, `stopped`, `starting`, then `running` or `stopped` with lastError. Until the restart has finished, other lifecycle requests fail with `busy`, also while the intermediate `stopped` is shown. When stopped: the same as start.",
       "paramStructure": "by-name",
-      "params": [],
+      "params": [
+        {
+          "name": "overwrite",
+          "required": false,
+          "description": "Paths the user agreed to overwrite, compared byte for byte with the paths the server would open. Defaults to an empty list. Pass every agreed path on each attempt.",
+          "schema": {
+            "$ref": "#/components/schemas/OverwritePaths"
+          }
+        }
+      ],
       "result": {
         "name": "accepted",
         "schema": {
@@ -408,11 +479,38 @@
         "properties": {
           "reason": {
             "type": "string",
-            "description": "Stable name. Open set: clients treat names they do not know like `startFailed`. Known in 0.1: `startFailed`."
+            "description": "Stable name. Open set: clients treat names they do not know like `startFailed`. Known in 0.1: `startFailed`, `outputExists`."
           },
           "message": {
             "type": "string",
             "description": "English description for display. Not part of the contract. Never contains secrets."
+          },
+          "paths": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "description": "Distinct refused output paths in stream slot order. Present exactly with outputExists. Very long lists can be reported over several attempts."
+          }
+        },
+        "if": {
+          "properties": {
+            "reason": {
+              "const": "outputExists"
+            }
+          }
+        },
+        "then": {
+          "required": [
+            "paths"
+          ]
+        },
+        "else": {
+          "not": {
+            "required": [
+              "paths"
+            ]
           }
         }
       },
@@ -1102,6 +1200,14 @@
             "description": "With `busy`: the state that caused the rejection."
           }
         }
+      },
+      "OverwritePaths": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "default": [],
+        "description": "Paths the user agreed to overwrite for this request."
       }
     },
     "errors": {

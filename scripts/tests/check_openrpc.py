@@ -63,6 +63,39 @@ def without(obj, key):
 
 # (component schema, instance, expected valid, label)
 CASES = [
+    (
+        "LastError",
+        {
+            "reason": "outputExists",
+            "message": "Output files already exist.",
+            "paths": ["/tmp/out.pos"],
+        },
+        True,
+        "overwrite refused",
+    ),
+    (
+        "LastError",
+        {"reason": "outputExists", "message": "Output files already exist."},
+        False,
+        "overwrite without paths",
+    ),
+    (
+        "LastError",
+        {"reason": "outputExists", "message": "Output files already exist.", "paths": []},
+        False,
+        "overwrite empty paths",
+    ),
+    (
+        "LastError",
+        {"reason": "outputExists", "message": "Output files already exist.", "paths": [1]},
+        False,
+        "overwrite non-string path",
+    ),
+    ("LastError", {**LAST_ERROR, "paths": ["/tmp/out.pos"]}, False, "startFailed with paths"),
+    ("OverwritePaths", [], True, "empty overwrite permission"),
+    ("OverwritePaths", ["/tmp/out.pos"], True, "overwrite permission"),
+    ("OverwritePaths", "/tmp/out.pos", False, "overwrite must be an array"),
+    ("OverwritePaths", [1], False, "overwrite members must be strings"),
     # lifecycle
     ("Lifecycle", {"state": "stopped"}, True, "stopped before the first start"),
     ("Lifecycle", {"state": "stopped", "stopReason": "inputEnd"}, True, "stopped at input end"),
