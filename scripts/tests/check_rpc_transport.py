@@ -3,6 +3,7 @@
 
 Python 3.10+ and its standard library suffice. When jsonschema is importable,
 results and errors are also checked against docs/rpc/openrpc.json.
+With --compiler, the C preprocessor also checks the CivetWeb minimum-version guard.
 
 Usage: check_rpc_transport.py --mrtk build/mrtk --source-dir .
 """
@@ -82,10 +83,19 @@ class WebSocket:
     """Minimal masked RFC 6455 client with independently verified handshake."""
 
     def __init__(
-        self, server, protocols=OFFER, origin=None, path="/rpc", upgrade=True, method="GET"
+        self,
+        server,
+        protocols=OFFER,
+        origin=None,
+        path="/rpc",
+        upgrade=True,
+        method="GET",
+        headers=(),
+        body=b"",
+        timeout=DEADLINE,
     ):
         """Connect and finish one raw HTTP handshake."""
-        self.sock = socket.create_connection((server.host, server.port), timeout=DEADLINE)
+        self.sock = socket.create_connection((server.host, server.port), timeout=timeout)
         server.sockets.append(self.sock)
         lines = [f"{method} {path} HTTP/1.1", "Host: localhost"]
         if upgrade:
@@ -103,7 +113,8 @@ class WebSocket:
             lines.append(f"Origin: {origin}")
         if method == "PUT":
             lines.append("Content-Length: 0")
-        self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii"))
+        lines.extend(headers)
+        self.sock.sendall(("\r\n".join(lines) + "\r\n\r\n").encode("ascii") + body)
         raw = bytearray()
         while not raw.endswith(b"\r\n\r\n"):
             byte = self.sock.recv(1)
@@ -135,12 +146,12 @@ class WebSocket:
             raw.extend(chunk)
         return bytes(raw)
 
-    def send(self, payload, opcode=1, final=True):
+    def send(self, payload, opcode=1, final=True, rsv=0):
         """Send one client frame, including a mask even for empty payloads."""
         if isinstance(payload, str):
             payload = payload.encode("utf-8")
         length = len(payload)
-        header = bytes([(0x80 if final else 0) | opcode])
+        header = bytes([(0x80 if final else 0) | rsv | opcode])
         if length < 126:
             header += bytes([0x80 | length])
         elif length < 65536:
@@ -416,6 +427,42 @@ class TransportTests(unittest.TestCase):
                 server.process.send_signal(signal.SIGTERM)
                 server.wait()
 
+    def test_civetweb_minimum_version(self):
+        """The actual source guard rejects old versions and accepts newer releases."""
+        if self.args.compiler is None:
+            self.skipTest("CivetWeb version guard checks require --compiler")
+        source = (self.args.source_dir / "apps/rtkrcv/rcvrpc.c").read_text()
+        guard = re.search(
+            r"^#if CIVETWEB_VERSION_MAJOR.*?^#endif", source, re.MULTILINE | re.DOTALL
+        )
+        self.assertIsNotNone(guard, "CivetWeb minimum-version guard not found")
+        for major, minor, patch, accepted in [
+            (0, 99, 99, False),
+            (1, 15, 99, False),
+            (1, 16, 0, True),
+            (1, 16, 1, True),
+            (1, 17, 0, True),
+            (2, 0, 0, True),
+        ]:
+            with self.subTest(version=f"{major}.{minor}.{patch}"):
+                program = (
+                    f"#define CIVETWEB_VERSION_MAJOR {major}\n"
+                    f"#define CIVETWEB_VERSION_MINOR {minor}\n"
+                    f"#define CIVETWEB_VERSION_PATCH {patch}\n" + guard[0] + "\n"
+                )
+                result = subprocess.run(
+                    [str(self.args.compiler), "-E", "-x", "c", "-"],
+                    input=program,
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    timeout=DEADLINE,
+                    check=False,
+                )
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+                if not accepted:
+                    self.assertIn("MRTK RPC requires CivetWeb 1.16 or newer", result.stderr)
+
     def test_token_bounds_and_default_origin(self):
         """Both token length bounds work, while browser origins default to refused."""
         for token in ("x", "X" * 256):
@@ -500,10 +547,13 @@ class TransportTests(unittest.TestCase):
         cases = [
             ("default", {}, 101),
             ("token first", {"protocols": f"mrtk-token.{TOKEN}, mrtk-rpc"}, 101),
+            ("space after token", {"protocols": f"mrtk-token.{TOKEN} , mrtk-rpc"}, 101),
             ("no spaces", {"protocols": f"mrtk-rpc,mrtk-token.{TOKEN}"}, 101),
             ("spaces after comma", {"protocols": f"mrtk-rpc,  mrtk-token.{TOKEN}"}, 101),
             ("space before comma", {"protocols": f"mrtk-rpc , mrtk-token.{TOKEN}"}, 400),
             ("tabs", {"protocols": f"\tmrtk-rpc\t,\tmrtk-token.{TOKEN}\t"}, 400),
+            ("tab after comma", {"protocols": f"mrtk-rpc,\tmrtk-token.{TOKEN}"}, 400),
+            ("tab in other header", {"headers": ["X-Client: native\tclient"]}, 400),
             ("multiple headers", {"protocols": ["mrtk-rpc", f"mrtk-token.{TOKEN}"]}, 101),
             ("allowed origin", {"origin": "HTTP://ALLOWED"}, 101),
             ("second origin", {"origin": "https://second:8443"}, 101),
@@ -534,6 +584,102 @@ class TransportTests(unittest.TestCase):
                     else:
                         self.assertEqual(ws.headers.get("connection"), ["close"])
                     ws.close()
+
+    def test_http_body_rejection(self):
+        """Rejected requests close promptly without waiting for their bodies."""
+        cases = [
+            ("no body length", "/rpc", False, [], b"", 426),
+            ("zero body length", "/rpc", False, ["Content-Length: 0"], b"", 426),
+            ("incomplete body", "/rpc", False, ["Content-Length: 1000000"], b"few", 426),
+            (
+                "incomplete chunk",
+                "/rpc",
+                False,
+                ["Transfer-Encoding: chunked"],
+                b"F4240\r\nfew",
+                426,
+            ),
+            (
+                "identity transfer encoding",
+                "/rpc",
+                False,
+                ["Transfer-Encoding: identity"],
+                b"",
+                426,
+            ),
+            ("other upgrade body", "/other", True, ["Content-Length: 1000000"], b"few", 404),
+            ("child upgrade body", "/rpc/child", True, ["Content-Length: 1000000"], b"few", 404),
+        ]
+        with Server(self.args) as server:
+            for name, path, upgrade, headers, body, expected in cases:
+                with self.subTest(case=name):
+                    started = time.monotonic()
+                    ws = server.connect(
+                        method="GET" if upgrade else "POST",
+                        path=path,
+                        upgrade=upgrade,
+                        headers=headers,
+                        body=body,
+                        timeout=1.0,
+                    )
+                    try:
+                        self.assertEqual(ws.status, expected)
+                        self.assertEqual(ws.headers.get("connection"), ["close"])
+                        if expected == 426:
+                            self.assertEqual(ws.headers.get("upgrade"), ["websocket"])
+                        received = 0
+                        while chunk := ws.sock.recv(4096):
+                            received += len(chunk)
+                            self.assertLess(received, 65536, "unbounded HTTP rejection body")
+                        self.assertLess(time.monotonic() - started, 1.0)
+                    finally:
+                        ws.sock.close()
+                    normal = server.connect()
+                    self.version(normal)
+                    normal.close()
+
+    def test_client_close(self):
+        """Client Close receives one reply before TCP EOF, including empty Close."""
+        with Server(self.args) as server:
+            for payload in (b"", struct.pack("!H", 1000), struct.pack("!H", 1000) + b"finished"):
+                with self.subTest(payload_length=len(payload)):
+                    ws = server.connect()
+                    try:
+                        ws.send(payload, opcode=8)
+                        self.assertEqual(ws.receive(), (8, payload[:2]))
+                        self.assertEqual(
+                            ws.sock.recv(1), b"", "Close reply must be followed by TCP EOF"
+                        )
+                    finally:
+                        ws.sock.close()
+
+    def test_frame_validation(self):
+        """RSV bits, invalid control frames, and reserved opcodes close with 1002."""
+        with Server(self.args) as server:
+            cases = [
+                (f"RSV{index + 1}", b"{}", dict(rsv=bit))
+                for index, bit in enumerate((0x40, 0x20, 0x10))
+            ]
+            for opcode in (8, 9, 10):
+                cases += [
+                    (f"long control {opcode}", b"x" * 126, dict(opcode=opcode)),
+                    (f"fragmented control {opcode}", b"", dict(opcode=opcode, final=False)),
+                ]
+            cases += [
+                (f"reserved opcode {opcode}", b"", dict(opcode=opcode))
+                for opcode in (*range(3, 8), *range(11, 16))
+            ]
+            for name, payload, flags in cases:
+                with self.subTest(case=name):
+                    ws = server.connect()
+                    try:
+                        ws.send(payload, **flags)
+                        ws.close_code(1002)
+                        self.assertEqual(
+                            ws.sock.recv(1), b"", "server must not send a second Close"
+                        )
+                    finally:
+                        ws.sock.close()
 
     def test_frames(self):
         """Invalid message types, UTF-8, and size receive their specified closes."""
@@ -653,6 +799,8 @@ class TransportTests(unittest.TestCase):
             self.assertIsInstance(response["result"]["seq"], int)
             first.close_code(1001)
             second.close_code(1001)
+            self.assertEqual(first.sock.recv(1), b"", "shutdown Close must not be sent twice")
+            self.assertEqual(second.sock.recv(1), b"", "shutdown Close must not be sent twice")
             server.wait()
 
     def test_stdin_eof(self):
@@ -753,6 +901,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mrtk", required=True, type=Path)
     parser.add_argument("--source-dir", required=True, type=Path)
+    parser.add_argument("--compiler", type=Path, help="C compiler for minimum-version guard checks")
     args = parser.parse_args()
     args.mrtk = args.mrtk.resolve()
     args.source_dir = args.source_dir.resolve()

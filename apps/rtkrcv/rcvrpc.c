@@ -17,8 +17,8 @@
 #include <civetweb.h>
 #include <yyjson.h>
 
-#if CIVETWEB_VERSION_MAJOR != 1 || CIVETWEB_VERSION_MINOR != 16 || CIVETWEB_VERSION_PATCH != 0
-#error "MRTK RPC requires CivetWeb 1.16"
+#if CIVETWEB_VERSION_MAJOR < 1 || (CIVETWEB_VERSION_MAJOR == 1 && CIVETWEB_VERSION_MINOR < 16)
+#error "MRTK RPC requires CivetWeb 1.16 or newer"
 #endif
 #if !defined(YYJSON_VERSION_HEX) || YYJSON_VERSION_HEX < 0x000A00
 #error "MRTK RPC requires yyjson 0.10 or newer"
@@ -34,7 +34,7 @@ typedef struct rpc_client {
     struct mg_connection* connection;
     struct rpc_client* next;
     size_t length;
-    int fragmented;
+    int fragmented, close_sent;
     char message[RPC_MESSAGE_MAX];
 } rpc_client_t;
 
@@ -219,10 +219,19 @@ static int reject_http(struct mg_connection* connection, int status, const char*
 
 static int begin_request(struct mg_connection* connection) {
     const struct mg_request_info* request = mg_get_request_info(connection);
-    if (!strcmp(request->local_uri, "/rpc") && !mg_get_header(connection, "Upgrade"))
-        return reject_http(connection, 426, "Upgrade Required");
-    if (strcmp(request->local_uri, "/rpc") && mg_get_header(connection, "Upgrade"))
-        return reject_http(connection, 404, "Not Found");
+    /* After a handled begin_request CivetWeb drains the request body unless the
+     * connection must close, so a body trickled below the read timeout could hold
+     * a worker. Mark the connection closing before answering. */
+    if (!strcmp(request->local_uri, "/rpc") && !mg_get_header(connection, "Upgrade")) {
+        mg_disable_connection_keep_alive(connection);
+        reject_http(connection, 426, "Upgrade Required");
+        return 426;
+    }
+    if (strcmp(request->local_uri, "/rpc") && mg_get_header(connection, "Upgrade")) {
+        mg_disable_connection_keep_alive(connection);
+        reject_http(connection, 404, "Not Found");
+        return 404;
+    }
     return 0;
 }
 
@@ -304,9 +313,17 @@ static void close_ws(const struct mg_connection* connection, void* arg) {
     mg_set_user_connection_data(connection, NULL);
 }
 
+/* The registry lock orders every Close against replies and shutdown. */
+static void close_frame(struct mg_connection* connection, const char* data, size_t length) {
+    rpc_client_t* client = mg_get_user_connection_data(connection);
+    if (client->close_sent) return;
+    client->close_sent = 1;
+    mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE, data, length);
+}
+
 static void close_code(struct mg_connection* connection, int code) {
     char bytes[] = {(char)(code >> 8), (char)code};
-    mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE, bytes, 2);
+    close_frame(connection, bytes, 2);
 }
 
 static yyjson_mut_val* rpc_error(yyjson_mut_doc* doc, int code, const char* message, const char* reason) {
@@ -396,19 +413,24 @@ static int data_ws(struct mg_connection* connection, int bits, char* data, size_
     rpc_client_t* client = mg_get_user_connection_data(connection);
     int opcode = bits & 15, keep = 1;
     if (!client) return 0;
-    if (opcode == MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE) return 0;
-    if (opcode == MG_WEBSOCKET_OPCODE_BINARY) {
-        close_code(connection, 1003);
-        return 0;
-    }
-    if (opcode == MG_WEBSOCKET_OPCODE_PONG) return 1;
     pthread_mutex_lock(&rpc->lock);
     /* This mutex covers response construction/write and final closes. CivetWeb's
      * mg_websocket_write takes its connection write lock internally, keeping each
      * frame indivisible; the registry lock also orders responses before close and
      * keeps connection pointers alive until close_ws removes them. */
-    if (rpc->stopping)
+    if (rpc->stopping || client->close_sent)
         keep = 0;
+    else if ((bits & 0x70) || ((opcode & 8) && (!(bits & 0x80) || length > 125))) {
+        close_code(connection, 1002);
+        keep = 0;
+    } else if (opcode == MG_WEBSOCKET_OPCODE_CONNECTION_CLOSE) {
+        close_frame(connection, data, length >= 2 ? 2 : 0);
+        keep = 0;
+    } else if (opcode == MG_WEBSOCKET_OPCODE_BINARY) {
+        close_code(connection, 1003);
+        keep = 0;
+    } else if (opcode == MG_WEBSOCKET_OPCODE_PONG)
+        keep = 1;
     else if (opcode == MG_WEBSOCKET_OPCODE_PING) {
         /* With automatic ping disabled, CivetWeb forwards control frames here. */
         mg_websocket_write(connection, MG_WEBSOCKET_OPCODE_PONG, data, length);

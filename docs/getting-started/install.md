@@ -6,7 +6,7 @@
 |-------------|---------|-------|
 | C compiler | C11 support | GCC 7+, Clang 5+, Apple Clang |
 | CMake | 3.15+ | Build system |
-| CivetWeb | 1.16, with WebSocket support | Required for `MRTK_WITH_RPC=ON` (default); system package |
+| CivetWeb | 1.16+, with WebSocket support | Required for `MRTK_WITH_RPC=ON` (default); system package |
 | yyjson | 0.10+ | Required for RPC; CMake fetches 0.13.0 if no suitable package is found |
 | LAPACK | any | Hardware-accelerated matrix operations |
 
@@ -40,7 +40,7 @@ also identify the dependency for future Windows support.
 
 `MRTK_WITH_RPC` defaults to `ON` and enables the WebSocket endpoint of
 `mrtk run`. CMake finds the system CivetWeb package with
-`find_package(civetweb CONFIG)` and requires version 1.16 with WebSocket
+`find_package(civetweb CONFIG)` and requires version 1.16 or newer with WebSocket
 support. Install it before configuring; CivetWeb is not downloaded by the
 build. If its CMake package is outside the usual search paths, add its
 prefix to `CMAKE_PREFIX_PATH`.

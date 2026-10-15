@@ -212,7 +212,7 @@ option(MRTK_WITH_RPC "Build the mrtk run WebSocket RPC endpoint" ON)
 if(MRTK_WITH_RPC)
     find_package(civetweb CONFIG QUIET)
     if(NOT civetweb_FOUND)
-        message(FATAL_ERROR "RPC requires CivetWeb 1.16: install libcivetweb-dev (Debian/Ubuntu), civetweb (Homebrew), mingw-w64-ucrt-x86_64-civetweb (MSYS2), or civetweb (vcpkg); or use -DMRTK_WITH_RPC=OFF.")
+        message(FATAL_ERROR "RPC requires CivetWeb 1.16 or newer: install libcivetweb-dev (Debian/Ubuntu), civetweb (Homebrew), mingw-w64-ucrt-x86_64-civetweb (MSYS2), or civetweb (vcpkg); or use -DMRTK_WITH_RPC=OFF.")
     endif()
     # Packages may omit a CMake version file; rcvrpc.c checks the header version.
     find_package(yyjson CONFIG QUIET)
@@ -2372,7 +2372,8 @@ set_tests_properties(has_ppp_check PROPERTIES
 if(MRTK_WITH_RPC)
     add_test(NAME rpc_transport
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/tests/check_rpc_transport.py
-            --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR})
+            --mrtk $<TARGET_FILE:mrtk> --source-dir ${CMAKE_SOURCE_DIR}
+            --compiler ${CMAKE_C_COMPILER})
     set_tests_properties(rpc_transport PROPERTIES LABELS "rpc" TIMEOUT 180)
 endif()
 

@@ -138,9 +138,10 @@ handshake request: the protocol name `mrtk-rpc` and the token entry
 Sec-WebSocket-Protocol: mrtk-rpc, mrtk-token.<token>
 ```
 
-Separate entries with a comma and optional spaces after it, as shown above.
-A tab or a space before a comma is refused with HTTP 400. Browsers and common
-clients write `a, b`.
+Separate the entries with a comma and optional spaces after it, as shown above.
+A tab anywhere in the request headers, or a space between `mrtk-rpc` and the
+following comma, makes the server answer HTTP 400. Browsers and common clients
+write `a, b`.
 
 In a browser:
 
@@ -162,8 +163,9 @@ The server checks the request before upgrading the connection:
 
 The endpoint path is exactly `/rpc`: `/rpc/child` and other paths return
 HTTP 404. A plain HTTP request to `/rpc` without a WebSocket upgrade returns
-HTTP 426 (Upgrade Required). The server does not serve files; GET requests
-to other paths return 404 and PUT or DELETE requests return 405.
+HTTP 426 (Upgrade Required); the server closes the connection without reading
+a request body. The server does not serve files; GET requests to other paths return 404 and
+PUT or DELETE requests return 405.
 
 Requests without an `Origin` header come from non-browser programs and skip
 the origin check. The origin check stops web pages open in a browser on the
