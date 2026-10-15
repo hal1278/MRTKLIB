@@ -226,7 +226,7 @@ static void sink_checks(void) {
     log_at(5, 2, "timed");
     long_text[RCVEVENT_TEXT - 1] = '\0';
     log_at(6, 1, long_text);
-    CHECK(strlen(events[6].data.log.text) == 511, "3000-byte trace is cut to 511 bytes");
+    CHECK(strlen(events[6].data.log.text) == RCVEVENT_TEXT - 1, "3000-byte trace keeps the sink's 1023 bytes");
     for (i = 1; i <= 2; i++) {
         CHECK(rcvcmd_set_log_level(cmd, i), "select valid level before invalid requests");
         CHECK(!rcvcmd_set_log_level(cmd, 0) && !rcvcmd_set_log_level(cmd, 3) && !rcvcmd_set_log_level(cmd, -1) &&
@@ -399,7 +399,7 @@ static void notice_checks(char* config) {
     set_option(cmd, "file-satantfile", "");
     set_option(cmd, "ant1-anttype", "");
     CHECK(unlink("empty.atx") == 0, "remove antenna fixture");
-    /* The file keeps the notice beyond the ring's 511-byte limit. */
+    /* A 717-byte notice stays whole in the ring and in the trace file. */
     memset(long_path, 'p', sizeof(long_path) - 1);
     long_path[sizeof(long_path) - 1] = '\0';
     set_option(cmd, "file-cmdfile1", long_path);
@@ -411,12 +411,13 @@ static void notice_checks(char* config) {
     traceclose(ctx);
     /* start reads the command file twice (start and periodic commands), stop once */
     CHECK(count_logs(cmd, last, "no command file:") == 3, "each long notice produces one ring entry");
+    CHECK(count_logs(cmd, last, long_path) == 3, "the ring keeps each long notice whole");
     fp = fopen("long-notice.trace", "r");
     CHECK(fp != NULL, "read long notice trace");
     if (fp) {
         n = fread(text, 1, sizeof(text) - 1, fp);
         text[n] = '\0';
-        CHECK(strstr(text, long_path) != NULL, "trace file retains the full notice beyond 511 bytes");
+        CHECK(strstr(text, long_path) != NULL, "trace file retains the full long notice");
         fclose(fp);
     }
     CHECK(unlink("long-notice.trace") == 0, "remove long notice trace");
@@ -712,7 +713,7 @@ static void overwrite_checks(char* config) {
     rcvevent_t event;
     rcvcmd_result_t result;
     gtime_t rst = {0};
-    char long_path[501], expected[1024], *second;
+    char long_path[MAXSTRPATH], expected[1024], *second;
     uint64_t before;
     CHECK(ctx != NULL, "overwrite context");
     if (!ctx) return;
@@ -750,7 +751,7 @@ static void overwrite_checks(char* config) {
           "snapshot retains refused paths");
     CHECK(rcvcmd_read_events(cmd, snapshot.seq - 1, &event, 1, &read) == 0 && read.n == 1 &&
               !memcmp(event.data.status.paths, lifecycle.paths, sizeof(lifecycle.paths)),
-          "status packs the same paths without growing the event");
+          "status carries the same paths");
     probe.count = 0;
     probe.stop = 1;
     rcvcmd_start(cmd, &callbacks);
@@ -765,6 +766,12 @@ static void overwrite_checks(char* config) {
     rcvcmd_get_lifecycle(cmd, &lifecycle);
     second = lifecycle.paths + strlen(lifecycle.paths) + 1;
     CHECK(probe.count == 3 && !strcmp(second, "second.pos"), "oversized entry omitted, later fitting path retained");
+    set_option(cmd, "outstr1-path", long_path);
+    probe.count = 0;
+    rcvcmd_start(cmd, &callbacks);
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    CHECK(probe.count == 3 && !strcmp(lifecycle.paths, long_path) && !lifecycle.paths[strlen(long_path) + 1],
+          "a longest path refused first always fits");
     set_option(cmd, "outstr1-path", "out_%Y%m%d.pos::S=1");
     probe.count = 0;
     probe.stop = 1;

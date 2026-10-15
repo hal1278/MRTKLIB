@@ -133,14 +133,24 @@ static void conversion_checks(void) {
     yyjson_doc_free(copy);
     for (i = 0; i < 6; i++) {
         double saved = solution.sol.rr[i];
+        int position = i < 3;
         solution.sol.rr[i] = i % 2 ? INFINITY : NAN;
         copy = encoded(doc, rcvjson_solution(doc, &solution));
         root = yyjson_doc_get_root(copy);
-        CHECK(yyjson_obj_size(root) == 3 && yyjson_equals_str(yyjson_obj_get(root, "status"), "none"),
-              "non-finite coordinates and velocity become none");
+        CHECK(position ? yyjson_obj_size(root) == 3 && yyjson_equals_str(yyjson_obj_get(root, "status"), "none")
+                       : yyjson_obj_get(root, "position") != NULL,
+              position ? "non-finite coordinates become none" : "unsent non-finite velocity keeps the solution");
         yyjson_doc_free(copy);
         solution.sol.rr[i] = saved;
     }
+    solution.sol.qv[0] = NAN;
+    solution.sol.dtr[0] = INFINITY;
+    copy = encoded(doc, rcvjson_solution(doc, &solution));
+    CHECK(yyjson_obj_get(yyjson_doc_get_root(copy), "position") != NULL,
+          "unsent non-finite velocity covariance and clock bias keep the solution");
+    yyjson_doc_free(copy);
+    solution.sol.qv[0] = 0.0f;
+    solution.sol.dtr[0] = 0.0;
     solution.sol.qr[4] = NAN;
     copy = encoded(doc, rcvjson_solution(doc, &solution));
     CHECK(yyjson_obj_size(yyjson_doc_get_root(copy)) == 3, "non-finite covariance becomes none");

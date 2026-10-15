@@ -224,6 +224,7 @@ static int token_equal(const char* entry, size_t length, const char* token) {
 }
 
 static int reject_http(struct mg_connection* connection, int status, const char* reason) {
+    trace(NULL, 3, "RPC: HTTP %d for %s\n", status, mg_get_request_info(connection)->local_uri);
     mg_printf(connection, "HTTP/1.1 %d %s\r\nContent-Length: 0\r\nConnection: close\r\n%s\r\n", status, reason,
               status == 426 ? "Upgrade: websocket\r\n" : "");
     return 1;
@@ -314,6 +315,7 @@ static void ready_ws(struct mg_connection* connection, void* arg) {
     client->next = rpc->clients;
     rpc->clients = client;
     pthread_mutex_unlock(&rpc->lock);
+    trace(NULL, 3, "RPC: WebSocket connection opened\n");
 }
 
 static void close_ws(const struct mg_connection* connection, void* arg) {
@@ -692,9 +694,11 @@ static int data_ws(struct mg_connection* connection, int bits, char* data, size_
     return keep;
 }
 
-/* CivetWeb access text includes Referer/User-Agent and diagnostics can include
- * request fragments. Redact every header value and the configured token before
- * forwarding either callback, including during mg_start failure reporting. */
+/* CivetWeb diagnostics can include request fragments. Redact every header value
+ * and the configured token before forwarding, including during mg_start failure
+ * reporting. No access-log callback is installed: CivetWeb 1.16 formats access
+ * lines with the non-reentrant localtime() whenever one is (a data race between
+ * connections); the handshake outcome is traced by reject_http/ready_ws instead. */
 static void safe_log_text(const struct mg_connection* connection, const char* message, char* out, size_t capacity) {
     const struct mg_request_info* request = mg_get_request_info(connection);
     rcvrpc_t* rpc = mg_get_user_data(mg_get_context(connection));
@@ -731,12 +735,6 @@ static int log_message(const struct mg_connection* connection, const char* messa
     if (!rpc->listen_error[0])
         snprintf(rpc->listen_error, sizeof(rpc->listen_error), "%.*s", (int)sizeof(rpc->listen_error) - 1, safe);
     pthread_mutex_unlock(&rpc->log_lock);
-    return 1;
-}
-static int log_access(const struct mg_connection* connection, const char* message) {
-    char safe[8192];
-    safe_log_text(connection, message, safe, sizeof(safe));
-    trace(NULL, 3, "CivetWeb access: %s\n", safe);
     return 1;
 }
 
@@ -809,7 +807,6 @@ int rcvrpc_start(rcvrpc_t** out, const rcvrpc_options_t* options, rcvcmd_t* cmd)
     snprintf(listening, sizeof(listening), strchr(host, ':') ? "[%s]:%d" : "%s:%d", host, options->port);
     callbacks.begin_request = begin_request;
     callbacks.log_message = log_message;
-    callbacks.log_access = log_access;
     mg_init_library(0);
     if (pthread_create(&rpc->lifecycle_thread, NULL, execute_lifecycle, rpc)) {
         startup_error("RPC lifecycle thread could not start");

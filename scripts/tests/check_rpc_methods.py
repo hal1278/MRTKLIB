@@ -265,9 +265,11 @@ class MethodsTests(unittest.TestCase):
                     self.finish(server, ws)
 
     def test_start_failure_redaction(self):
+        # A TCP client path carries a password; the invalid port makes the open
+        # fail at once. File paths are not secrets, so a file input would not test this.
         config = CONFIG.replace(
             '[streams.input.rover]\ntype = "off"',
-            '[streams.input.rover]\ntype = "file"\npath = "user:secret@missing/obs"',
+            '[streams.input.rover]\ntype = "tcpcli"\npath = "user:secret@127.0.0.1:notaport"',
         )
         with Server(self.args, config=config) as server:
             ws = server.connect()

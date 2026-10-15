@@ -27,8 +27,12 @@
 extern "C" {
 #endif
 
-#define RCVEVENT_PATHS 508 /* NUL-separated refused paths; fits inside the log union member */
-#define RCVEVENT_TEXT 512  /* log text bytes including the terminating NUL */
+/* Both sizes follow the core: a whole trace sink message (MRTK_TRACE_SINK_MSGLEN,
+ * checked in rcvcmd.c because this header stays light), and the longest stream path
+ * plus the list terminator. The ring never cuts a log text and one refused path always
+ * fits; the union, and so every entry, is about 1 KB. */
+#define RCVEVENT_TEXT 1024              /* log text bytes including the terminating NUL */
+#define RCVEVENT_PATHS (MAXSTRPATH + 1) /* NUL-separated refused paths, then an empty string */
 
 typedef enum { RCVEVENT_STATUS, RCVEVENT_SOLUTION, RCVEVENT_LOG } rcvevent_kind_t;
 

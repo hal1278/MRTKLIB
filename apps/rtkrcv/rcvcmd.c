@@ -46,8 +46,7 @@
 #define RCVCMD_EVENT_CAPACITY 4096
 #define RCVCMD_COLLECT_MS 100
 
-_Static_assert(sizeof(rcvevent_status_t) <= sizeof(rcvevent_log_t), "event paths must fit inside the log member");
-_Static_assert(sizeof(rcvevent_t) <= 536, "event paths must not enlarge ring entries");
+_Static_assert(RCVEVENT_TEXT == MRTK_TRACE_SINK_MSGLEN, "a log event holds one whole trace sink message");
 
 typedef struct {
     sol_t solutions[MAXSOLBUF];
@@ -232,15 +231,12 @@ static void mask_stream_error(const char* text, char* out, size_t size) {
 #ifdef TRACE
 /* svr->lock / stream locks / config_lock -> publish_lock (innermost).
  * Never trace or take another lock under publish_lock. The core passes up to
- * MRTK_TRACE_SINK_MSGLEN - 1 bytes; RCVEVENT_TEXT is the only cut of log text. */
+ * MRTK_TRACE_SINK_MSGLEN - 1 bytes, which RCVEVENT_TEXT holds. Secrets are masked
+ * at their sources (the core's level 1-2 traces and notice()), not here. */
 static void publish_trace(void* arg, int level, const char* msg) {
     rcvcmd_t* cmd = (rcvcmd_t*)arg;
     rcvevent_t ev = {0};
-    char safe[MRTK_TRACE_SINK_MSGLEN];
-    size_t n;
-    mask_stream_error(msg, safe, sizeof(safe));
-    msg = safe;
-    n = strlen(msg);
+    size_t n = strlen(msg);
     while (n && (msg[n - 1] == '\n' || msg[n - 1] == '\r')) n--;
     if (!n) return;
     if (n >= RCVEVENT_TEXT) n = RCVEVENT_TEXT - 1;
