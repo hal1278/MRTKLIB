@@ -8,14 +8,16 @@ Run through CTest to prepare and clean the MALIB replay fixtures:
 
 import argparse
 import json
+import math
 import re
 import socket
+import struct
 import time
 import unittest
 from pathlib import Path
 
-from rpc_test_support import CONFIG, Server, wait_for
-from check_rtkrcv_console import file_gate
+from rpc_test_support import CONFIG, DEADLINE, Server, wait_for
+from check_rtkrcv_console import PROMPT, Console, file_gate
 
 try:
     from jsonschema import Draft7Validator
@@ -177,6 +179,152 @@ class MethodsTests(unittest.TestCase):
             self.assertEqual(len(first["events"]), 1)
             self.assertTrue(first["more"])
             self.assertLessEqual(len(self.page(ws, 0, limit=100000)["events"]), 1000)
+            self.finish(server, ws)
+
+    def test_file_geoid_solution(self):
+        """RPC keeps ellipsoidal heights; telnet uses the event even after stop."""
+
+        def config(directory):
+            grid = directory / "egm96.bin"
+            # EGM96 rows run west to east, then north to south, in centimetres.
+            # A plane makes bilinear interpolation equal its closed form.
+            with grid.open("wb") as output:
+                for j in range(721):
+                    output.write(
+                        struct.pack(">1440h", *(3 * i + 5 * j - 4000 for i in range(1440)))
+                    )
+            text = self.replay(directory)
+            text = text.replace('height_type = "ellipsoidal"', 'height_type = "geodetic"')
+            text = text.replace('geoid_model = "internal"', 'geoid_model = "egm96"')
+            text = text.replace('geoid = ""', "geoid = " + json.dumps(str(grid)))
+            return text.replace('timetype = "gpst"', 'timetype = "tow"')
+
+        with socket.socket() as probe:
+            probe.bind(("127.0.0.1", 0))
+            port = probe.getsockname()[1]
+        with Server(
+            self.args,
+            ["--rpc-port", "0", "--no-console", "-p", str(port), "-w", ""],
+            config=config,
+        ) as server:
+            ws = server.connect()
+            # Each console has its own cursor, initialized when it connects.
+            # Connect before start so the stopped checks can read the same run.
+            consoles = []
+            for _ in range(4):
+                sock = socket.create_connection(("127.0.0.1", port), timeout=DEADLINE)
+                server.sockets.append(sock)
+                console = Console(sock)
+                console.read_until(lambda text: text.endswith(PROMPT), "initial prompt")
+                consoles.append(console)
+            seq = self.accepted(ws, "start")
+            self.until(
+                ws,
+                seq - 1,
+                lambda events: any(
+                    e["kind"] == "solution" and e["data"]["status"] != "none" for e in events
+                ),
+            )
+            displays = []
+            for phase, peers in (("running", consoles[:2]), ("stopped", consoles[2:])):
+                if phase == "stopped":
+                    self.accepted(ws, "stop")
+                    events = self.state(ws, seq - 1, "stopped")
+                for soltype, console in enumerate(peers):
+                    console.expect(
+                        f"set console-soltype {soltype}",
+                        "option console-soltype changed.",
+                    )
+                    displays.append((phase, soltype, console.run("solution")))
+                self.assertEqual(self.call(ws, "getStatus")["status"]["lifecycle"]["state"], phase)
+
+            solutions = {}
+            for event in events:
+                if event["kind"] != "solution" or event["data"]["status"] == "none":
+                    continue
+                data = event["data"]
+                llh = data["position"]["llh"]
+                geoid = data["geoid"]
+                self.assertEqual(geoid["model"], "egm96")
+                i = (llh["lon"] % 360.0) / 0.25
+                j = (90.0 - llh["lat"]) / 0.25
+                self.assertAlmostEqual(
+                    geoid["separation"], (3 * i + 5 * j - 4000) * 0.01, delta=1e-6
+                )
+                # Project ECEF onto the ellipsoid normal to independently check
+                # that RPC height was not reduced by the output height setting.
+                xyz = data["position"]["ecef"]
+                lat = math.radians(llh["lat"])
+                flattening = 1 / 298.257223563
+                e2 = flattening * (2 - flattening)
+                height = (
+                    math.hypot(xyz["x"], xyz["y"]) * math.cos(lat)
+                    + xyz["z"] * math.sin(lat)
+                    - 6378137.0 * math.sqrt(1 - e2 * math.sin(lat) ** 2)
+                )
+                self.assertAlmostEqual(llh["height"], height, delta=1e-4)
+                epoch = (data["time"]["week"], round(data["time"]["tow"] * 100))
+                self.assertNotIn(
+                    epoch, solutions, "fixture epochs must be distinct at telnet precision"
+                )
+                solutions[epoch] = llh["height"] - geoid["separation"]
+            self.assertTrue(solutions)
+            for phase, soltype, text in displays:
+                with self.subTest(phase=phase, soltype=soltype):
+                    rows = re.findall(
+                        r"^\s*(\d{4})\s+(\d+\.\d{2})\s+\([^\n]*? H:\s*(-?\d+\.\d{3})",
+                        text,
+                        re.MULTILINE,
+                    )
+                    self.assertTrue(rows, text)
+                    for week, tow, height in rows:
+                        epoch = (int(week), round(float(tow) * 100))
+                        self.assertIn(epoch, solutions)
+                        self.assertAlmostEqual(float(height), solutions[epoch], delta=0.000500001)
+            self.finish(server, ws)
+
+    def test_missing_geoid_file(self):
+        """A failed file-model open reports the internal model actually in use."""
+
+        def config(directory):
+            text = self.replay(directory)
+            text = text.replace('geoid_model = "internal"', 'geoid_model = "egm96"')
+            return text.replace(
+                'geoid = ""', "geoid = " + json.dumps(str(directory / "missing-geoid.bin"))
+            )
+
+        with Server(self.args, config=config) as server:
+            ws = server.connect()
+            seq = self.accepted(ws, "start")
+            events = self.until(
+                ws,
+                seq - 1,
+                lambda events: any(
+                    e["kind"] == "solution" and e["data"]["status"] != "none" for e in events
+                ),
+            )
+            self.assertTrue(
+                any(e["kind"] == "status" and e["data"]["state"] == "running" for e in events)
+            )
+            self.assertEqual(self.call(ws, "getStatus")["status"]["lifecycle"]["state"], "running")
+            self.accepted(ws, "stop")
+            events = self.state(ws, seq - 1, "stopped")
+            self.assertTrue(
+                any(
+                    e["kind"] == "logMessage" and "geoid data open error" in e["data"]["text"]
+                    for e in events
+                )
+            )
+            solutions = [
+                e["data"]
+                for e in events
+                if e["kind"] == "solution" and e["data"]["status"] != "none"
+            ]
+            self.assertTrue(solutions)
+            for solution in solutions:
+                self.assertEqual(solution["geoid"]["model"], "internal")
+                self.assertIn("separation", solution["geoid"])
+                self.assertTrue(math.isfinite(solution["geoid"]["separation"]))
             self.finish(server, ws)
 
     def test_held_start(self):

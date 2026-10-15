@@ -52,6 +52,7 @@ typedef struct {
     int has_base;       /* the mode uses a base and rb is known (RPC `base`) */
     double leap;        /* GPST - UTC (s) for sol.time */
     int geoid_model;    /* solopt geoid model of the run */
+    int height_type;    /* solopt height of the run: 0 ellipsoidal, 1 geodetic */
     int has_separation; /* separation is valid */
     double separation;  /* geoid height above the ellipsoid (m) */
 } rcvevent_solution_t;

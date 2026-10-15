@@ -434,6 +434,10 @@ contain fewer solutions.
 | `ratio` | Ambiguity validation ratio (second-best to best candidate). 0 is also used when no ambiguity resolution was done for the epoch |
 | `base` | Base station position (`ecef`, `llh`) used for the solution. Absent when the mode uses no base station or its position is not known yet |
 
+If the configured geoid file cannot be opened, the server uses the internal
+model, as the solution output does, reports `internal` in `geoid.model`, and
+records the reason in a log message.
+
 A `none` solution has only `time`, `leapSeconds` and `status`; every other
 solution has all members except `base`, which depends on the mode. *Why:* the
 server can keep the coordinates of an earlier epoch while it has no solution;
@@ -550,8 +554,6 @@ Planned for later versions:
   observations, input message counts, uptime, estimated states, baseline
   length;
 - velocity in solutions;
-- the geoid separation for file-based geoid models (until then
-  `geoid.separation` is present only with the `internal` model);
 - `lastError.reason` values more specific than `startFailed`.
 
 Possible later additions, without changing what is defined here: push
