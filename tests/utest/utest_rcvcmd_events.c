@@ -480,6 +480,82 @@ static void replay_notice(void* arg, const rcvcmd_notice_t* value) {
     CHECK(value->code == RCVCMD_NOTICE_SERVER_STOPPED, "replay has no error notices");
 }
 
+static void stdin_notice(void* arg, const rcvcmd_notice_t* value) {
+    rcvcmd_t* cmd = (rcvcmd_t*)arg;
+    rcvcmd_snapshot_t snapshot;
+    CHECK(value->code == RCVCMD_NOTICE_SERVER_STOPPED ||
+              (value->code == RCVCMD_NOTICE_SERVER_START_ERROR &&
+               !strcmp(value->text, "stdin is reserved by --exit-on-stdin-eof")),
+          "stdin reservation uses the existing server failure notice");
+    rcvcmd_snapshot(cmd, &snapshot);
+    rcvcmd_reserve_stdin(cmd);
+}
+
+static void stdin_checks(char* config) {
+    static const char* paths[] = {"", "::T", "::x1"};
+    mrtk_ctx_t* ctx = mrtk_ctx_create();
+    rcvcmd_t* cmd;
+    rcvcmd_io_t output = {0};
+    rcvcmd_lifecycle_t lifecycle;
+    rcvcmd_result_t result;
+    rcvcmd_snapshot_t snapshot;
+    gtime_t rst = {0};
+    char option[32];
+    FILE* fp;
+    size_t i;
+    int slot;
+    CHECK(ctx != NULL, "stdin test context created");
+    if (!ctx) return;
+    g_mrtk_ctx = ctx;
+    cmd = rcvcmd_create(ctx);
+    CHECK(cmd != NULL, "stdin test command instance created");
+    if (!cmd) {
+        g_mrtk_ctx = NULL;
+        mrtk_ctx_destroy(ctx);
+        return;
+    }
+    rcvcmd_initialize(cmd, config, "admin", "", 0, 0, rst);
+    output.arg = cmd;
+    output.notice = stdin_notice;
+    output.confirm_overwrite = overwrite;
+    rcvcmd_reserve_stdin(cmd);
+    rcvcmd_reserve_stdin(cmd);
+    set_option(cmd, "misc-startcmd", "touch stdin-started");
+    for (slot = 1; slot <= 3; slot++) {
+        snprintf(option, sizeof(option), "inpstr%d-type", slot);
+        set_option(cmd, option, "file");
+        for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+            snprintf(option, sizeof(option), "inpstr%d-path", slot);
+            set_option(cmd, option, paths[i]);
+            result = rcvcmd_start(cmd, &output);
+            CHECK(result.kind == RCVCMD_START_FAILED && result.state == RCVCMD_STOPPED,
+                  "reserved stdin input fails start in each input slot");
+            rcvcmd_get_lifecycle(cmd, &lifecycle);
+            CHECK(
+                lifecycle.last_error == RCVCMD_START_ERROR_STDIN_RESERVED && lifecycle.stop_reason == RCVCMD_STOP_ERROR,
+                "stdin reservation has a structured start failure");
+            rcvcmd_snapshot(cmd, &snapshot);
+            CHECK(snapshot.lifecycle.last_error == RCVCMD_START_ERROR_STDIN_RESERVED,
+                  "stdin reservation error is visible in sync/getStatus snapshot");
+            CHECK(access("stdin-started", F_OK) != 0, "stdin refusal happens before the start command");
+        }
+        snprintf(option, sizeof(option), "inpstr%d-type", slot);
+        set_option(cmd, option, "off");
+    }
+    set_option(cmd, "misc-startcmd", "");
+    fp = fopen("stdin-input.bin", "w");
+    CHECK(fp != NULL, "create named file input fixture");
+    if (fp) fclose(fp);
+    set_option(cmd, "inpstr1-type", "file");
+    set_option(cmd, "inpstr1-path", "stdin-input.bin");
+    CHECK(rcvcmd_start(cmd, &output).kind == RCVCMD_SUCCESS, "stdin reservation permits named file inputs");
+    rcvcmd_get_lifecycle(cmd, &lifecycle);
+    CHECK(lifecycle.last_error == RCVCMD_START_ERROR_NONE, "successful start clears stdin reservation error");
+    rcvcmd_shutdown(cmd, &output);
+    destroy_context(cmd, ctx);
+    CHECK(unlink("stdin-input.bin") == 0, "remove named file input fixture");
+}
+
 static void verify_error_reader(rcvcmd_t* cmd, uint64_t after, int level) {
     uint64_t cursor = after, last = rcvcmd_last_seq(cmd);
     int reads = 0;
@@ -783,6 +859,7 @@ int main(int argc, char** argv) {
 #endif
     sink_checks();
     notice_checks(config);
+    stdin_checks(config);
 cleanup_files:
     CHECK(unlink(config) == 0 && chdir(original) == 0 && rmdir(directory) == 0, "temporary config cleanup");
     free(original);

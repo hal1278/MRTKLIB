@@ -85,6 +85,7 @@ struct rcvcmd {
     int claimed;
     int readers;
     int shutdown_requested;
+    int stdin_reserved; /* configuration mutex; captured with each start's settings */
     rcvevent_ring_t events;
     mrtk_ctx_t* ctx;
     int log_level;
@@ -813,7 +814,7 @@ static void readant(rcvcmd_t* cmd, const rcvcmd_io_t* io, prcopt_t* opt, nav_t* 
     free(pcvs.pcv);
 }
 /* start rtk server ----------------------------------------------------------*/
-static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
+static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io, int stdin_reserved) {
     rtksvr_t* svr = cmd->svr;
     rcvcmd_settings_t* settings = &cmd->run_settings;
     static sta_t sta[MAXRCV] = {{""}};
@@ -829,6 +830,16 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io) {
         paths[i] = settings->strpath[i];
     }
     trace(NULL, 3, "startsvr:\n");
+
+    /* openfile() strips :: options before choosing stdin for an empty file path.
+     * Refuse before commands or streams start so the watcher is the sole reader. */
+    for (i = 0; stdin_reserved && i < 3; i++) {
+        if (settings->strtype[i] == STR_FILE &&
+            (!settings->strpath[i][0] || strncmp(settings->strpath[i], "::", 2) == 0)) {
+            notice(io, RCVCMD_NOTICE_SERVER_START_ERROR, NULL, "stdin is reserved by --exit-on-stdin-eof", 0);
+            return RCVCMD_START_ERROR_STDIN_RESERVED;
+        }
+    }
 
     /* resolve/validate correction source against the positioning mode */
     {
@@ -1024,7 +1035,7 @@ void rcvcmd_get_lifecycle(rcvcmd_t* cmd, rcvcmd_lifecycle_t* data) {
 static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifecycle_operation_t operation) {
     rcvcmd_result_t result = {RCVCMD_SUCCESS, RCVCMD_STOPPED, 0};
     rcvcmd_start_error_t error = RCVCMD_START_ERROR_NONE;
-    int stop, start = operation == LIFECYCLE_START || operation == LIFECYCLE_RESTART;
+    int stop, stdin_reserved, start = operation == LIFECYCLE_START || operation == LIFECYCLE_RESTART;
 
     pthread_mutex_lock(&cmd->publish_lock);
     if (operation == LIFECYCLE_SHUTDOWN) {
@@ -1069,8 +1080,9 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
         if (start) {
             pthread_mutex_lock(&cmd->config_lock);
             cmd->run_settings = cmd->settings;
+            stdin_reserved = cmd->stdin_reserved;
             pthread_mutex_unlock(&cmd->config_lock);
-            error = start_server(cmd, io);
+            error = start_server(cmd, io, stdin_reserved);
         }
         if (start && error == RCVCMD_START_ERROR_NONE) {
             /* Marks mean "not in effect yet". Changes are refused while starting
@@ -1105,6 +1117,12 @@ static rcvcmd_result_t run_lifecycle(rcvcmd_t* cmd, const rcvcmd_io_t* io, lifec
 }
 
 rcvcmd_result_t rcvcmd_start(rcvcmd_t* cmd, const rcvcmd_io_t* io) { return run_lifecycle(cmd, io, LIFECYCLE_START); }
+
+void rcvcmd_reserve_stdin(rcvcmd_t* cmd) {
+    pthread_mutex_lock(&cmd->config_lock);
+    cmd->stdin_reserved = 1;
+    pthread_mutex_unlock(&cmd->config_lock);
+}
 
 rcvcmd_result_t rcvcmd_stop(rcvcmd_t* cmd, const rcvcmd_io_t* io) { return run_lifecycle(cmd, io, LIFECYCLE_STOP); }
 

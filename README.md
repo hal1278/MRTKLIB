@@ -91,6 +91,7 @@ streamed from an active `mrtk run` session.
 ### Prerequisites
 * CMake (>= 3.15)
 * C11 compatible compiler (GCC, Clang)
+* CivetWeb 1.16 with WebSocket support for the RPC endpoint (enabled by default): `libcivetweb-dev` on Debian/Ubuntu, `civetweb` on Homebrew or vcpkg, `mingw-w64-ucrt-x86_64-civetweb` on MSYS2. yyjson 0.10 or newer is used for JSON; CMake fetches yyjson 0.13.0 if no suitable package is found. See [installation](docs/getting-started/install.md) for dependency and offline build instructions. Configure with `-DMRTK_WITH_RPC=OFF` to build without these dependencies; that build rejects all RPC-related `mrtk run` options.
 * LAPACK/BLAS (Optional but recommended for fast matrix operations. e.g., `liblapack-dev` on Ubuntu, Accelerate framework on macOS) — **requires the LP64 (32-bit integer) interface**; ILP64 providers are not supported (for example, avoid OpenBLAS built with `INTERFACE64=1`). On CMake ≥ 3.22, MRTKLIB requests a 32-bit integer BLAS/LAPACK interface by setting `BLA_SIZEOF_INTEGER=4`. This is a CMake selection hint, not a complete ABI verifier for all BLAS/LAPACK package layouts: if `FindBLAS`/`FindLAPACK` still resolves an ILP64 provider (e.g. an ILP64 OpenBLAS published as plain `libopenblas.so` with no `64`-suffixed name), make an LP64 BLAS/LAPACK provider visible to CMake explicitly. On older CMake, install an LP64 build of your BLAS/LAPACK provider (the default for most distributions).
 
 ### Build Instructions

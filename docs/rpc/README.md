@@ -47,20 +47,27 @@ follow in later versions (§11).
 
 New command-line options of `mrtk run` (all other options are unchanged):
 
+The endpoint is available only in builds with `MRTK_WITH_RPC=ON` (the
+default). Builds configured with `MRTK_WITH_RPC=OFF` reject all options in
+the table below with an error; they do not silently ignore them. See the
+[build instructions](../getting-started/install.md) for dependencies.
+
 | Option | Meaning |
 |---|---|
 | `--rpc-port PORT` | Open the RPC endpoint on `PORT`. `0` lets the operating system choose a free port. Without this option no RPC endpoint is opened. |
-| `--rpc-bind ADDR` | Address to listen on. Default `127.0.0.1`. Any other address must be given explicitly. |
+| `--rpc-bind ADDR` | IPv4 or IPv6 literal address to listen on. Default `127.0.0.1`. Any other address must be given explicitly. |
 | `--rpc-origin ORIGIN` | Accept browser connections from `ORIGIN`, for example `http://localhost:8080`. May be repeated. Default: no browser origin is accepted. |
 | `--no-console` | Do not open the local console. Together with `--rpc-port` and without `-p`, the process serves only the RPC endpoint. Requires `--rpc-port`. |
 | `--rpc-no-auth` | For testing only: accept connections without a token (§3). Refused unless the endpoint listens on a loopback address. The server prints a warning, and `getVersion` reports `"authentication": "none"`. This cannot be set in the configuration file or over RPC. |
+| `--exit-on-stdin-eof` | End the process through normal shutdown when stdin reaches EOF or a read error. Requires `--no-console`. A configuration with a file input that reads stdin cannot start while this option is active. |
 
 ### Token
 
 The process that starts `mrtk run` (the parent, for example a GUI) generates
 a random token and passes it in the environment variable `MRTK_RPC_TOKEN`.
 Generate 32 random bytes and encode them in base64url without padding
-(43 characters). The token may contain only base64url characters
+(43 characters). The token must be 1–256 characters long and may contain
+only base64url characters
 (`A`–`Z`, `a`–`z`, `0`–`9`, `-`, `_`), because it travels in a WebSocket
 handshake header (§3); the server refuses to start with any other character.
 
@@ -112,15 +119,28 @@ Use the `shutdown` method (§5). SIGINT, SIGTERM and the Windows console
 control events take the same path: positioning stops, navigation data is
 saved and the process exits.
 
+Parents that launch the server with a stdin pipe can pass
+`--exit-on-stdin-eof --no-console`. Data written to that pipe is discarded;
+closing it requests the same normal shutdown. The parent dying always
+closes its pipe, so the server stops and saves navigation data even if the
+parent crashes. This reserves stdin for process lifetime monitoring: a file
+input whose path before any `::` options is empty cannot start while the
+option is active.
+
 ## 3. Connecting
 
-Connect to the `url` of the ready line (`ws://HOST:PORT/rpc`) and offer two
-WebSocket subprotocols: the protocol name `mrtk-rpc` and the token entry
+Connect to the `url` of the ready line (`ws://HOST:PORT/rpc`) and list two
+WebSocket subprotocols in the `Sec-WebSocket-Protocol` header of the
+handshake request: the protocol name `mrtk-rpc` and the token entry
 `mrtk-token.<token>`.
 
 ```text
 Sec-WebSocket-Protocol: mrtk-rpc, mrtk-token.<token>
 ```
+
+Separate entries with a comma and optional spaces after it, as shown above.
+A tab or a space before a comma is refused with HTTP 400. Browsers and common
+clients write `a, b`.
 
 In a browser:
 
@@ -135,10 +155,15 @@ The server checks the request before upgrading the connection:
 
 | Condition | Response |
 |---|---|
-| `mrtk-rpc` not offered | HTTP 400 |
+| `mrtk-rpc` not in `Sec-WebSocket-Protocol` (in the format above) | HTTP 400 |
 | `Origin` header present and not allowed by `--rpc-origin` | HTTP 403 |
 | token entry missing or wrong (unless `--rpc-no-auth`) | HTTP 401 |
 | otherwise | upgrade; the server selects `mrtk-rpc` and never echoes the token entry |
+
+The endpoint path is exactly `/rpc`: `/rpc/child` and other paths return
+HTTP 404. A plain HTTP request to `/rpc` without a WebSocket upgrade returns
+HTTP 426 (Upgrade Required). The server does not serve files; GET requests
+to other paths return 404 and PUT or DELETE requests return 405.
 
 Requests without an `Origin` header come from non-browser programs and skip
 the origin check. The origin check stops web pages open in a browser on the
@@ -179,10 +204,17 @@ in status, events or log messages.
   arrive in a different order than the requests. Match them by `id`.
 - Binary frames close the connection with WebSocket status 1003, which
   RFC 6455 defines for an endpoint that receives a type of data it cannot
-  accept (such as binary data at a text-only endpoint). When the process
-  exits, connections close with status 1001 ("going away", defined for a
-  server going down), so a client can tell this from a broken connection,
-  which ends without a close frame.
+  accept (such as binary data at a text-only endpoint).
+- Text messages containing invalid UTF-8 close the connection with status
+  1007. A message larger than 64 KiB closes it with status 1009; the limit
+  applies to the complete message, including fragmented messages.
+- A continuation frame without a started message, or a new message before
+  the previous fragmented one ended, closes the connection with status 1002
+  (protocol error). An internal failure while answering closes it with
+  status 1011.
+- When the process exits, connections close with status 1001 ("going away",
+  defined for a server going down), so a client can tell this from a broken
+  connection, which ends without a close frame.
 
 ## 4. Versioning
 

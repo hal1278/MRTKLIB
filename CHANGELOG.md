@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Initial `mrtk run` WebSocket JSON-RPC transport with token authentication,
+  origin checks, an ephemeral-port ready line, `getVersion` and `shutdown`.
+  The remaining protocol 0.1 methods follow in the next implementation unit.
+- `--no-console` for RPC operation and `--exit-on-stdin-eof` for parents to
+  tie the server lifetime to a stdin pipe while retaining normal shutdown.
+- `MRTK_WITH_RPC` build option (default `ON`), system CivetWeb 1.16 dependency
+  and yyjson package discovery with a pinned FetchContent fallback.
+
 ## [v0.7.11] - 2026-09-29
 
 **MADOCA regression tests: build-independent upstream parity plus absolute
