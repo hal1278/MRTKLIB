@@ -283,6 +283,50 @@ class MethodsTests(unittest.TestCase):
                         self.assertAlmostEqual(float(height), solutions[epoch], delta=0.000500001)
             self.finish(server, ws)
 
+    def test_missing_geoid_file(self):
+        """A failed file-model open reports the internal model actually in use."""
+
+        def config(directory):
+            text = self.replay(directory)
+            text = text.replace('geoid_model = "internal"', 'geoid_model = "egm96"')
+            return text.replace(
+                'geoid = ""', "geoid = " + json.dumps(str(directory / "missing-geoid.bin"))
+            )
+
+        with Server(self.args, config=config) as server:
+            ws = server.connect()
+            seq = self.accepted(ws, "start")
+            events = self.until(
+                ws,
+                seq - 1,
+                lambda events: any(
+                    e["kind"] == "solution" and e["data"]["status"] != "none" for e in events
+                ),
+            )
+            self.assertTrue(
+                any(e["kind"] == "status" and e["data"]["state"] == "running" for e in events)
+            )
+            self.assertEqual(self.call(ws, "getStatus")["status"]["lifecycle"]["state"], "running")
+            self.accepted(ws, "stop")
+            events = self.state(ws, seq - 1, "stopped")
+            self.assertTrue(
+                any(
+                    e["kind"] == "logMessage" and "geoid data open error" in e["data"]["text"]
+                    for e in events
+                )
+            )
+            solutions = [
+                e["data"]
+                for e in events
+                if e["kind"] == "solution" and e["data"]["status"] != "none"
+            ]
+            self.assertTrue(solutions)
+            for solution in solutions:
+                self.assertEqual(solution["geoid"]["model"], "internal")
+                self.assertIn("separation", solution["geoid"])
+                self.assertTrue(math.isfinite(solution["geoid"]["separation"]))
+            self.finish(server, ws)
+
     def test_held_start(self):
         def config(directory):
             gate = file_gate(directory / "entered", directory / "release")

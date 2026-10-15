@@ -99,7 +99,8 @@ struct rcvcmd {
     rcvcmd_staging_t* staging;
     pthread_t collector;
     int collector_started, collector_exit, initialized;
-    int run_mode, run_geoid, run_height;
+    int run_mode, run_height;
+    int run_geoid; /* geoid model in use: internal if the file failed to open */
     uint64_t solution_start_seq;
     rcvevent_t last_solution;
     int has_solution, previous_none;
@@ -889,7 +890,8 @@ static void overwrite_path(const rcvcmd_settings_t* settings, const char* config
 }
 
 /* start rtk server ----------------------------------------------------------*/
-static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io, int stdin_reserved, char* refused) {
+static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io, int stdin_reserved, char* refused,
+                                         int* effective_geoid) {
     rtksvr_t* svr = cmd->svr;
     rcvcmd_settings_t* settings = &cmd->run_settings;
     static sta_t sta[MAXRCV] = {{""}};
@@ -1006,7 +1008,9 @@ static rcvcmd_start_error_t start_server(rcvcmd_t* cmd, const rcvcmd_io_t* io, i
         readdcb(settings->filopt.dcb, &svr->nav, sta);
     }
     /* open geoid data file */
+    *effective_geoid = settings->solopt[0].geoid;
     if (settings->solopt[0].geoid > 0 && !opengeoid(settings->solopt[0].geoid, settings->filopt.geoid)) {
+        *effective_geoid = GEOID_EMBEDDED;
         notice(io, RCVCMD_NOTICE_GEOID_FILE_ERROR, settings->filopt.geoid, NULL, 0);
     }
     /* set stream options */
@@ -1161,7 +1165,7 @@ rcvcmd_result_t rcvcmd_execute(rcvcmd_t* cmd, const rcvcmd_claim_t* claim, const
     rcvcmd_start_error_t error = RCVCMD_START_ERROR_NONE;
     rcvcmd_operation_t operation;
     char paths[RCVEVENT_PATHS] = {0};
-    int stop, start, stdin_reserved;
+    int stop, start, stdin_reserved, effective_geoid = GEOID_EMBEDDED;
     pthread_mutex_lock(&cmd->publish_lock);
     if (!claim->seq || !cmd->claimed || cmd->executing || cmd->claim_seq != claim->seq) {
         result.kind = RCVCMD_BUSY;
@@ -1191,7 +1195,7 @@ rcvcmd_result_t rcvcmd_execute(rcvcmd_t* cmd, const rcvcmd_claim_t* claim, const
         cmd->run_settings = cmd->settings;
         stdin_reserved = cmd->stdin_reserved;
         pthread_mutex_unlock(&cmd->config_lock);
-        error = start_server(cmd, io, stdin_reserved, paths);
+        error = start_server(cmd, io, stdin_reserved, paths, &effective_geoid);
     }
     if (start && error == RCVCMD_START_ERROR_NONE) {
         /* Marks mean "not in effect yet". Changes are refused while starting
@@ -1208,7 +1212,7 @@ rcvcmd_result_t rcvcmd_execute(rcvcmd_t* cmd, const rcvcmd_claim_t* claim, const
     } else if (error == RCVCMD_START_ERROR_NONE) {
         cmd->lifecycle.state = RCVCMD_RUNNING;
         cmd->run_mode = cmd->run_settings.prcopt.mode;
-        cmd->run_geoid = cmd->run_settings.solopt[0].geoid;
+        cmd->run_geoid = effective_geoid;
         cmd->run_height = cmd->run_settings.solopt[0].height;
         cmd->lifecycle.last_error = RCVCMD_START_ERROR_NONE;
         memset(cmd->lifecycle.paths, 0, sizeof(cmd->lifecycle.paths));
