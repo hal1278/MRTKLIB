@@ -258,6 +258,9 @@ static void closegeoid_locked(void) {
 int opengeoid(int model, const char* file) {
     int status = 1, error = 0;
 
+    trace(NULL, 3, "opengeoid: model=%d file=%s\n", model, file);
+    trace(NULL, 3, "closegoid:\n");
+
     rtk_lock(&lock_geoid);
     closegeoid_locked();
     if (model != GEOID_EMBEDDED) {
@@ -274,8 +277,6 @@ int opengeoid(int model, const char* file) {
     }
     rtk_unlock(&lock_geoid);
 
-    trace(NULL, 3, "opengeoid: model=%d file=%s\n", model, file);
-    trace(NULL, 3, "closegoid:\n");
     if (error == 1) {
         trace(NULL, 2, "invalid geoid model: model=%d file=%s\n", model, file);
     } else if (error == 2) {
@@ -290,11 +291,11 @@ int opengeoid(int model, const char* file) {
  * notes  : calls to opengeoid(), closegeoid() and geoidh() are serialized.
  *-----------------------------------------------------------------------------*/
 void closegeoid(void) {
+    trace(NULL, 3, "closegoid:\n");
+
     rtk_lock(&lock_geoid);
     closegeoid_locked();
     rtk_unlock(&lock_geoid);
-
-    trace(NULL, 3, "closegoid:\n");
 }
 /* geoid height ----------------------------------------------------------------
  * get geoid height from geoid model

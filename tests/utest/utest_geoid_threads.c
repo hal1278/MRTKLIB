@@ -31,6 +31,8 @@ static int fails;
 
 typedef struct {
     atomic_int start;
+    atomic_int readers; /* query threads that have started querying */
+    atomic_int cycled;  /* model replacement finished */
     const char* file;
     int cycling;
     int cycle_failures;
@@ -74,8 +76,12 @@ static void wait_start(run_t* run) {
 static void* query_thread(void* arg) {
     query_t* q = arg;
     wait_start(q->run);
-    for (int i = 0; i < NITER; i++) {
+    /* With replacement, keep querying until it ends so that both overlap. */
+    for (int i = 0; i < NITER || (q->run->cycling && !atomic_load(&q->run->cycled)); i++) {
         double h = geoidh(q->pos);
+        if (i == 0) {
+            atomic_fetch_add(&q->run->readers, 1);
+        }
         if (!isfinite(h) || (fabs(h - q->expected) > TOL && (!q->run->cycling || fabs(h - q->embedded) > TOL))) {
             if (!q->failures) {
                 q->first_bad = h;
@@ -90,6 +96,10 @@ static void* query_thread(void* arg) {
 static void* cycle_thread(void* arg) {
     run_t* run = arg;
     wait_start(run);
+    /* Start replacing only while every query thread is querying. */
+    while (atomic_load(&run->readers) < NQUERY) {
+        sched_yield();
+    }
     for (int i = 0; i < NCYCLE; i++) {
         if (!opengeoid(GEOID_EGM96_M150, run->file)) {
             run->cycle_failures++;
@@ -98,12 +108,15 @@ static void* cycle_thread(void* arg) {
         closegeoid();
         sched_yield();
     }
+    atomic_store(&run->cycled, 1);
     return NULL;
 }
 
 static void run_threads(query_t* queries, run_t* run) {
     pthread_t threads[NQUERY + 1];
     int created = 0;
+    atomic_store(&run->readers, 0);
+    atomic_store(&run->cycled, 0);
     for (int i = 0; i < NQUERY; i++) {
         queries[i].failures = 0;
         int err = pthread_create(&threads[created], NULL, query_thread, &queries[i]);
@@ -118,6 +131,9 @@ static void run_threads(query_t* queries, run_t* run) {
         int err = pthread_create(&threads[created], NULL, cycle_thread, run);
         CHECK(err == 0, "create model replacement thread");
         cycle_created = err == 0;
+    }
+    if (!cycle_created) {
+        atomic_store(&run->cycled, 1); /* nothing for the query threads to wait for */
     }
     atomic_store(&run->start, 1);
     for (int i = 0; i < created; i++) {
