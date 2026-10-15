@@ -492,9 +492,13 @@ class TransportTests(unittest.TestCase):
         """Sequential requests are answered without a delayed-ACK wait.
 
         A response frame is written as a header and a payload. Without TCP_NODELAY,
-        Nagle's algorithm holds the payload until the client acknowledges the header,
-        and the client delays that acknowledgement (40 ms on Linux). The median keeps
-        an occasional scheduling delay under load from failing the test.
+        Nagle's algorithm can hold the payload until the client acknowledges the
+        header, and the client may delay that acknowledgement (40 ms observed on
+        Linux). The median tolerates up to four slow round trips; the test assumes
+        that the client and the server get a CPU promptly most of the time (on
+        Linux with 8 busy loops per CPU the median stayed below 0.1 ms). A platform
+        that acknowledges at once passes without TCP_NODELAY, so this checks for
+        the delay, not for the socket option.
         """
         with Server(self.args) as server:
             ws = server.connect()
