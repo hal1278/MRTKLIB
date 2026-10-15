@@ -139,22 +139,6 @@ static yyjson_mut_val* position_json(yyjson_mut_doc* doc, const double* xyz) {
     return out;
 }
 
-/* Only the values written below count: an unsent member (velocity, clock bias)
- * must not turn a usable solution into none. */
-static int solution_finite(const rcvevent_solution_t* value) {
-    const sol_t* sol = &value->sol;
-    int i;
-    if (!isfinite(sol->time.sec) || !isfinite(value->leap) || !isfinite(sol->age) || !isfinite(sol->ratio)) return 0;
-    for (i = 0; i < 3; i++)
-        if (!isfinite(sol->rr[i])) return 0;
-    for (i = 0; i < 6; i++)
-        if (!isfinite(sol->qr[i])) return 0;
-    if (value->has_base)
-        for (i = 0; i < 3; i++)
-            if (!isfinite(value->rb[i])) return 0;
-    return !value->has_separation || isfinite(value->separation);
-}
-
 yyjson_mut_val* rcvjson_solution(yyjson_mut_doc* doc, const rcvevent_solution_t* value) {
     static const char* names[] = {"none", "fix", "float", "sbas", "dgps", "single", "ppp", "dr"};
     static const char* ecef_keys[] = {"xx", "yy", "zz", "xy", "yz", "zx"};
@@ -163,11 +147,10 @@ yyjson_mut_val* rcvjson_solution(yyjson_mut_doc* doc, const rcvevent_solution_t*
     const sol_t* sol = &value->sol;
     double pos[3], P[9], Q[9], tow;
     gtime_t epoch = sol->time;
-    int week, i, none = sol->stat == SOLQ_NONE || !solution_finite(value);
+    int week, i, none = sol->stat == SOLQ_NONE || !rcvevent_solution_finite(value);
     yyjson_mut_val *out = yyjson_mut_obj(doc), *time = yyjson_mut_obj(doc);
     yyjson_mut_val *covariance, *ecef, *enu, *geoid;
-    /* Invalid time itself has no JSON representation; keep the integral epoch. */
-    if (!isfinite(epoch.sec)) epoch.sec = 0.0;
+    /* The collector publishes no solution whose time is not finite. */
     tow = round(time2gpst(epoch, &week) * 1e9) / 1e9;
     if (tow >= 604800.0) {
         week++;
@@ -176,7 +159,7 @@ yyjson_mut_val* rcvjson_solution(yyjson_mut_doc* doc, const rcvevent_solution_t*
     yyjson_mut_obj_add_int(doc, time, "week", week);
     yyjson_mut_obj_add_real(doc, time, "tow", tow);
     yyjson_mut_obj_add_val(doc, out, "time", time);
-    yyjson_mut_obj_add_int(doc, out, "leapSeconds", isfinite(value->leap) ? (int)lround(value->leap) : 0);
+    yyjson_mut_obj_add_int(doc, out, "leapSeconds", (int)lround(value->leap));
     /* Server-produced solutions are ECEF (type 0); type 1 is readsol's ENU input. */
     if (!none) ecef2pos(sol->rr, pos);
     P[0] = sol->qr[0];

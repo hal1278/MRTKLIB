@@ -426,7 +426,7 @@ foreach(case start_state stop_after_start start_failure_cleanup stop_without_sta
 endforeach()
 set_tests_properties(utest_rtksvr_lifecycle_small_buffer PROPERTIES SKIP_RETURN_CODE 77)
 
-add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c)
+add_executable(utest_rcvjson ${_UTEST_DIR}/utest_rcvjson.c apps/rtkrcv/rcvjson.c apps/rtkrcv/rcvevent.c)
 target_compile_options(utest_rcvjson PRIVATE -std=c11)
 target_include_directories(utest_rcvjson PRIVATE apps/rtkrcv)
 target_link_libraries(utest_rcvjson PRIVATE mrtklib)

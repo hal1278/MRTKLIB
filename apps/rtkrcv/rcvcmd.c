@@ -54,6 +54,8 @@ typedef struct {
     double rb[3];
     char errors[MAXERRMSG];
     int nsol, neb;
+    int nevents; /* solution events built from the nsol solutions */
+    int invalid; /* the run's previous solution had non-finite values */
 } rcvcmd_staging_t;
 
 typedef struct {
@@ -211,6 +213,7 @@ static uint64_t publish_status(rcvcmd_t* cmd) {
 
 static void clear_run_solution(rcvcmd_t* cmd) {
     cmd->has_solution = cmd->previous_none = 0;
+    cmd->staging->invalid = 0;
     memset(&cmd->last_solution, 0, sizeof(cmd->last_solution));
     memset(&cmd->none_time, 0, sizeof(cmd->none_time));
 }
@@ -273,35 +276,54 @@ static void collect_events(rcvcmd_t* cmd) {
     svr->nsol = svr->rtk.neb = 0;
     rtksvrunlock(svr);
 
+    stage->nevents = 0;
     for (i = 0; i < stage->nsol; i++) {
-        rcvevent_t* ev = &stage->events[i];
+        rcvevent_t* ev = &stage->events[stage->nevents];
         rcvevent_solution_t* solution = &ev->data.solution;
         sol_t* sol = &stage->solutions[i];
+        int timed = isfinite(sol->time.sec), finite;
         memset(ev, 0, sizeof(*ev));
         ev->kind = RCVEVENT_SOLUTION;
-        solution->leap = timediff(sol->time, gpst2utc(sol->time));
-        if (sol->stat == SOLQ_NONE) {
-            solution->sol.time = sol->time;
-            solution->sol.stat = sol->stat;
-            continue;
+        solution->sol.time = sol->time;
+        solution->sol.stat = sol->stat;
+        if (timed) solution->leap = timediff(sol->time, gpst2utc(sol->time));
+        if (sol->stat != SOLQ_NONE) {
+            solution->sol = *sol;
+            memcpy(solution->rb, stage->rb, sizeof(solution->rb));
+            solution->has_base = uses_base && norm(stage->rb, 3) > 0.0;
+            solution->geoid_model = geoid;
+            /* geoidh() indexes its table with (int) of a NaN position otherwise. */
+            if (geoid == 0 && isfinite(sol->rr[0]) && isfinite(sol->rr[1]) && isfinite(sol->rr[2])) {
+                ecef2pos(sol->rr, pos);
+                if (isfinite(pos[0]) && isfinite(pos[1]) && isfinite(pos[2])) {
+                    solution->separation = geoidh(pos);
+                    solution->has_separation = solution->separation != 0.0;
+                }
+            }
         }
-        solution->sol = *sol;
-        memcpy(solution->rb, stage->rb, sizeof(solution->rb));
-        solution->has_base = uses_base && norm(stage->rb, 3) > 0.0;
-        solution->geoid_model = geoid;
-        if (geoid == 0 && isfinite(sol->rr[0]) && isfinite(sol->rr[1]) && isfinite(sol->rr[2])) {
-            ecef2pos(sol->rr, pos);
-            if (!isfinite(pos[0]) || !isfinite(pos[1]) || !isfinite(pos[2])) continue;
-            solution->separation = geoidh(pos);
-            solution->has_separation = solution->separation != 0.0;
+        /* Engines are not expected to produce these. Log one line per episode,
+         * since a diverged filter can repeat it every epoch. */
+        finite = timed && rcvevent_solution_finite(solution);
+        if (!finite && !stage->invalid) {
+            char text[64];
+            if (timed) {
+                time2str(sol->time, text, 3);
+                trace(NULL, 1, "solution at %s GPST has non-finite values\n", text);
+            } else {
+                trace(NULL, 1, "solution with a non-finite time is not published\n");
+            }
         }
+        stage->invalid = !finite;
+        /* An event needs a valid time, as no none is published before the
+         * first epoch has one (docs/rpc/README.md §8). */
+        if (timed) stage->nevents++;
     }
 }
 
 static void publish_collected(rcvcmd_t* cmd) {
     rcvcmd_staging_t* stage = cmd->staging;
     int i, first;
-    for (i = 0; i < stage->nsol; i++) {
+    for (i = 0; i < stage->nevents; i++) {
         rcvevent_t* ev = &stage->events[i];
         gtime_t time = ev->data.solution.sol.time;
         int none = ev->data.solution.sol.stat == SOLQ_NONE;

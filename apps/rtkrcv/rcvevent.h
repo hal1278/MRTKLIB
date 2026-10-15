@@ -87,6 +87,15 @@ typedef struct {
 } rcvevent_read_t;
 
 /**
+ * @brief Check that the values a solution event carries out are finite.
+ * Covers time, leap seconds, position, position covariance, age, ratio and,
+ * when present, the base position and the geoid separation; values that no
+ * adapter writes (velocity, clock bias) are not checked.
+ * @param[in] s Solution event data.
+ * @return 1 if all are finite, otherwise 0.
+ */
+int rcvevent_solution_finite(const rcvevent_solution_t* s);
+/**
  * @brief Allocate an empty ring.
  * @param[out] ring Ring to initialize.
  * @param[in]  cap  Number of entries (> 0).

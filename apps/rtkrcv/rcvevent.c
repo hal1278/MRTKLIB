@@ -7,10 +7,23 @@
  *----------------------------------------------------------------------------*/
 #include "rcvevent.h"
 
+#include <math.h>
 #include <stdlib.h>
 
 /* seq s lives at (s - 1) % cap: the held range is always contiguous */
 static rcvevent_t* slot(const rcvevent_ring_t* ring, uint64_t seq) { return ring->buf + (seq - 1) % ring->cap; }
+
+int rcvevent_solution_finite(const rcvevent_solution_t* s) {
+    int i;
+    if (!isfinite(s->sol.time.sec) || !isfinite(s->leap) || !isfinite(s->sol.age) || !isfinite(s->sol.ratio)) return 0;
+    for (i = 0; i < 3; i++) {
+        if (!isfinite(s->sol.rr[i]) || (s->has_base && !isfinite(s->rb[i]))) return 0;
+    }
+    for (i = 0; i < 6; i++) {
+        if (!isfinite(s->sol.qr[i])) return 0;
+    }
+    return !s->has_separation || isfinite(s->separation);
+}
 
 int rcvevent_init(rcvevent_ring_t* ring, size_t cap) {
     ring->buf = (rcvevent_t*)calloc(cap, sizeof(rcvevent_t));

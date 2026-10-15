@@ -525,7 +525,9 @@ static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* 
         if (value) {
             yyjson_val* path;
             if (!yyjson_is_arr(value)) goto invalid;
-            yyjson_arr_foreach(value, i, max, path) if (!yyjson_is_str(path)) goto invalid;
+            /* A path cannot contain NUL; such a string cannot agree to any file. */
+            yyjson_arr_foreach(value, i, max, path) if (!yyjson_is_str(path) || strlen(yyjson_get_str(path)) !=
+                                                                                    yyjson_get_len(path)) goto invalid;
             overwrite.count = yyjson_arr_size(value);
             if (overwrite.count) {
                 overwrite.paths = calloc(overwrite.count, sizeof(*overwrite.paths));
@@ -539,8 +541,6 @@ static yyjson_mut_val* dispatch(rcvrpc_t* rpc, yyjson_mut_doc* doc, yyjson_val* 
                     goto internal;
                 }
                 memcpy(overwrite.paths[i], yyjson_get_str(path), length + 1);
-                /* Embedded NUL cannot agree to a shorter filesystem path. */
-                if (strlen(overwrite.paths[i]) != length) overwrite.paths[i][0] = 0;
             }
         }
         accepted = rcvcmd_claim(rpc->cmd,

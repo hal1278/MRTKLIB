@@ -298,7 +298,8 @@ status events):
 
 `start` and `restart` accept an optional `overwrite` parameter, an array of
 strings (default `[]`). Existing output files are refused unless their paths
-appear in this list, with an exact byte comparison. A refusal ends the start in
+appear in this list, with an exact byte comparison; a string containing NUL is
+an invalid parameter, as no path contains one. A refusal ends the start in
 `stopped` with `stopReason: "error"` and
 `lastError: {reason: "outputExists", message, paths}`. `paths` lists distinct
 refused files in stream slot order. Pass **every path the user agreed to** on
@@ -479,10 +480,19 @@ instant twice, while the offset is all a client needs. During an inserted
 leap second a client shows the same UTC second twice; the server's own UTC
 time cannot represent `23:59:60` either.
 
-If any number in a solution is NaN or infinite, its JSON representation is a
-`none` solution containing only `time`, `leapSeconds` and `status: "none"`.
-*Why:* JSON cannot represent non-finite numbers (RFC 8259 §6); one invalid
-number must not lose a whole event page or close the connection.
+Positioning engines are not expected to produce non-finite numbers; if they
+do, the server keeps the event stream valid JSON:
+
+- A solution whose time is not finite is not published: like the solutions
+  before the first epoch, it has no time to report.
+- A solution with any other value that is NaN or infinite is sent as a `none`
+  solution with only `time`, `leapSeconds` and `status: "none"`.
+- At the first such solution after valid ones, the server emits a level-1 log
+  message.
+
+*Why:* JSON cannot represent non-finite numbers (RFC 8259 §6), and one invalid
+number must not lose a whole event page or close the connection. A substitute
+value would look like a valid one.
 
 ## 9. Log messages
 

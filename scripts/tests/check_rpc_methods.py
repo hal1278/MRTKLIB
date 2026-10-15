@@ -340,7 +340,7 @@ class MethodsTests(unittest.TestCase):
             ):
                 self.call(ws, method, {"unknown": 1}, error=-32602)
             for method in ("start", "restart"):
-                for value in (None, 1, True, "path", {}, [1], [False], [None]):
+                for value in (None, 1, True, "path", {}, [1], [False], [None], ["a\u0000b"]):
                     self.call(ws, method, {"overwrite": value}, error=-32602)
             for params in (
                 {},
